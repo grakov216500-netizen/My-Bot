@@ -1,4 +1,4 @@
-# main.py — финальная версия (2025), всё работает + гарантированное восстановление
+# main.py — финальная версия: работает и локально, и на Replit
 
 import logging
 import os
@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from typing import Dict, Any
 
-# Проверка импортов
+# === Импорты (все вместе, включая AsyncIOScheduler) ===
 try:
     from telegram import Update
     from telegram.ext import (
@@ -18,18 +18,21 @@ try:
         ContextTypes,
         PicklePersistence,
     )
-    print("✅ Все импорты из telegram.ext успешны")
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler  # ✅ Добавлено
+    from apscheduler.triggers.cron import CronTrigger
+    print("✅ Все импорты из telegram.ext и apscheduler успешны")
 except ImportError as e:
     print(f"❌ Ошибка импорта: {e}")
-    print("Установите: pip install python-telegram-bot --upgrade")
+    print("Установите: pip install python-telegram-bot python-dotenv apscheduler pandas openpyxl")
     sys.exit(1)
 
-from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-
-# === Загрузка .env ===
-load_dotenv()
+# === Попробуем использовать .env (только локально) ===
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Только если установлен python-dotenv
+    print("📁 .env загружен (локальный режим)")
+except ImportError:
+    print("📁 .env не найден — работает в облаке (Replit)")
 
 # === Настройка логирования ===
 logging.basicConfig(
@@ -38,7 +41,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# === Переменные из .env ===
+# === Определяем, где запущен: локально или в облаке ===
+IS_REPLIT = "REPL_SLUG" in os.environ  # Replit устанавливает эту переменную
+IS_LOCAL = not IS_REPLIT
+
+# === Загружаем переменные: в зависимости от среды ===
 TOKEN = os.getenv("TOKEN")
 ADMIN_ID_STR = os.getenv("ADMIN_ID", "1027070834")
 
@@ -70,7 +77,6 @@ def import_modules():
     global admin_router, assistant_router, edit_schedule_handler
     global load_all_schedules
 
-    # База данных
     try:
         from database import check_and_update_courses, init_db, get_db
         logger.info("✅ database загружен")
@@ -78,7 +84,6 @@ def import_modules():
         logger.critical(f"❌ Ошибка загрузки database: {e}")
         sys.exit(1)
 
-    # Напоминания
     try:
         from handlers.task_reminders import check_task_reminders
         logger.info("✅ task_reminders загружен")
@@ -93,7 +98,6 @@ def import_modules():
         logger.critical(f"❌ Ошибка загрузки reminders: {e}")
         sys.exit(1)
 
-    # Обработчики
     try:
         from handlers.menu import start_command, router as menu_router, back_router
         logger.info("✅ menu загружен")
@@ -164,7 +168,6 @@ def import_modules():
         logger.critical(f"❌ Ошибка загрузки utils.storage: {e}")
         sys.exit(1)
 
-# Загружаем модули
 import_modules()
 
 # === Команда /start ===
@@ -210,7 +213,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === Загрузка editors из БД ===
 def load_editors_from_db(application):
-    """Загружает всех пользователей с role в bot_data['editors']"""
     try:
         conn = get_db()
         cursor = conn.cursor()
@@ -232,7 +234,6 @@ def load_editors_from_db(application):
 
         # Гарантируем, что ADMIN_ID — админ
         editors[ADMIN_ID] = {'role': 'admin', 'group': 'Администратор'}
-
         application.bot_data['editors'] = editors
         logger.info(f"🟢 Загружено {len(editors)} редакторов")
     except Exception as e:
@@ -242,7 +243,6 @@ def load_editors_from_db(application):
 async def post_init(application):
     logger.info("🔄 Начало инициализации post_init...")
 
-    # --- Инициализация БД ---
     try:
         init_db()
         logger.info("✅ БД инициализирована")
@@ -250,45 +250,32 @@ async def post_init(application):
         logger.critical(f"❌ Ошибка инициализации БД: {e}", exc_info=True)
         return
 
-    # --- Автообновление курсов ---
     try:
         updated = check_and_update_courses()
         logger.info(f"🔄 Автообновление курсов: {updated} пользователей")
     except Exception as e:
         logger.error(f"⚠️ Ошибка автообновления курсов: {e}", exc_info=True)
 
-    # --- Планировщик ---
     try:
         scheduler = AsyncIOScheduler()
-        scheduler.add_job(
-            check_and_update_courses,
-            CronTrigger(hour=0, minute=1),
-            id="daily_course_check"
-        )
+        scheduler.add_job(check_and_update_courses, CronTrigger(hour=0, minute=1), id="daily_course_check")
         scheduler.start()
         logger.info("⏰ Планировщик: проверка курсов запущена")
     except Exception as e:
         logger.error(f"❌ Ошибка запуска планировщика: {e}", exc_info=True)
 
-    # --- Напоминания о задачах ---
     try:
-        application.job_queue.run_repeating(
-            check_task_reminders,
-            interval=30,
-            first=5
-        )
+        application.job_queue.run_repeating(check_task_reminders, interval=30, first=5)
         logger.info("⏰ Напоминания о задачах: добавлены")
     except Exception as e:
         logger.error(f"❌ Ошибка добавления напоминаний о задачах: {e}", exc_info=True)
 
-    # --- Загрузка графиков ---
     try:
         schedules = load_all_schedules()
         if schedules:
             application.bot_data['schedules'] = schedules
             sorted_months = sorted(schedules.keys(), reverse=True)
             latest_month = sorted_months[0]
-
             application.bot_data['current_schedule'] = latest_month
             application.bot_data['duty_schedule'] = schedules[latest_month]
             logger.info(f"📅 Загружено {len(schedules)} расписаний. Активно: {latest_month}")
@@ -300,7 +287,6 @@ async def post_init(application):
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки графиков: {e}", exc_info=True)
 
-    # --- Восстановление напоминаний о нарядах ---
     try:
         context = application.context_types.context(application)
         await restore_duty_reminders(context)
@@ -308,13 +294,11 @@ async def post_init(application):
     except Exception as e:
         logger.error(f"❌ Ошибка восстановления напоминаний: {e}", exc_info=True)
 
-    # --- Загрузка редакторов ---
     try:
         load_editors_from_db(application)
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки редакторов: {e}", exc_info=True)
 
-    # 🔥 ГАРАНТИРОВАННОЕ СОХРАНЕНИЕ bot_data.pkl
     try:
         application.bot_data.setdefault('persistence_init', True)
         application.bot_data.setdefault('boot_time', datetime.now().isoformat())
@@ -330,73 +314,88 @@ async def post_init(application):
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("❗ Произошла ошибка", exc_info=context.error)
 
+# === Веб-сервер только для Replit ===
+if IS_REPLIT:
+    try:
+        from flask import Flask
+        from threading import Thread
+
+        app = Flask('')
+
+        @app.route('/')
+        def home():
+            return '''
+            <h1>✅ Бот работает!</h1>
+            <p><strong>Course Duty Bot</strong> запущен 24/7</p>
+            <p>Режим: <strong>Replit</strong></p>
+            '''
+
+        def run():
+            app.run(host='0.0.0.0', port=8080)
+
+        Thread(target=run, daemon=True).start()
+        logger.info("🌐 Веб-сервер запущен (Replit)")
+    except ImportError:
+        logger.warning("⚠️ Flask не установлен — веб-сервер не запущен")
+
 # === Запуск бота ===
 def main():
     try:
         logger.info("🚀 Начало запуска бота...")
         logger.info(f"📁 Рабочая директория: {os.getcwd()}")
-
-        # Удалить bot_data.pkl (для чистого старта — раскомментировать)
-        # if os.path.exists("bot_data.pkl"):
-        #     os.remove("bot_data.pkl")
-        #     logger.info("🗑 bot_data.pkl удалён")
+        logger.info(f"☁️ Режим: {'Replit' if IS_REPLIT else 'Локальный'}")
 
         persistence = PicklePersistence(filepath="bot_data.pkl")
 
-        app = ApplicationBuilder() \
+        application = ApplicationBuilder() \
             .token(TOKEN) \
             .persistence(persistence) \
             .post_init(post_init) \
             .build()
 
-        # --- Регистрация обработчиков ---
-        logger.info("📝 Регистрация обработчиков...")
-
-        app.add_handler(CommandHandler("start", start))
-
-        # Основные роутеры
-        for handler in menu_router:
-            app.add_handler(handler)
-        app.add_handler(back_router)
-
-        for handler in my_duties_router:
-            app.add_handler(handler)
-
-        for handler in tasks_router:
-            app.add_handler(handler)
-
-        if excel_router:
-            app.add_handler(excel_router)
+        # === 🔥 РЕГИСТРАЦИЯ — В НАЧАЛЕ, ПЕРЕД ОБЩИМИ ОБРАБОТЧИКАМИ ===
+        application.add_handler(CommandHandler("start", start))
 
         if get_registration_handler:
-            app.add_handler(get_registration_handler())
+            application.add_handler(get_registration_handler())  # ✅ Раньше всех
+
+        # === Другие ConversationHandler ===
+        application.add_handler(edit_schedule_handler)
+        application.add_handler(back_router)
+
+        # === Остальные роутеры ===
+        for handler in menu_router:
+            application.add_handler(handler)
+
+        for handler in my_duties_router:
+            application.add_handler(handler)
+
+        for handler in tasks_router:
+            application.add_handler(handler)
+
+        if excel_router:
+            application.add_handler(excel_router)
 
         for handler in profile_router:
-            app.add_handler(handler)
+            application.add_handler(handler)
+
         if 'get_profile_edit_handler' in globals() and get_profile_edit_handler:
-            app.add_handler(get_profile_edit_handler())
+            application.add_handler(get_profile_edit_handler())
 
         for handler in admin_router:
-            app.add_handler(handler)
+            application.add_handler(handler)
 
         for handler in assistant_router:
-            app.add_handler(handler)
+            application.add_handler(handler)
 
-        app.add_handler(edit_schedule_handler)
+        # === В КОНЦЕ — общий текст ===
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-        # Текстовые сообщения
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-        app.add_error_handler(error_handler)
+        application.add_error_handler(error_handler)
 
         logger.info("✅ Все обработчики зарегистрированы")
-
-        # === Запуск ===
         logger.info("🚀 Бот запущен. Ожидание обновлений...")
-        app.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True
-        )
+        application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
     except Exception as e:
         logger.critical(f"❌ Критическая ошибка: {e}", exc_info=True)

@@ -1,4 +1,4 @@
-# handlers/registration.py — финальная версия (2025), всё работает + выбор пола + защита от дублей
+# handlers/registration.py — финальная исправленная версия (2025)
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -283,13 +283,21 @@ async def enter_fio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def choose_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+
+    # ✅ Считываем пол
     gender = query.data.replace("gender_", "")
     context.user_data['gender'] = gender
 
-    # Определяем роль
-    group = context.user_data['group_name']
-    year = context.user_data['enrollment_year']
+    # ✅ БЕЗОПАСНО получаем fio
+    fio = context.user_data.get('fio', 'Не указано')
+    group = context.user_data.get('group_name')
+    year = context.user_data.get('enrollment_year')
 
+    if not group or not year:
+        await query.edit_message_text("❌ Ошибка: группа или год не указаны.")
+        return ConversationHandler.END
+
+    # Определяем роль
     conn = get_db()
     cursor = conn.cursor()
     try:
@@ -483,7 +491,8 @@ def get_registration_handler():
             CONFIRMATION: [CallbackQueryHandler(confirmation, pattern='^confirm_')]
         },
         fallbacks=[CommandHandler('cancel', cancel_registration)],
-        allow_reentry=True
+        allow_reentry=True,
+        per_message=False  # ✅ Важно: иначе будет ошибка в callback_data
     )
 
 
