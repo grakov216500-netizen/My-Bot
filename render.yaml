@@ -12,7 +12,6 @@ services:
         fromSecret: TOKEN
       - key: ADMIN_ID
         fromSecret: ADMIN_ID
-    env:
       - key: DATABASE
         value: bot.db
       - key: UPLOAD_FOLDER
