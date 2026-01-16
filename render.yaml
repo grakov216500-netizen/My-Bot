@@ -1,0 +1,17 @@
+services:
+  - type: worker
+    name: course-bot
+    runtime: python
+    branch: main
+    plan: free
+    envVars:
+      - key: TOKEN
+        fromSecret: TOKEN
+      - key: ADMIN_ID
+        fromSecret: ADMIN_ID
+      - key: DATABASE
+        value: bot.db
+      - key: UPLOAD_FOLDER
+        value: uploads
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
