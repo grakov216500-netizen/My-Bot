@@ -1,4 +1,4 @@
-# handlers/registration.py — финальная исправленная версия (2025)
+# handlers/registration.py — финальная рабочая версия (2025)
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -94,15 +94,23 @@ async def start_registration(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Проверка: уже зарегистрирован?
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE telegram_id = ?", (user_id,))
+    cursor.execute("SELECT fio, group_name FROM users WHERE telegram_id = ?", (user_id,))
     existing_user = cursor.fetchone()
     conn.close()
 
     if existing_user:
+        fio, group = existing_user['fio'], existing_user['group_name']
         if update.callback_query:
-            await update.callback_query.answer("Вы уже зарегистрированы!", show_alert=True)
+            await update.callback_query.answer(
+                f"Вы уже зарегистрированы как {fio.split()[0]} ({group})", 
+                show_alert=True
+            )
         else:
-            await update.message.reply_text("Вы уже зарегистрированы! Используйте /menu для главного меню.")
+            await update.message.reply_text(
+                f"Вы уже зарегистрированы как <b>{fio}</b> ({group})\n"
+                "Используйте /menu для главного меню.",
+                parse_mode='HTML'
+            )
         return ConversationHandler.END
 
     welcome_text = get_welcome_message()
@@ -255,11 +263,22 @@ async def enter_fio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверка на дублирование ФИО
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT telegram_id FROM users WHERE fio = ?", (fio,))
+    cursor.execute("SELECT telegram_id, group_name FROM users WHERE fio = ?", (fio,))
     existing_user = cursor.fetchone()
     conn.close()
 
     if existing_user:
+        existing_id, existing_group = existing_user['telegram_id'], existing_user['group_name']
+        if existing_id == update.effective_user.id:
+            # Повторная регистрация того же пользователя
+            await update.message.reply_text(
+                f"⚠️ Вы уже зарегистрированы как <code>{fio}</code> в группе <b>{existing_group}</b>.\n"
+                "Если хотите изменить данные — обратитесь к администратору.",
+                parse_mode="HTML"
+            )
+            return ConversationHandler.END
+
+        # ФИО занято другим пользователем
         await update.message.reply_text(
             "⚠️ <b>Внимание!</b>\n\n"
             f"Пользователь с ФИО <code>{fio}</code> уже зарегистрирован в системе.\n\n"
@@ -289,7 +308,11 @@ async def choose_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['gender'] = gender
 
     # ✅ БЕЗОПАСНО получаем fio
-    fio = context.user_data.get('fio', 'Не указано')
+    fio = context.user_data.get('fio')
+    if not fio:
+        await query.edit_message_text("❌ Ошибка: ФИО не указано.")
+        return ConversationHandler.END
+
     group = context.user_data.get('group_name')
     year = context.user_data.get('enrollment_year')
 
@@ -492,7 +515,7 @@ def get_registration_handler():
         },
         fallbacks=[CommandHandler('cancel', cancel_registration)],
         allow_reentry=True,
-        per_message=False  # ✅ Важно: иначе будет ошибка в callback_data
+        per_message=False
     )
 
 

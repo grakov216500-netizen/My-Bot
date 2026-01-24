@@ -1,4 +1,4 @@
-# handlers/excel.py — финальная версия (2025), всё работает + поддержка девушек + безопасность
+# handlers/excel.py — финальная исправленная версия (2025)
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, MessageHandler, filters
@@ -21,9 +21,15 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # === ОБРАБОТКА ЗАГРУЗКИ EXCEL ===
 async def handle_excel_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    editors = context.application.bot_data.get('editors', {})
 
-    # Проверка прав
+    # 🔐 ГАРАНТИРУЕМ, ЧТО АДМИН ВСЕГДА ЕСТЬ
+    editors = context.application.bot_data.get('editors', {})
+    if user_id == context.application.bot_data.get('ADMIN_ID', 1027070834):
+        editors[user_id] = {'role': 'admin', 'group': 'Администратор'}
+        context.application.bot_data['editors'] = editors
+        logger.info("🛡️ Админ добавлен в editors временно")
+
+    # 🔍 Проверка прав
     if user_id not in editors:
         await update.message.reply_text("❌ У вас нет прав на загрузку графика.")
         return
@@ -75,7 +81,7 @@ async def handle_excel_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not is_female_group:
         is_female_group = "Ж" in detected_group or "жен" in detected_group.lower()
 
-    # Проверка прав
+    # 🔐 Проверка прав
     if role == 'female_editor':
         if not is_female_group:
             await update.message.reply_text(
@@ -100,7 +106,7 @@ async def handle_excel_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
                 parse_mode="HTML"
             )
             return
-    # Админ может загружать всё
+    # Админ может загружать всё — ✅ уже разрешено
 
     # Определяем месяц и год
     month_year = get_month_year_from_schedule(schedule_data)

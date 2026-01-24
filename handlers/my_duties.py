@@ -1,4 +1,4 @@
-# handlers/my_duties.py — финальная версия (с кнопкой "Загрузить график" в "Мои наряды")
+# handlers/my_duties.py — финальная версия: админ, сержант, помощник — видят кнопки "Загрузить график" и "Редактировать вручную"
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CallbackQueryHandler, MessageHandler, filters
@@ -61,7 +61,9 @@ async def show_my_duties(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
     user_role = get_user_role(user_id, context)
-    is_sergeant = user_role == 'sergeant'
+
+    # ✅ Теперь: админ, сержант, помощник — могут загружать и редактировать
+    can_upload = user_role in ['admin', 'sergeant', 'assistant']
 
     conn = get_db()
     cursor = conn.cursor()
@@ -107,9 +109,10 @@ async def show_my_duties(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append([InlineKeyboardButton("📋 Полный график", callback_data="full_schedule_0")])
         keyboard.append([InlineKeyboardButton("📆 Выбрать месяц", callback_data="select_month")])
 
-        # 🔽 КНОПКА ДЛЯ СЕРЖАНТА
-        if is_sergeant:
+        # 🔽 КНОПКИ — ДЛЯ АДМИНА, СЕРЖАНТА, ПОМОЩНИКА
+        if can_upload:
             keyboard.append([InlineKeyboardButton("📂 Загрузить график", callback_data="upload_schedule")])
+            keyboard.append([InlineKeyboardButton("✏️ Редактировать вручную", callback_data="start_edit_schedule")])
 
         keyboard.append([InlineKeyboardButton("⬅️ В меню", callback_data="back_to_main")])
 
@@ -135,9 +138,7 @@ async def show_my_duties(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         conn.close()
 
-# === ОСТАЛЬНЫЕ ФУНКЦИИ БЕЗ ИЗМЕНЕНИЙ ===
-# (Все функции ниже — оставлены как есть, они работают корректно)
-
+# === Показать, с кем в паре ===
 async def button_show_partners(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -176,6 +177,7 @@ async def button_show_partners(update: Update, context: ContextTypes.DEFAULT_TYP
     finally:
         conn.close()
 
+# === Показать, с кем в паре — со всем курсом ===
 async def button_show_partners_course(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -222,6 +224,7 @@ async def button_show_partners_course(update: Update, context: ContextTypes.DEFA
     finally:
         conn.close()
 
+# === Запрос даты для просмотра наряда ===
 async def ask_duty_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -243,6 +246,7 @@ async def ask_duty_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     context.user_data['awaiting_duty_date'] = True
 
+# === Обработка ввода даты для наряда ===
 async def handle_duty_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('awaiting_duty_date'):
         return
@@ -303,6 +307,7 @@ async def handle_duty_date_input(update: Update, context: ContextTypes.DEFAULT_T
         parse_mode="HTML"
     )
 
+# === Показать полный график ===
 async def show_full_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -337,6 +342,7 @@ async def show_full_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.edit_message_text(reply, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
+# === Выбор месяца ===
 async def select_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -356,6 +362,7 @@ async def select_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="my_duties")])
     await query.edit_message_text("📅 Выберите месяц:", reply_markup=InlineKeyboardMarkup(keyboard))
 
+# === Просмотр нарядов за месяц ===
 async def view_month_duties(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -411,6 +418,7 @@ async def view_month_duties(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         conn.close()
 
+# === Запрос даты для просмотра по всем группам ===
 async def ask_global_duty_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
@@ -434,6 +442,7 @@ async def ask_global_duty_date(update: Update, context: ContextTypes.DEFAULT_TYP
         )
     context.user_data['awaiting_global_duty_date'] = True
 
+# === Обработка ввода даты для общего наряда ===
 async def handle_global_duty_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get('awaiting_global_duty_date'):
         return
@@ -512,6 +521,7 @@ async def handle_global_duty_date_input(update: Update, context: ContextTypes.DE
     finally:
         conn.close()
 
+# === Проверить, с кем в наряде по всем группам ===
 async def check_duty_partners(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()

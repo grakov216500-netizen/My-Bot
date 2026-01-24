@@ -1,4 +1,4 @@
-# handlers/menu.py — финальная версия (исправлена роль, убрана лишняя кнопка)
+# handlers/menu.py — финальная версия (без кнопок для незарегистрированных)
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CallbackQueryHandler
@@ -59,13 +59,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user:
         # Не зарегистрирован
         keyboard = [
-            [InlineKeyboardButton("🚀 Начать регистрацию", callback_data="start_registration")],
-            [InlineKeyboardButton("📝 Задачи", callback_data="menu_tasks")]
+            [InlineKeyboardButton("🚀 Начать регистрацию", callback_data="start_registration")]
         ]
         
         text = (
             "Добро пожаловать в систему электронного помощника курсанта ведомственного института.\n\n"
-            "Вы ещё не зарегистрированы. Начните регистрацию:"
+            "Вы ещё не зарегистрированы.\n\n"
+            "Нажмите кнопку ниже, чтобы начать регистрацию и получить доступ ко всем функциям:"
         )
     else:
         # Зарегистрирован
@@ -101,8 +101,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         keyboard = [
             [InlineKeyboardButton("📋 Мои наряды", callback_data="my_duties")],
+            [InlineKeyboardButton("📝 Мои задачи", callback_data="menu_tasks")],
             [InlineKeyboardButton("👤 Мой профиль", callback_data="my_profile")],
-            [InlineKeyboardButton("📝 Задачи", callback_data="menu_tasks")],
             [InlineKeyboardButton("❓ Помощь", callback_data="help")]
         ]
         
@@ -143,6 +143,27 @@ async def back_to_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def open_tasks_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
+    # 🔐 Проверка: зарегистрирован ли пользователь?
+    user_id = update.effective_user.id
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT fio FROM users WHERE telegram_id = ?", (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+
+    if not user:
+        await query.edit_message_text(
+            "❌ Вы не зарегистрированы.\n\n"
+            "Сначала пройдите регистрацию:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🚀 Начать", callback_data="start_registration")]
+            ]),
+            parse_mode="HTML"
+        )
+        return
+
+    # Если зарегистрирован — открываем задачи
     from handlers.tasks import task_list_tasks
     await task_list_tasks(update, context)
 

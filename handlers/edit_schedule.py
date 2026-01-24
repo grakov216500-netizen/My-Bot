@@ -1,8 +1,9 @@
-# handlers/edit_schedule.py
+# handlers/edit_schedule.py — ручное редактирование графика (с выбором месяца и группой)
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ContextTypes, CallbackQueryHandler, ConversationHandler, MessageHandler, filters
+from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
 from database import get_db
+from utils.storage import load_all_schedules, save_all_schedules
 from utils.roles import VALID_ROLES, get_full_role_name, ROLE_SHORT_NAMES
 from datetime import datetime
 import logging
@@ -10,54 +11,54 @@ import logging
 logger = logging.getLogger(__name__)
 
 # === СОСТОЯНИЯ ===
-SELECT_ACTION, SELECT_FIO, SELECT_DATE, SELECT_ROLE, CONFIRM_DELETE = range(5)
+SELECT_ACTION, SELECT_MONTH, SELECT_FIO, SELECT_DATE, SELECT_ROLE, CONFIRM_EDIT = range(6)
 
 # === ДОСТУПНЫЕ ДЕЙСТВИЯ ===
 ACTIONS = {
     'add': '➕ Добавить наряд',
-    'edit': '✏️ Изменить наряд',
     'delete': '🗑️ Удалить наряд'
 }
 
-# === ПРОВЕРКА: ДОПУЩЕН ЛИ К РЕДАКТИРОВАНИЮ ===
-def can_edit_schedule(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str]:
+# === ПРОВЕРКА ПРАВ НА РЕДАКТИРОВАНИЕ ===
+def can_edit_schedule(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str, str]:
     editors = context.application.bot_data.get('editors', {})
     editor = editors.get(user_id)
     
     if not editor:
-        return False, "Доступ запрещён"
+        return False, "Доступ запрещён", None
     
     role = editor['role']
     if role not in ['admin', 'assistant', 'sergeant']:
-        return False, "Недостаточно прав"
+        return False, "Недостаточно прав", None
     
-    return True, editor['group']
+    return True, editor['role'], editor['group']
 
 # === НАЧАЛО РЕДАКТИРОВАНИЯ ===
 async def start_edit_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     query = update.callback_query
 
-    allowed, group = can_edit_schedule(user_id, context)
+    allowed, user_role, editor_group = can_edit_schedule(user_id, context)
     if not allowed:
         if query:
             await query.answer("❌ У вас нет прав", show_alert=True)
+            await query.edit_message_text("❌ У вас нет прав на редактирование графика.")
         else:
             await update.message.reply_text("❌ У вас нет прав на редактирование графика.")
         return ConversationHandler.END
 
-    context.user_data['editor_group'] = group
+    context.user_data['user_role'] = user_role
+    context.user_data['editor_group'] = editor_group
 
     keyboard = [
         [InlineKeyboardButton(ACTIONS['add'], callback_data='edit_action_add')],
-        [InlineKeyboardButton(ACTIONS['edit'], callback_data='edit_action_edit')],
         [InlineKeyboardButton(ACTIONS['delete'], callback_data='edit_action_delete')],
-        [InlineKeyboardButton("⬅️ Отмена", callback_data="back_to_main")]
+        [InlineKeyboardButton("❌ Отмена", callback_data="back_to_main")]
     ]
 
     text = (
         "📊 <b>Редактирование графика</b>\n\n"
-        f"👥 Группа: <b>{group}</b>\n\n"
+        f"👥 Ваша группа: <b>{editor_group}</b>\n\n"
         "Выберите действие:"
     )
 
@@ -75,7 +76,6 @@ async def select_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     action_map = {
         'edit_action_add': 'add',
-        'edit_action_edit': 'edit',
         'edit_action_delete': 'delete'
     }
     action = action_map.get(query.data)
@@ -84,48 +84,111 @@ async def select_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     context.user_data['edit_action'] = action
-    await show_fio_selection(update, context)
-    return SELECT_FIO
 
-# === ВЫБОР ФИО ===
-async def show_fio_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Загружаем доступные месяцы
+    schedules = load_all_schedules()
+    if not schedules:
+        await query.edit_message_text("❌ Нет загруженных графиков.")
+        return ConversationHandler.END
+
+    # Определяем, какие месяцы есть для редактирования (где есть группа)
+    available_months = []
+    for month in sorted(schedules.keys(), reverse=True):
+        month_data = schedules[month]
+        editor_group = context.user_data['editor_group']
+        if editor_group in month_data:
+            available_months.append(month)
+
+    if not available_months:
+        await query.edit_message_text("❌ У вашей группы нет графиков.")
+        return ConversationHandler.END
+
+    keyboard = []
+    for month in available_months:
+        keyboard.append([InlineKeyboardButton(month, callback_data=f"edit_month_{month}")])
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="back_to_main")])
+
+    await query.edit_message_text(
+        "📅 Выберите месяц для редактирования:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="HTML"
+    )
+    return SELECT_MONTH
+
+# === ВЫБОР МЕСЯЦА ===
+async def select_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    group = context.user_data['editor_group']
+    await query.answer()
 
+    month = query.data.replace("edit_month_", "")
+    context.user_data['edit_month'] = month
+
+    # Получаем ФИО курсантов из группы
+    editor_group = context.user_data['editor_group']
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT fio FROM users WHERE group_name = ? ORDER BY fio", (group,))
+    cursor.execute("SELECT fio FROM users WHERE group_name = ? ORDER BY fio", (editor_group,))
     users = cursor.fetchall()
     conn.close()
 
     if not users:
-        await query.edit_message_text("❌ Нет пользователей в вашей группе.")
+        await query.edit_message_text("❌ Нет курсантов в вашей группе.")
         return ConversationHandler.END
 
     keyboard = []
     for user in users:
-        keyboard.append([InlineKeyboardButton(f"👤 {user['fio']}", callback_data=f"edit_fio_{user['fio']}")])
+        fio = user['fio']
+        keyboard.append([InlineKeyboardButton(f"👤 {fio}", callback_data=f"edit_fio_{fio}")])
+    keyboard.append([InlineKeyboardButton("✏️ Ввести вручную", callback_data="edit_fio_custom")])
     keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="back_to_main")])
 
-    action = context.user_data['edit_action']
-    action_text = ACTIONS[action].split()[1].capitalize()
-
     await query.edit_message_text(
-        f"👥 Выберите курсанта для {action_text.lower()} наряда:",
+        "👥 Выберите курсанта:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="HTML"
     )
+    return SELECT_FIO
 
-# === СОХРАНЕНИЕ ВЫБРАННОГО ФИО ===
+# === СОХРАНЕНИЕ ФИО ===
 async def save_selected_fio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    fio = query.data.replace("edit_fio_", "")
+    data = query.data
+    if data == "edit_fio_custom":
+        await query.edit_message_text(
+            "✏️ Введите ФИО курсанта:\n\nФормат: Фамилия Имя Отчество",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Отмена", callback_data="back_to_main")]
+            ]),
+            parse_mode="HTML"
+        )
+        return SELECT_FIO
+
+    fio = data.replace("edit_fio_", "")
     context.user_data['edit_fio'] = fio
 
     await query.edit_message_text(
-        "📅 Введите дату в формате <code>ГГГГ-ММ-ДД</code>:\n\n<i>Например: 2026-01-15</i>",
+        "📅 Введите дату в формате <code>ГГГГ-ММ-ДД</code>:\n\n<i>Например: 2025-04-05</i>",
+        parse_mode="HTML"
+    )
+    return SELECT_DATE
+
+# === ВВОД ФИО ВРУЧНУЮ ===
+async def enter_fio_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    fio = update.message.text.strip()
+    if len(fio.split()) < 2:
+        await update.message.reply_text(
+            "❌ Введите ФИО полностью (минимум фамилия и имя).",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("❌ Отмена", callback_data="back_to_main")]
+            ])
+        )
+        return SELECT_FIO
+
+    context.user_data['edit_fio'] = fio
+    await update.message.reply_text(
+        "📅 Введите дату в формате <code>ГГГГ-ММ-ДД</code>:\n\n<i>Например: 2025-04-05</i>",
         parse_mode="HTML"
     )
     return SELECT_DATE
@@ -135,7 +198,8 @@ async def handle_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     date_str = update.message.text.strip()
     try:
         parsed_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        context.user_data['edit_date'] = str(parsed_date)
+        formatted_date = str(parsed_date)
+        context.user_data['edit_date'] = formatted_date
     except ValueError:
         await update.message.reply_text(
             "❌ Неверный формат даты. Используйте <code>ГГГГ-ММ-ДД</code>",
@@ -144,10 +208,9 @@ async def handle_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return SELECT_DATE
 
     action = context.user_data['edit_action']
-
     if action == 'delete':
         await confirm_delete_duty(update, context)
-        return CONFIRM_DELETE
+        return CONFIRM_EDIT
     else:
         await show_role_selection(update, context)
         return SELECT_ROLE
@@ -179,8 +242,9 @@ async def show_role_selection(update: Update, context: ContextTypes.DEFAULT_TYPE
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="HTML"
     )
+    return SELECT_ROLE
 
-# === СОХРАНЕНИЕ РОЛИ ===
+# === СОХРАНЕНИЕ РОЛИ И ПОДТВЕРЖДЕНИЕ ===
 async def save_role_and_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -196,7 +260,7 @@ async def save_role_and_confirm(update: Update, context: ContextTypes.DEFAULT_TY
     action = context.user_data['edit_action']
 
     role_full = get_full_role_name(role)
-    action_verb = "добавлен" if action == 'add' else "изменён"
+    action_verb = "добавить" if action == 'add' else "удалить"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Подтвердить", callback_data="confirm_edit")],
@@ -204,42 +268,43 @@ async def save_role_and_confirm(update: Update, context: ContextTypes.DEFAULT_TY
     ])
 
     await query.edit_message_text(
-        f"📋 Подтверждение:\n\n"
+        f"📋 Подтверждение {action_verb}:\n\n"
         f"👤 <b>{fio}</b>\n"
         f"📅 <b>{date}</b>\n"
         f"🔧 <b>{role_full}</b>\n\n"
-        f"Вы хотите {action_verb} этот наряд?",
+        f"Вы уверены, что хотите {action_verb} этот наряд?",
         reply_markup=keyboard,
         parse_mode="HTML"
     )
-    return SELECT_ROLE
+    return CONFIRM_EDIT
 
 # === ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ ===
 async def confirm_delete_duty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fio = context.user_data['edit_fio']
     date = context.user_data['edit_date']
+    month = context.user_data['edit_month']
 
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT role FROM duty_schedule WHERE fio = ? AND date = ?",
-        (fio, date)
-    )
-    duty = cursor.fetchone()
-    conn.close()
+    schedules = load_all_schedules()
+    month_data = schedules.get(month, {})
+    group_data = month_data.get(context.user_data['editor_group'], [])
 
-    if not duty:
+    found = False
+    for item in group_data:
+        if item['fio'] == fio and item['date'] == date:
+            found = True
+            role_full = get_full_role_name(item['role'])
+            break
+
+    if not found:
         await update.message.reply_text(
-            "❌ На указанную дату нет наряда для этого курсанта.",
+            "❌ На указанную дату нет наряда у этого курсанта.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ Назад", callback_data="back_to_main")]
             ])
         )
         return ConversationHandler.END
 
-    role_full = get_full_role_name(duty['role'])
-
-    context.user_data['edit_role'] = duty['role']  # для удаления
+    context.user_data['edit_role'] = item['role']  # для удаления
 
     await update.message.reply_text(
         f"🗑️ Вы действительно хотите удалить наряд?\n\n"
@@ -247,11 +312,12 @@ async def confirm_delete_duty(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"📅 <b>{date}</b>\n"
         f"🔧 <b>{role_full}</b>",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Удалить", callback_data="confirm_delete")],
+            [InlineKeyboardButton("✅ Удалить", callback_data="confirm_edit")],
             [InlineKeyboardButton("❌ Отмена", callback_data="back_to_main")]
         ]),
         parse_mode="HTML"
     )
+    return CONFIRM_EDIT
 
 # === ВЫПОЛНЕНИЕ ИЗМЕНЕНИЯ ===
 async def execute_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -262,87 +328,77 @@ async def execute_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fio = context.user_data['edit_fio']
     date = context.user_data['edit_date']
     role = context.user_data['edit_role']
+    month = context.user_data['edit_month']
     group = context.user_data['editor_group']
 
-    conn = get_db()
-    cursor = conn.cursor()
+    schedules = load_all_schedules()
+    month_data = schedules.get(month, {})
+    group_data = month_data.get(group, [])
 
     try:
         if action == 'delete':
-            cursor.execute("DELETE FROM duty_schedule WHERE fio = ? AND date = ?", (fio, date))
-            if cursor.rowcount == 0:
+            initial_count = len(group_data)
+            group_data = [d for d in group_data if not (d['fio'] == fio and d['date'] == date)]
+            if len(group_data) == initial_count:
                 text = "❌ Не удалось удалить: наряд не найден."
             else:
+                schedules[month][group] = group_data
+                save_all_schedules(schedules)
+                # Обновляем bot_data
+                if month == context.application.bot_data.get('current_schedule'):
+                    full_list = []
+                    for g, duties in schedules[month].items():
+                        full_list.extend(duties)
+                    context.application.bot_data['duty_schedule'] = full_list
+                    context.application.bot_data['schedules'] = schedules
                 text = f"✅ <b>Наряд удалён</b>:\n\n👤 {fio}\n📅 {date}"
         else:
-            cursor.execute("""
-                INSERT OR REPLACE INTO duty_schedule (fio, date, role, group_name)
-                VALUES (?, ?, ?, ?)
-            """, (fio, date, role, group))
-            action_text = "добавлен" if action == 'add' else "обновлён"
-            text = f"✅ <b>Наряд {action_text}</b>:\n\n👤 {fio}\n📅 {date}\n🔧 {get_full_role_name(role)}"
-
-        conn.commit()
-
-        # Обновляем график в боте
-        all_schedules = context.application.bot_data.get('schedules', {})
-        current = context.application.bot_data.get('current_schedule', datetime.now().strftime('%Y-%m'))
-        
-        schedule_list = all_schedules.get(current, [])
-        schedule_list = [d for d in schedule_list if not (d['fio'] == fio and d['date'] == date)]
-        
-        if action != 'delete':
-            schedule_list.append({'fio': fio, 'date': date, 'role': role, 'group': group})
-        
-        all_schedules[current] = schedule_list
-        context.application.bot_data['schedules'] = all_schedules
-        context.application.bot_data['duty_schedule'] = schedule_list
+            # Удаляем старый
+            group_data = [d for d in group_data if not (d['fio'] == fio and d['date'] == date)]
+            # Добавляем новый
+            group_data.append({'fio': fio, 'date': date, 'role': role})
+            schedules[month][group] = sorted(group_data, key=lambda x: x['date'])
+            save_all_schedules(schedules)
+            # Обновляем bot_data
+            if month == context.application.bot_data.get('current_schedule'):
+                full_list = []
+                for g, duties in schedules[month].items():
+                    full_list.extend(duties)
+                context.application.bot_data['duty_schedule'] = full_list
+                context.application.bot_data['schedules'] = schedules
+            role_full = get_full_role_name(role)
+            text = f"✅ <b>Наряд добавлен</b>:\n\n👤 {fio}\n📅 {date}\n🔧 {role_full}"
 
     except Exception as e:
         logger.error(f"Ошибка при редактировании графика: {e}")
         text = "❌ Ошибка при сохранении. Обратитесь к администратору."
-    finally:
-        conn.close()
 
-    await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Другой наряд", callback_data="start_edit_schedule")],
-        [InlineKeyboardButton("⬅️ В меню", callback_data="back_to_main")]
-    ]))
+    await query.edit_message_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Другой наряд", callback_data="start_edit_schedule")],
+            [InlineKeyboardButton("⬅️ В меню", callback_data="back_to_main")]
+        ])
+    )
 
     return ConversationHandler.END
 
-# === ОБРАБОТЧИК КНОПОК ===
-async def edit_schedule_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data
-
-    if data == "start_edit_schedule":
-        return await start_edit_schedule(update, context)
-    elif data.startswith("edit_action_"):
-        return await select_action(update, context)
-    elif data.startswith("edit_fio_"):
-        return await save_selected_fio(update, context)
-    elif data == "confirm_edit":
-        return await execute_edit(update, context)
-    elif data == "confirm_delete":
-        return await execute_edit(update, context)
-    else:
-        await query.answer("❌ Неизвестная команда", show_alert=True)
-
-# === ЭКСПОРТ ===
+# === ЭКСПОРТ — ConversationHandler ===
 edit_schedule_handler = ConversationHandler(
     entry_points=[
         CallbackQueryHandler(start_edit_schedule, pattern="^start_edit_schedule$")
     ],
     states={
         SELECT_ACTION: [CallbackQueryHandler(select_action, pattern="^edit_action_")],
-        SELECT_FIO: [CallbackQueryHandler(save_selected_fio, pattern="^edit_fio_")],
-        SELECT_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_date_input)],
-        SELECT_ROLE: [
-            CallbackQueryHandler(save_role_and_confirm, pattern="^edit_role_"),
-            CallbackQueryHandler(execute_edit, pattern="^confirm_edit$")
+        SELECT_MONTH: [CallbackQueryHandler(select_month, pattern="^edit_month_")],
+        SELECT_FIO: [
+            CallbackQueryHandler(save_selected_fio, pattern="^edit_fio_"),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, enter_fio_manual)
         ],
-        CONFIRM_DELETE: [CallbackQueryHandler(execute_edit, pattern="^confirm_delete$")]
+        SELECT_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_date_input)],
+        SELECT_ROLE: [CallbackQueryHandler(save_role_and_confirm, pattern="^edit_role_")],
+        CONFIRM_EDIT: [CallbackQueryHandler(execute_edit, pattern="^confirm_edit$")]
     },
     fallbacks=[
         CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^back_to_main$")

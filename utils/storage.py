@@ -1,24 +1,46 @@
-# utils/storage.py — финальная версия (2025), всё работает + безопасность + поддержка gender и year
+# utils/storage.py — финальная версия (2025) + user_id для Mini App
 
 import json
 import os
 from datetime import datetime
+from typing import Dict, List, Any
 
+# === Настройки путей ===
 DATA_DIR = "data"
 SCHEDULES_FILE = os.path.join(DATA_DIR, "schedules.json")
 
-# Создаём папку, если нет
+# Создаём папку, если не существует
 os.makedirs(DATA_DIR, exist_ok=True)
 
 
-def save_all_schedules(schedules):
+def save_all_schedules(schedules: Dict[str, List[Dict[str, Any]]]) -> None:
     """
-    Сохраняет все графики в JSON.
-    Преобразует ключи в строки (на случай, если переданы datetime и т.п.).
-    Автоматически очищает роли и приводит к нижнему регистру.
+    Сохраняет все графики в JSON-файл.
+    
+    Автоматически:
+    - Преобразует ключи в строки
+    - Приводит роли к нижнему регистру
+    - Очищает поля: fio, date, group_name, gender
+    - Добавляет user_id, если есть telegram_id
+    - Игнорирует битые данные
+    - Сохраняет с отступами и кириллицей
+    
+    Args:
+        schedules (dict): Словарь графиков, например:
+            {
+                "2025-04": [
+                    {
+                        "fio": "Иванов И.И.",
+                        "date": "2025-04-05",
+                        "role": "к",
+                        "group_name": "1-1",
+                        "gender": "male",
+                        "telegram_id": 123456789   # <-- будет преобразован в user_id
+                    }
+                ]
+            }
     """
     try:
-        # Глубокое копирование с очисткой
         safe_schedules = {}
         for key, data in schedules.items():
             safe_key = str(key).strip()
@@ -30,14 +52,19 @@ def save_all_schedules(schedules):
                         for k, v in item.items():
                             if k == 'role' and isinstance(v, str):
                                 clean_item[k] = v.strip().lower()
-                            elif k in ['date', 'fio', 'group_name', 'group', 'gender']:
+                            elif k in ['fio', 'date', 'group_name', 'group', 'gender']:
                                 clean_item[k] = str(v) if v else ""
                             else:
                                 clean_item[k] = v
+
+                        # 🔐 Добавляем user_id, если есть telegram_id
+                        if 'telegram_id' in item and 'user_id' not in clean_item:
+                            clean_item['user_id'] = str(item['telegram_id'])
+
                         safe_data.append(clean_item)
                 safe_schedules[safe_key] = safe_data
             else:
-                print(f"⚠️ Пропущен некорректный месяц '{safe_key}': не список")
+                print(f"⚠️ Пропущен некорректный месяц '{safe_key}': значение не список")
 
         with open(SCHEDULES_FILE, "w", encoding="utf-8") as f:
             json.dump(safe_schedules, f, ensure_ascii=False, indent=2)
@@ -46,17 +73,36 @@ def save_all_schedules(schedules):
 
     except Exception as e:
         print(f"❌ Ошибка сохранения schedules.json: {e}")
+        raise
 
 
-def load_all_schedules():
+def load_all_schedules() -> Dict[str, List[Dict[str, Any]]]:
     """
-    Загружает все графики из JSON.
-    Возвращает словарь: {"2025-12": [...], "2026-01": [...]}
+    Загружает все графики из JSON-файла.
 
     Автоматически:
     - Восстанавливает строковые ключи
     - Приводит роли к нижнему регистру
+    - Заменяет 'group' на 'group_name', если нужно
+    - Удаляет старое 'group'
+    - Добавляет 'gender' по умолчанию
     - Фильтрует битые записи
+    - Гарантирует корректную структуру
+
+    Returns:
+        dict: Графики по месяцам. Пример:
+            {
+                "2025-04": [
+                    {
+                        "fio": "Иванов И.И.",
+                        "date": "2025-04-05",
+                        "role": "к",
+                        "group_name": "1-1",
+                        "gender": "male",
+                        "user_id": "123456789"
+                    }
+                ]
+            }
     """
     if not os.path.exists(SCHEDULES_FILE):
         print("⚠️ Файл schedules.json не найден — начнём с пустого")
@@ -77,7 +123,7 @@ def load_all_schedules():
                 continue
 
             if not isinstance(value, list):
-                print(f"⚠️ Пропущен некорректный ключ '{safe_key}': не список")
+                print(f"⚠️ Пропущен некорректный ключ '{safe_key}': значение не список")
                 continue
 
             clean_data = []
@@ -86,9 +132,20 @@ def load_all_schedules():
                     # Приводим роль к нижнему регистру
                     if isinstance(item.get('role'), str):
                         item['role'] = item['role'].strip().lower()
+
                     # Восстанавливаем group_name, если было group
                     if 'group' in item and 'group_name' not in item:
                         item['group_name'] = item['group']
+                        del item['group']  # убираем старое
+
+                    # Убедимся, что gender есть
+                    if 'gender' not in item:
+                        item['gender'] = "male"
+
+                    # 🔐 Убедимся, что user_id есть (если был telegram_id)
+                    if 'telegram_id' in item and 'user_id' not in item:
+                        item['user_id'] = str(item['telegram_id'])
+
                     clean_data.append(item)
                 else:
                     print(f"⚠️ Пропущена битая запись: {item}")
@@ -99,20 +156,27 @@ def load_all_schedules():
         print(f"✅ Загружено {len(schedules)} месяцев графиков")
         return schedules
 
+    except json.JSONDecodeError as e:
+        print(f"❌ Ошибка парсинга JSON в schedules.json: {e}")
+        return {}
     except Exception as e:
-        print(f"❌ Ошибка загрузки schedules.json: {e}")
+        print(f"❌ Неизвестная ошибка при загрузке schedules.json: {e}")
         return {}
 
 
-def get_month_year_from_schedule(schedule_data):
+def get_month_year_from_schedule(schedule_data: List[Dict[str, Any]]) -> str:
     """
-    Определяет месяц и год из даты в графике.
-    Возвращает строку в формате "YYYY-MM"
+    Определяет месяц и год из первой валидной даты в графике.
+    
+    Если данных нет — возвращает текущий месяц.
 
-    Пример: "2025-12-01" → "2025-12"
+    Args:
+        schedule_data (list): Список записей о нарядах
+
+    Returns:
+        str: Месяц в формате "YYYY-MM", например "2025-04"
     """
     if not schedule_data:
-        # Если данных нет — возвращаем текущий месяц
         return datetime.now().strftime("%Y-%m")
 
     for item in schedule_data:
@@ -121,8 +185,7 @@ def get_month_year_from_schedule(schedule_data):
             parts = date_str.split('-')
             if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
                 year = parts[0]
-                month = parts[1]
+                month = parts[1].zfill(2)
                 return f"{year}-{month}"
 
-    # По умолчанию — текущий месяц
     return datetime.now().strftime("%Y-%m")
