@@ -28,4 +28,4 @@ echo .idea/ >> .gitignore
 
 echo # System >> .gitignore
 echo .DS_Store >> .gitignore
-echo Thumbs.db >> .gitignore
+echo Thumbs.db >> .gitignore.env 
