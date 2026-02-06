@@ -35,3 +35,8 @@ Thumbs.db
 bot_data.pkl
 secrets.py
 config.py
+.env 
+*.db 
+*.pkl 
+__pycache__/ 
+uploads/ 
