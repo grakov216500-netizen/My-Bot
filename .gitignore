@@ -1,42 +1,31 @@
-# Переменные окружения
-.env
-*.env
+cd "C:\Users\MSI\Desktop\My Bot"
 
-# Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
+# Сохраните текущий .gitignore на всякий случай
+copy .gitignore .gitignore.backup
 
-# Логи
-*.log
+# Создайте новый .gitignore
+echo # Python > .gitignore
+echo __pycache__/ >> .gitignore
+echo *.pyc >> .gitignore
+echo *.pyo >> .gitignore
+echo *.pyd >> .gitignore
+echo .Python >> .gitignore
+echo env/ >> .gitignore
 
-# Системные файлы
-.DS_Store
-Thumbs.db
+echo # Environment >> .gitignore
+echo .env >> .gitignore
+echo *.env >> .gitignore
 
-# Файлы бота
-bot_data.pkl
-secrets.py
-config.py
-.env 
-*.db 
-*.pkl 
-__pycache__/ 
-uploads/ 
+echo # Bot files >> .gitignore
+echo bot.db >> .gitignore
+echo bot_data.pkl >> .gitignore
+echo uploads/ >> .gitignore
+echo data/ >> .gitignore
+
+echo # IDE >> .gitignore
+echo .vscode/ >> .gitignore
+echo .idea/ >> .gitignore
+
+echo # System >> .gitignore
+echo .DS_Store >> .gitignore
+echo Thumbs.db >> .gitignore
