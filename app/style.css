@@ -1,37 +1,234 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Тёмная тема */
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #0F172A; /* Глубокий синий */
+  color: #E2E8F0; /* Светлый текст */
+  padding: 16px;
+  min-height: 100vh;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
-.card {
+/* Скроллбар */
+body::-webkit-scrollbar {
+  width: 6px;
+}
+
+body::-webkit-scrollbar-track {
+  background: #0F172A;
+}
+
+body::-webkit-scrollbar-thumb {
+  background: #3B82F6;
+  border-radius: 3px;
+}
+
+body::-webkit-scrollbar-thumb:hover {
+  background: #2563EB;
+}
+
+/* Шапка */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #1E293B;
+  background-color: #0F172A;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.avatar-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #3B82F6;
+  transition: transform 0.2s ease;
+}
+
+.avatar:hover {
+  transform: scale(1.05);
+}
+
+.home-btn {
+  background: none;
   border: none;
+  color: #60A5FA;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.2s ease;
+}
+
+.home-btn:hover {
+  color: #3B82F6;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: #60A5FA;
+  font-size: 20px;
+  cursor: pointer;
+  margin-left: 12px;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.icon-btn:hover {
+  color: #3B82F6;
+  transform: scale(1.1);
+}
+
+/* Виджеты */
+.widget {
+  background-color: #1E293B;
+  padding: 16px;
   border-radius: 12px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  overflow: hidden;
 }
 
-#schedule-container {
-  max-height: 60vh;
+.widget:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.widget h3 {
+  color: #93C5FD;
+  margin-bottom: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.widget p, .widget li {
+  font-size: 14px;
+  color: #CBD5E1;
+  margin-bottom: 4px;
+}
+
+/* Списки */
+.schedule-list, .notification-list {
+  list-style: none;
+  font-size: 14px;
+  color: #CBD5E1;
+  max-height: 120px;
   overflow-y: auto;
+  padding-right: 8px;
+  margin-top: 4px;
 }
 
-.day-item {
-  padding: 8px 12px;
-  margin: 4px 0;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border-left: 4px solid #0d6efd;
+.schedule-list::-webkit-scrollbar,
+.notification-list::-webkit-scrollbar {
+  width: 4px;
 }
 
-.day-item strong {
-  color: #212529;
+.schedule-list::-webkit-scrollbar-track,
+.notification-list::-webkit-scrollbar-track {
+  background: #1E293B;
 }
 
-.day-item small {
-  color: #6c757d;
+.schedule-list::-webkit-scrollbar-thumb,
+.notification-list::-webkit-scrollbar-thumb {
+  background: #3B82F6;
+  border-radius: 2px;
 }
 
-.btn {
-  border-radius: 8px;
+.schedule-list li, .notification-list li {
+  margin-bottom: 6px;
+  padding: 4px 0;
+  border-bottom: 1px dashed #334155;
 }
 
-.alert {
-  border-radius: 8px;
+.schedule-list li:last-child,
+.notification-list li:last-child {
+  border-bottom: none;
+}
+
+/* Основное меню */
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #1E293B;
+  padding: 12px 8px;
+  border-radius: 10px;
+  text-decoration: none;
+  color: #E2E8F0;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 1px solid #1E293B;
+}
+
+.menu-item:hover {
+  background-color: #334155;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  border-color: #3B82F6;
+}
+
+.menu-icon {
+  font-size: 20px;
+  margin-bottom: 4px;
+  transition: transform 0.2s ease;
+}
+
+.menu-item:hover .menu-icon {
+  transform: scale(1.1);
+}
+
+/* Общие улучшения */
+button, a, .menu-item {
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+/* Адаптация под мобильные */
+@media (max-width: 480px) {
+  body {
+    padding: 12px;
+  }
+
+  .header {
+    margin-bottom: 16px;
+  }
+
+  .widget {
+    padding: 14px;
+  }
+
+  .menu-grid {
+    gap: 8px;
+  }
+
+  .menu-item {
+    padding: 10px 6px;
+    font-size: 11px;
+  }
 }

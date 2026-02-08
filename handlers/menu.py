@@ -1,6 +1,7 @@
-# handlers/menu.py — обновлённая версия с Mini App
+# handlers/menu.py — финальная версия с правильным Mini App
+# Старый функционал закомментирован для будущих ссылок
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo  # ← Добавлен WebAppInfo
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.ext import ContextTypes, CallbackQueryHandler
 from database import get_db, update_user_last_active
 from utils.course_calculator import get_course_info
@@ -99,13 +100,22 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += "• 📚 <b>Организовать учебный процесс</b>.\n"
         text += "• 👤 <b>Управлять профилем</b> и личными данными.\n\n"
         
+        # 🔧 ЛОКАЛЬНЫЙ URL ДЛЯ ТЕСТИРОВАНИЯ Mini App
+        # ❗️Меняй при каждом запуске через localhost.run
+        MINI_APP_URL = "https://a4220cdc-b701-409a-9723-28a99a5e90f8/app"  # ← АКТУАЛЬНАЯ ССЫЛКА
+        
+        # ⬇️ СТАРЫЙ URL (для сравнения)
+        # MINI_APP_URL = "https://grakov216500-netizen.github.io/My-Bot/app/"
+        # → Это GitHub Pages — статика, без API
+        # → Мы используем localhost.run для доступа к /api/user и /api/duties
+
         keyboard = [
             [InlineKeyboardButton("📋 Мои наряды", callback_data="my_duties")],
             [InlineKeyboardButton("📝 Мои задачи", callback_data="menu_tasks")],
             [InlineKeyboardButton("👤 Мой профиль", callback_data="my_profile")],
             [InlineKeyboardButton("❓ Помощь", callback_data="help")],
-            # --- НОВАЯ КНОПКА ---
-            [InlineKeyboardButton("🖥️ Панель управления", web_app=WebAppInfo(url="https://grakov216500-netizen.github.io/my-bot/app"))]
+            # --- КНОПКА MINI APP ---
+            [InlineKeyboardButton("🖥️ Панель управления", web_app=WebAppInfo(url=MINI_APP_URL))]
         ]
         
         # 🔐 Админ-панель — только для админа

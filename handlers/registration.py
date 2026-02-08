@@ -1,4 +1,4 @@
-# handlers/registration.py — финальная рабочая версия (2025)
+# handlers/registration.py — финальная версия с кнопкой Mini App (2025)
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
@@ -458,7 +458,11 @@ async def confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         success_text += "Используйте меню ниже для продолжения."
 
-        keyboard = [[InlineKeyboardButton("🏠 В главное меню", callback_data="back_to_main")]]
+        # 🔧 ДОБАВЛЕНА КНОПКА ДЛЯ MINI APP
+        keyboard = [
+            [InlineKeyboardButton("🖥️ Перейти в панель управления", web_app={"url": "https://grakov216500-netizen.github.io/My-Bot/app/"})],
+            [InlineKeyboardButton("🏠 В главное меню", callback_data="back_to_main")]
+        ]
 
         await query.edit_message_text(
             success_text,

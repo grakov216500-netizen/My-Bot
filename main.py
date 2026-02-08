@@ -1,4 +1,4 @@
-# main.py — финальная версия: работает и локально, и на Replit
+# main.py — финальная версия: работает и локально, и на Replit, с Mini App
 
 import logging
 import os
@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 # === Импорты (все вместе, включая AsyncIOScheduler) ===
 try:
-    from telegram import Update
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
     from telegram.ext import (
         ApplicationBuilder,
         CommandHandler,
@@ -79,7 +79,7 @@ def import_modules():
     global check_task_reminders, restore_duty_reminders
     global start_command, get_registration_handler
     global menu_router, back_router, my_duties_router
-    global excel_router, tasks_router, profile_router, get_profile_edit_handler
+    global tasks_router, profile_router, get_profile_edit_handler
     global admin_router, assistant_router, edit_schedule_handler
     global load_all_schedules, handle_duty_date_input, handle_global_duty_date_input
     global handle_excel_upload  # Добавили явно
@@ -124,10 +124,10 @@ def import_modules():
         sys.exit(1)
 
     try:
-        from handlers.excel import excel_router, handle_excel_upload  # Импортируем оба
-        logger.info("✅ excel загружен")
+        from handlers.excel import handle_excel_upload
+        logger.info("✅ excel: handle_excel_upload загружен")
     except Exception as e:
-        logger.critical(f"❌ Ошибка загрузки excel: {e}")
+        logger.critical(f"❌ Ошибка загрузки handle_excel_upload: {e}")
         sys.exit(1)
 
     try:
@@ -249,7 +249,7 @@ def load_editors_from_db(application):
             user_id = row['telegram_id']
             editors[user_id] = {
                 'role': row['role'],
-                'group": row['group_name']
+                'group': row['group_name']
             }
 
         # Гарантируем, что ADMIN_ID — админ
@@ -298,7 +298,6 @@ async def post_init(application):
             sorted_months = sorted(schedules.keys(), reverse=True)
             latest_month = sorted_months[0]
             application.bot_data['current_schedule'] = latest_month
-            # Собираем полный график на месяц из всех групп
             full_schedule = []
             for group_duties in schedules[latest_month].values():
                 full_schedule.extend(group_duties)
@@ -392,21 +391,51 @@ if __name__ == "__main__":
             else:
                 logger.warning("⚠️ get_registration_handler вернул None")
 
+        # Добавляем edit_schedule_handler
         application.add_handler(edit_schedule_handler)
-        application.add_handler(back_router)
+        logger.info("✅ Обработчик редактирования графика добавлен")
 
+        # Добавляем back_router
+        application.add_handler(back_router)
+        logger.info("✅ back_router добавлен")
+
+        # Меню
         for handler in menu_router:
             application.add_handler(handler)
+        logger.info("✅ Обработчики меню добавлены")
 
+        # Мои наряды
         for handler in my_duties_router:
             application.add_handler(handler)
+        logger.info("✅ Обработчики my_duties добавлены")
 
+        # Задачи
         for handler in tasks_router:
             application.add_handler(handler)
+        logger.info("✅ Обработчики задач добавлены")
 
-        # === ДОБАВЛЯЕМ excel_router РАНЬШЕ handle_text ===
+        # Профиль
+        for handler in profile_router:
+            application.add_handler(handler)
+        logger.info("✅ Обработчики профиля добавлены")
+
+        # Редактирование профиля
+        if 'get_profile_edit_handler' in globals() and callable(get_profile_edit_handler):
+            application.add_handler(get_profile_edit_handler())
+            logger.info("✅ Обработчик редактирования профиля добавлен")
+
+        # Админ
+        for handler in admin_router:
+            application.add_handler(handler)
+        logger.info("✅ Обработчики админа добавлены")
+
+        # Ассистент
+        for handler in assistant_router:
+            application.add_handler(handler)
+        logger.info("✅ Обработчики ассистента добавлены")
+
+        # === ЗАГРУЗКА EXCEL (.xlsx) — до текста ===
         try:
-            from telegram.ext import MessageHandler, filters
             application.add_handler(
                 MessageHandler(
                     filters.Document.MimeType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
@@ -415,23 +444,15 @@ if __name__ == "__main__":
             )
             logger.info("✅ Обработчик Excel (.xlsx) добавлен")
         except Exception as e:
-            logger.error(f"❌ Ошибка подключения excel_router: {e}")
+            logger.error(f"❌ Ошибка подключения обработчика Excel: {e}")
 
-        for handler in profile_router:
-            application.add_handler(handler)
-
-        if 'get_profile_edit_handler' in globals() and callable(get_profile_edit_handler):
-            application.add_handler(get_profile_edit_handler())
-
-        for handler in admin_router:
-            application.add_handler(handler)
-
-        for handler in assistant_router:
-            application.add_handler(handler)
-
-        # === В САМОМ КОНЦЕ — глобальный текстовый обработчик ===
+        # === ГЛОБАЛЬНЫЙ ТЕКСТОВОЙ ОБРАБОТЧИК — В КОНЦЕ ===
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+        logger.info("✅ Глобальный текстовый обработчик добавлен")
+
+        # Обработчик ошибок
         application.add_error_handler(error_handler)
+        logger.info("✅ Обработчик ошибок добавлен")
 
         logger.info("✅ Все обработчики зарегистрированы")
         logger.info("🚀 Бот запущен. Ожидание обновлений...")

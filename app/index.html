@@ -3,38 +3,89 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Курсант</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"/>
-  <link rel="stylesheet" href="style.css" />
+  <title>VITECHBOT</title>
+  <!-- ✅ Пути к статике -->
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="/static/script.js" defer></script>
 </head>
-<body class="bg-light">
-
-  <div class="container py-4">
-    <div class="card shadow-sm">
-      <div class="card-header bg-primary text-white">
-        <h5 class="mb-0">📅 Наряды курсанта</h5>
-      </div>
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h6 class="mb-0" id="user-name">Загрузка...</h6>
-          <button class="btn btn-sm btn-outline-primary" id="refresh-btn">🔄</button>
-        </div>
-
-        <div class="alert alert-info d-none" id="admin-panel">
-          <button class="btn btn-warning btn-sm w-100" id="edit-mode-btn">✏️ Редактировать график</button>
-        </div>
-
-        <div id="schedule-container" class="mb-3">
-          <!-- Сюда вставляется график -->
-        </div>
-
-        <div class="text-center">
-          <small class="text-muted">Обновлено: <span id="timestamp">-</span></small>
-        </div>
+<body>
+  <!-- Шапка с динамическим профилем -->
+  <header class="header">
+    <div class="user-section" style="display: flex; align-items: center; gap: 12px;">
+      <!-- Аватар обновляется через script.js -->
+      <img src="https://ui-avatars.com/api/?name=Загрузка...&background=3B82F6&color=fff" 
+           alt="Аватар" class="avatar" />
+      <div class="profile-info" style="color: #E2E8F0; font-size: 14px;">
+        <!-- Эти элементы обновятся через JS -->
+        <p id="userName">Загрузка...</p>
+        <p id="userCourse">Курс: —</p>
+        <p id="userGroup">Группа: —</p>
       </div>
     </div>
-  </div>
+    <div class="header-icons">
+      <button class="icon-btn" onclick="openNotifications()">🔔</button>
+      <button class="icon-btn" onclick="openSettings()">⋮</button>
+    </div>
+  </header>
 
-  <script src="script.js"></script>
+  <!-- Основные виджеты -->
+  <main class="main">
+    <!-- Погода -->
+    <div class="widget">
+      <h3>🌡️ Погода в Воронеже</h3>
+      <p>-3°C, снег ❄️</p>
+    </div>
+
+    <!-- Расписание -->
+    <div class="widget">
+      <h3>📚 Расписание на сегодня</h3>
+      <ul class="schedule-list">
+        <li>9:00 — Математика (310) — Иванов И.И.</li>
+        <li>11:00 — Физика (215) — Петров П.П.</li>
+        <li>14:00 — Химия (405) — Сидорова А.К.</li>
+        <li>16:00 — Физ-ра (стадион) — Козлов В.С.</li>
+      </ul>
+    </div>
+
+    <!-- Ближайший наряд (динамический) -->
+    <div class="widget" id="next-duty-widget">
+      <h3>🎖️ Ближайший наряд</h3>
+      <p>Загрузка данных...</p>
+    </div>
+
+    <!-- Уведомления -->
+    <div class="widget">
+      <h3>🔔 Уведомления</h3>
+      <ul class="notification-list">
+        <li>Сержант: График изменён на 15.02</li>
+        <li>Админ: Отмена пары по физике</li>
+        <li>Система: Напоминание: сдать форму</li>
+      </ul>
+    </div>
+
+    <!-- Основное меню -->
+    <div class="menu-grid">
+      <a href="#duties" class="menu-item">
+        <div class="menu-icon">📅</div>
+        <span>Наряды</span>
+      </a>
+      <a href="#schedule" class="menu-item">
+        <div class="menu-icon">🗂️</div>
+        <span>Распис.</span>
+      </a>
+      <a href="#study" class="menu-item">
+        <div class="menu-icon">📚</div>
+        <span>Учёба</span>
+      </a>
+      <a href="#notes" class="menu-item">
+        <div class="menu-icon">✅</div>
+        <span>Заметки</span>
+      </a>
+      <a href="#rating" class="menu-item">
+        <div class="menu-icon">🏆</div>
+        <span>Рейтинг</span>
+      </a>
+    </div>
+  </main>
 </body>
 </html>

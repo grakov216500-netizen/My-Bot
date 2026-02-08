@@ -6,7 +6,6 @@ import pandas as pd
 import os
 from datetime import datetime
 import logging
-
 from utils.storage import get_month_year_from_schedule, save_all_schedules
 from utils.schedule import save_schedule
 from handlers import reminders
@@ -65,11 +64,9 @@ async def handle_excel_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Парсим с валидацией
     result = parse_excel_schedule_with_validation(file_path)
-    
     if not result['success']:
         errors = result.get('errors', [])
         warnings = result.get('warnings', [])
-        
         error_msg = "❌ Не удалось загрузить график:\n"
         if errors:
             error_msg += "\n".join([f"• {e}" for e in errors[:5]])
@@ -77,7 +74,6 @@ async def handle_excel_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
                 error_msg += f"\n• и ещё {len(errors) - 5} ошибок..."
         if warnings:
             error_msg += "\n\n⚠️ Предупреждения:\n" + "\n".join([f"• {w}" for w in warnings[:3]])
-        
         await update.message.reply_text(error_msg)
         return
 
@@ -85,7 +81,10 @@ async def handle_excel_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
     detected_group = result['group']
 
     # Определяем, женский ли график
-    is_female_group = any("девушки" in record['group'].lower() or "женщины" in record['group'].lower() for record in schedule_data)
+    is_female_group = any(
+        "девушки" in record['group'].lower() or "женщины" in record['group'].lower()
+        for record in schedule_data
+    )
     if not is_female_group:
         is_female_group = "Ж" in detected_group or "жен" in detected_group.lower()
 
@@ -170,23 +169,22 @@ async def handle_excel_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
             [InlineKeyboardButton("📆 Выбрать месяц", callback_data="select_month")]
         ])
     )
-
     logger.info(f"✅ График загружен: {month_year}, {len(schedule_data)} записей, группа={detected_group}, женский={is_female_group}")
 
 
 # === ПАРСИНГ EXCEL С ВАЛИДАЦИЕЙ ===
 def parse_excel_schedule_with_validation(file_path: str) -> dict:
-    """
-    Возвращает:
-    {
-        'success': bool,
-        'data': [...],
-        'group': str,
-        'errors': [str],
-        'warnings': [str],
-        'valid_count': int,
-        'ignored_count': int
-    }
+    """ 
+    Возвращает: 
+    { 
+        'success': bool, 
+        'data': [...], 
+        'group': str, 
+        'errors': [str], 
+        'warnings': [str], 
+        'valid_count': int, 
+        'ignored_count': int 
+    } 
     """
     errors = []
     warnings = []
@@ -200,10 +198,11 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
         # 1. Группа — E1:E2
         group = "Неизвестно"
         for i in range(2):
-            val = df.iloc[i, 4] if i < len(df) and 4 < len(df.iloc[i]) else None
-            if pd.notna(val) and str(val).strip().lower() not in ['nan', '']:
-                group = str(val).strip()
-                break
+            if i < len(df) and 4 < len(df.iloc[i]) and pd.notna(df.iloc[i, 4]):
+                val = df.iloc[i, 4]
+                if str(val).strip().lower() not in ['nan', '']:
+                    group = str(val).strip()
+                    break
 
         # 2. ФИО — F6:H21
         fio_cells = df.iloc[5:21, 5:8]
@@ -247,7 +246,6 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
             'октябрь': 10, 'окт': 10,
             'ноябрь': 11, 'ноя': 11
         }
-
         month_num = month_map.get(month_str, 12)
         year = 2026 if month_num == 1 else 2025
 
@@ -266,9 +264,7 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
                     duty_cell = duties_matrix.iloc[i, j]
                 except:
                     continue
-
                 cell_value = str(duty_cell) if not pd.isna(duty_cell) else ''
-
                 is_valid, status = validate_duty_role(cell_value)
 
                 if status == 'ignored':
@@ -279,25 +275,26 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
                     continue
                 else:
                     role = cell_value.strip().lower()
-                    try:
-                        full_date = f"{year}-{month_num:02d}-{int(day):02d}"
-                    except:
-                        errors.append(f"❌ Ошибка даты: строка {i+6}, день {day}")
-                        continue
 
-                    # Определяем пол по БД
-                    cursor.execute("SELECT gender FROM users WHERE fio LIKE ?", (f"{fio}%",))
-                    user = cursor.fetchone()
-                    gender = user['gender'] if user else 'male'
+                try:
+                    full_date = f"{year}-{month_num:02d}-{int(day):02d}"
+                except:
+                    errors.append(f"❌ Ошибка даты: строка {i+6}, день {day}")
+                    continue
 
-                    duty_data.append({
-                        "fio": fio,
-                        "date": full_date,
-                        "role": role,
-                        "group": group,
-                        "gender": gender
-                    })
-                    valid_count += 1
+                # Определяем пол по БД
+                cursor.execute("SELECT gender FROM users WHERE fio LIKE ?", (f"{fio}%",))
+                user = cursor.fetchone()
+                gender = user['gender'] if user else 'male'
+
+                duty_data.append({
+                    "fio": fio,
+                    "date": full_date,
+                    "role": role,
+                    "group": group,
+                    "gender": gender
+                })
+                valid_count += 1
 
         conn.close()
 
@@ -327,5 +324,5 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
         }
 
 
-# === ЭКСПОРТ ОБРАБОТЧИКА ===
+# === ЭКСПОРТ ===
 __all__ = ['handle_excel_upload']
