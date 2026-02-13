@@ -1,9 +1,7 @@
-# main.py — финальная версия: работает на VPS
-
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any
 
 # === Импорты (все вместе, включая AsyncIOScheduler) ===
@@ -18,9 +16,7 @@ try:
         ContextTypes,
         PicklePersistence,
     )
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from apscheduler.triggers.cron import CronTrigger
-    print("✅ Все импорты из telegram.ext и apscheduler успешны")
+    print("✅ Все импорты из telegram.ext успешны")
 except ImportError as e:
     print(f"❌ Ошибка импорта: {e}")
     print("Установите: pip install python-telegram-bot python-dotenv apscheduler pandas openpyxl")
@@ -41,8 +37,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# === Загружаем переменные: используем BOT_TOKEN ===
-TOKEN = os.getenv("BOT_TOKEN")  # ← Ключевое исправление: было TOKEN, стало BOT_TOKEN
+# === Загружаем переменные ===
+TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID_STR = os.getenv("ADMIN_ID", "1027070834")
 
 if not TOKEN:
@@ -71,7 +67,8 @@ os.makedirs("data", exist_ok=True)
 # === Отложенные импорты ===
 def import_modules():
     global check_and_update_courses, init_db, get_db
-    global check_task_reminders, restore_duty_reminders
+    global check_task_reminders, restore_task_reminders  # ← Теперь восстанавливаем и задачи!
+    global restore_duty_reminders
     global start_command, get_registration_handler
     global menu_router, back_router, my_duties_router
     global tasks_router, profile_router, get_profile_edit_handler
@@ -87,15 +84,15 @@ def import_modules():
         sys.exit(1)
 
     try:
-        from handlers.task_reminders import check_task_reminders
-        logger.info("✅ task_reminders загружен")
+        from handlers.task_reminders import check_task_reminders, restore_task_reminders  # ← Добавлено
+        logger.info("✅ task_reminders загружен (включая восстановление)")
     except Exception as e:
         logger.critical(f"❌ Ошибка загрузки task_reminders: {e}")
         sys.exit(1)
 
     try:
         from handlers.reminders import restore_duty_reminders
-        logger.info("✅ reminders загружен")
+        logger.info("✅ reminders (наряды) загружен")
     except Exception as e:
         logger.critical(f"❌ Ошибка загрузки reminders: {e}")
         sys.exit(1)
@@ -176,7 +173,7 @@ def import_modules():
 
 import_modules()
 
-# === ПЕРЕДАЁМ ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ В МОДУЛИ ===
+# === Передача глобальных переменных ===
 try:
     from handlers import excel
     excel.ADMIN_ID = ADMIN_ID
@@ -244,7 +241,6 @@ def load_editors_from_db(application):
                 'group': row['group_name']
             }
 
-        # Гарантируем, что ADMIN_ID — админ
         editors[ADMIN_ID] = {'role': 'admin', 'group': 'Администратор'}
         application.bot_data['editors'] = editors
         logger.info(f"🟢 Загружено {len(editors)} редакторов")
@@ -268,20 +264,31 @@ async def post_init(application):
     except Exception as e:
         logger.error(f"⚠️ Ошибка автообновления курсов: {e}", exc_info=True)
 
-    try:
-        scheduler = AsyncIOScheduler()
-        scheduler.add_job(check_and_update_courses, CronTrigger(hour=0, minute=1), id="daily_course_check")
-        scheduler.start()
-        logger.info("⏰ Планировщик: проверка курсов запущена")
-    except Exception as e:
-        logger.error(f"❌ Ошибка запуска планировщика: {e}", exc_info=True)
+    # Убираем AsyncIOScheduler — используем только JobQueue
+    # Вместо этого — добавляем ежедневную проверку курсов через job_queue
+    application.job_queue.run_daily(check_and_update_courses, time=datetime.strptime("00:01", "%H:%M").time())
+    logger.info("⏰ Ежедневная проверка курсов запланирована через job_queue")
 
-    try:
-        application.job_queue.run_repeating(check_task_reminders, interval=30, first=5)
-        logger.info("⏰ Напоминания о задачах: добавлены")
-    except Exception as e:
-        logger.error(f"❌ Ошибка добавления напоминаний о задачах: {e}", exc_info=True)
+    # ✅ Проверка напоминаний о задачах каждые 30 секунд
+    application.job_queue.run_repeating(check_task_reminders, interval=30, first=5)
+    logger.info("⏰ Напоминания о задачах: добавлены")
 
+    # ✅ Восстановление напоминаний о задачах при старте
+    try:
+        context = application.context_types.context(application)
+        await restore_task_reminders(context)  # ← Это новое!
+        logger.info("✅ Напоминания о задачах восстановлены после перезапуска")
+    except Exception as e:
+        logger.error(f"❌ Ошибка восстановления напоминаний о задачах: {e}", exc_info=True)
+
+    # ✅ Восстановление напоминаний о нарядах
+    try:
+        await restore_duty_reminders(application.context_types.context(application))
+        logger.info("✅ Напоминания о нарядах восстановлены")
+    except Exception as e:
+        logger.error(f"❌ Ошибка восстановления напоминаний о нарядах: {e}", exc_info=True)
+
+    # ✅ Загрузка расписаний
     try:
         schedules = load_all_schedules()
         if schedules:
@@ -302,21 +309,16 @@ async def post_init(application):
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки графиков: {e}", exc_info=True)
 
-    try:
-        context = application.context_types.context(application)
-        await restore_duty_reminders(context)
-        logger.info("✅ Напоминания о нарядах восстановлены")
-    except Exception as e:
-        logger.error(f"❌ Ошибка восстановления напоминаний: {e}", exc_info=True)
-
+    # ✅ Загрузка редакторов
     try:
         load_editors_from_db(application)
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки редакторов: {e}", exc_info=True)
 
-    # === КРИТИЧЕСКАЯ ПРАВКА: гарантируем, что ADMIN_ID в bot_data ===
+    # ✅ Гарантия: ADMIN_ID в bot_data
     application.bot_data['ADMIN_ID'] = ADMIN_ID
 
+    # ✅ Сохраняем состояние
     try:
         application.bot_data.setdefault('persistence_init', True)
         application.bot_data.setdefault('boot_time', datetime.now().isoformat())
@@ -332,14 +334,12 @@ async def post_init(application):
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("❗ Произошла ошибка", exc_info=context.error)
 
-# === ЗАПУСК: ТОЛЬКО БОТ (FastAPI — отдельно через uvicorn) ===
+# === ЗАПУСК БОТА ===
 if __name__ == "__main__":
     logger.info("🤖 Запуск Telegram-бота...")
 
-    # Инициализация persistence
     persistence = PicklePersistence(filepath="bot_data.pkl")
 
-    # Создаём приложение
     try:
         application = ApplicationBuilder() \
             .token(TOKEN) \
@@ -347,7 +347,7 @@ if __name__ == "__main__":
             .post_init(post_init) \
             .build()
 
-        # === РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ ===
+        # === Регистрация обработчиков ===
         application.add_handler(CommandHandler("start", start))
 
         if 'get_registration_handler' in globals() and callable(get_registration_handler):
@@ -392,7 +392,7 @@ if __name__ == "__main__":
             application.add_handler(handler)
         logger.info("✅ Обработчики ассистента добавлены")
 
-        # === ЗАГРУЗКА EXCEL (.xlsx) ===
+        # === Загрузка Excel ===
         try:
             application.add_handler(
                 MessageHandler(
@@ -404,7 +404,7 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f"❌ Ошибка подключения обработчика Excel: {e}")
 
-        # === ГЛОБАЛЬНЫЙ ТЕКСТОВОЙ ОБРАБОТЧИК ===
+        # === Глобальный текстовый обработчик ===
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
         logger.info("✅ Глобальный текстовый обработчик добавлен")
 

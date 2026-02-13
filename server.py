@@ -1,6 +1,6 @@
-# server.py — FastAPI сервер для Mini App (автоопределение схемы БД)
+# server.py — FastAPI сервер для Mini App (с поддержкой задачника)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -197,14 +197,200 @@ async def get_duties(telegram_id: int):
     }
 
 # ============================================
-# 3. ВСЁ РАСПИСАНИЕ (заглушка)
+# 3. ЗАДАЧНИК: API ДЛЯ WEBAPP
+# ============================================
+
+@app.get("/api/tasks")
+async def get_tasks(user_id: int):
+    conn = get_db()
+    if not conn:
+        return {"error": "База данных не найдена"}
+
+    try:
+        # Проверим, есть ли таблица tasks
+        cursor = conn.execute("PRAGMA table_info(tasks)")
+        columns = [row['name'] for row in cursor.fetchall()]
+        if not columns:
+            print("[ERROR] Таблица tasks не найдена")
+            return {"error": "Таблица задач не найдена"}
+
+        # Выбираем задачи
+        query = """
+            SELECT id, text, done, deadline 
+            FROM tasks 
+            WHERE user_id = ? 
+            ORDER BY done, deadline IS NULL, deadline
+        """
+        rows = conn.execute(query, (user_id,)).fetchall()
+        tasks = []
+        for row in rows:
+            task = dict(row)
+            # Форматируем deadline для отображения
+            if task['deadline']:
+                try:
+                    dt = datetime.fromisoformat(task['deadline'])
+                    task['formatted_deadline'] = dt.strftime('%d %H:%M')
+                except:
+                    task['formatted_deadline'] = None
+            else:
+                task['formatted_deadline'] = None
+            tasks.append(task)
+        return tasks
+
+    except Exception as e:
+        print(f"[ERROR] Ошибка загрузки задач: {e}")
+        return {"error": f"Ошибка БД: {str(e)}"}
+    finally:
+        conn.close()
+
+
+@app.post("/api/add_task")
+async def add_task(data: dict):
+    user_id = data.get('user_id')
+    text = data.get('text')
+
+    if not user_id or not text:
+        raise HTTPException(status_code=400, detail="user_id и text обязательны")
+
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+
+    try:
+        conn.execute("""
+            INSERT INTO tasks (user_id, text, done, reminded, deadline) 
+            VALUES (?, ?, 0, 0, NULL)
+        """, (user_id, text.strip()))
+        conn.commit()
+        print(f"✅ Добавлена задача: '{text}' для user_id={user_id}")
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] Ошибка добавления задачи: {e}")
+        raise HTTPException(status_code=500, detail="Не удалось добавить задачу")
+    finally:
+        conn.close()
+
+
+@app.post("/api/done_task")
+async def done_task(data: dict):
+    task_id = data.get('task_id')
+    user_id = data.get('user_id')
+    done = data.get('done', True)
+
+    if not task_id or not user_id:
+        raise HTTPException(status_code=400, detail="task_id и user_id обязательны")
+
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+
+    try:
+        conn.execute("UPDATE tasks SET done = ? WHERE id = ? AND user_id = ?", (int(done), task_id, user_id))
+        conn.commit()
+        action = "выполнена" if done else "восстановлена"
+        print(f"✅ Задача {task_id} отмечена как {action}")
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] Ошибка обновления статуса задачи: {e}")
+        raise HTTPException(status_code=500, detail="Не удалось обновить задачу")
+    finally:
+        conn.close()
+
+
+@app.post("/api/delete_task")
+async def delete_task(data: dict):
+    task_id = data.get('task_id')
+    user_id = data.get('user_id')
+
+    if not task_id or not user_id:
+        raise HTTPException(status_code=400, detail="task_id и user_id обязательны")
+
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+
+    try:
+        conn.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
+        conn.commit()
+        print(f"✅ Задача {task_id} удалена")
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] Ошибка удаления задачи: {e}")
+        raise HTTPException(status_code=500, detail="Не удалось удалить задачу")
+    finally:
+        conn.close()
+
+
+@app.post("/api/edit_task")
+async def edit_task(data: dict):
+    task_id = data.get('task_id')
+    text = data.get('text')
+    user_id = data.get('user_id')
+
+    if not task_id or not text or not user_id:
+        raise HTTPException(status_code=400, detail="task_id, text и user_id обязательны")
+
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+
+    try:
+        conn.execute("UPDATE tasks SET text = ? WHERE id = ? AND user_id = ?", (text.strip(), task_id, user_id))
+        conn.commit()
+        print(f"✅ Задача {task_id} отредактирована: '{text}'")
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] Ошибка редактирования задачи: {e}")
+        raise HTTPException(status_code=500, detail="Не удалось редактировать задачу")
+    finally:
+        conn.close()
+
+
+@app.post("/api/set_reminder")
+async def set_reminder(data: dict):
+    task_id = data.get('task_id')
+    deadline = data.get('deadline')  # 'YYYY-MM-DD HH:MM:SS'
+    user_id = data.get('user_id')
+
+    if not task_id or not deadline or not user_id:
+        raise HTTPException(status_code=400, detail="task_id, deadline и user_id обязательны")
+
+    # Валидация формата
+    try:
+        datetime.fromisoformat(deadline)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте YYYY-MM-DD HH:MM:SS")
+
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+
+    try:
+        conn.execute("""
+            UPDATE tasks 
+            SET deadline = ?, reminded = 0 
+            WHERE id = ? AND user_id = ?
+        """, (deadline, task_id, user_id))
+        conn.commit()
+        print(f"✅ Напоминание установлено: задача {task_id} → {deadline}")
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] Ошибка установки напоминания: {e}")
+        raise HTTPException(status_code=500, detail="Не удалось установить напоминание")
+    finally:
+        conn.close()
+
+
+# ============================================
+# 4. ВСЁ РАСПИСАНИЕ (заглушка)
 # ============================================
 @app.get("/api/schedule/all")
 async def get_full_schedule():
     return {"info": "Модуль в разработке"}
 
+
 # ============================================
-# 4. СТАТИКА И ГЛАВНАЯ
+# 5. СТАТИКА И ГЛАВНАЯ
 # ============================================
 app.mount("/static", StaticFiles(directory="app"), name="static")
 
@@ -225,8 +411,9 @@ async def serve_app():
 
     return HTMLResponse(content=content)
 
+
 # ============================================
-# 5. ЗАПУСК
+# 6. ЗАПУСК
 # ============================================
 if __name__ == "__main__":
     import uvicorn

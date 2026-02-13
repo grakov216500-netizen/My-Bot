@@ -2,11 +2,11 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
   <meta name="theme-color" content="#1f2937" />
   <title>VITECHBOT</title>
 
-  <!-- 🔁 Универсальные пути: работают везде -->
+  <!-- 🔁 Подключаем стили и скрипты -->
   <link rel="stylesheet" href="./style.css" />
   <script src="./script.js" defer></script>
 
@@ -19,12 +19,17 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       padding: 0;
       min-height: 100vh;
+      position: relative;
+      overflow: hidden;
     }
 
     .header {
       background: #374151;
       padding: 16px 20px;
       border-bottom: 1px solid #4b5563;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
 
     .avatar {
@@ -73,10 +78,171 @@
       font-size: 20px;
       margin-bottom: 4px;
     }
+
+    /* === НОВОЕ: Экран заметок (скрыт по умолчанию) === */
+    #notes-screen {
+      display: none;
+      padding: 16px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .search-bar {
+      display: flex;
+      align-items: center;
+      background: #374151;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 16px;
+    }
+
+    .search-bar svg {
+      fill: #8e8e93;
+      margin-right: 8px;
+    }
+
+    #search-input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      font-size: 15px;
+      outline: none;
+      color: #e5e7eb;
+    }
+
+    .task-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .task-card {
+      display: flex;
+      align-items: center;
+      background: #374151;
+      border-radius: 12px;
+      padding: 12px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      font-size: 15px;
+    }
+
+    .task-checkbox {
+      width: 20px;
+      height: 20px;
+      border: 2px solid #6b7280;
+      border-radius: 6px;
+      margin-right: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .task-checkbox.checked {
+      background: #007AFF;
+      border-color: #007AFF;
+      color: white;
+      font-size: 14px;
+    }
+
+    .task-text {
+      flex: 1;
+      word-break: break-word;
+    }
+
+    .task-actions button {
+      background: none;
+      border: none;
+      font-size: 18px;
+      cursor: pointer;
+      color: #8e8e93;
+      margin-left: 8px;
+    }
+
+    .task-actions button:hover {
+      color: #007AFF;
+    }
+
+    /* === Круглая кнопка + === */
+    #add-task-fab {
+      position: absolute;
+      right: 20px;
+      bottom: 80px;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: #007AFF;
+      color: white;
+      font-size: 24px;
+      border: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      cursor: pointer;
+      z-index: 10;
+      display: none;
+    }
+
+    /* === Фиксированная нижняя панель === */
+    .bottom-nav {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: #374151;
+      border-top: 1px solid #4b5563;
+      display: flex;
+      z-index: 100;
+    }
+
+    .nav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      color: #8e8e93;
+      font-size: 10px;
+      position: relative;
+    }
+
+    .nav-item svg {
+      width: 20px;
+      height: 20px;
+      margin-bottom: 2px;
+    }
+
+    .nav-item.active::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 10%;
+      width: 80%;
+      height: 32px;
+      background: #007AFF;
+      border-radius: 12px;
+      z-index: -1;
+    }
+
+    .main {
+      padding: 16px;
+      display: block;
+    }
+
+    /* Скрываем основной экран, когда открыт notes */
+    .main.hidden {
+      display: none;
+    }
   </style>
 </head>
 <body>
-  <!-- Шапка с динамическим профилем -->
+  <!-- Шапка -->
   <header class="header">
     <div class="user-section" style="display: flex; align-items: center; gap: 12px;">
       <img src="https://ui-avatars.com/api/?name=Загрузка...&background=3B82F6&color=fff" 
@@ -88,20 +254,18 @@
       </div>
     </div>
     <div class="header-icons">
-      <button class="icon-btn" onclick="openNotifications()" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">🔔</button>
-      <button class="icon-btn" onclick="openSettings()" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">⋮</button>
+      <button class="icon-btn" onclick="openNotifications()">🔔</button>
+      <button class="icon-btn" onclick="openSettings()">⋮</button>
     </div>
   </header>
 
-  <!-- Основные виджеты -->
-  <main class="main" style="padding: 16px;">
-    <!-- Погода -->
+  <!-- Основной контент (виджеты) -->
+  <main class="main" id="main-content">
     <div class="widget">
       <h3>🌡️ Погода в Воронеже</h3>
       <p>-3°C, снег ❄️</p>
     </div>
 
-    <!-- Расписание -->
     <div class="widget">
       <h3>📚 Расписание на сегодня</h3>
       <ul class="schedule-list" style="list-style: none; padding: 0; margin: 0;">
@@ -112,13 +276,11 @@
       </ul>
     </div>
 
-    <!-- Ближайший наряд (динамический) -->
     <div class="widget" id="next-duty-widget">
       <h3>🎖️ Ближайший наряд</h3>
       <p>Загрузка данных...</p>
     </div>
 
-    <!-- Уведомления -->
     <div class="widget">
       <h3>🔔 Уведомления</h3>
       <ul class="notification-list" style="list-style: none; padding: 0; margin: 0;">
@@ -128,29 +290,92 @@
       </ul>
     </div>
 
-    <!-- Основное меню -->
     <div class="menu-grid">
-      <a href="#duties" class="menu-item">
+      <a href="#duties" class="menu-item" onclick="switchTab('duties')">
         <div class="menu-icon">📅</div>
         <span>Наряды</span>
       </a>
-      <a href="#schedule" class="menu-item">
+      <a href="#schedule" class="menu-item" onclick="switchTab('schedule')">
         <div class="menu-icon">🗂️</div>
         <span>Распис.</span>
       </a>
-      <a href="#study" class="menu-item">
+      <a href="#study" class="menu-item" onclick="switchTab('study')">
         <div class="menu-icon">📚</div>
         <span>Учёба</span>
       </a>
-      <a href="#notes" class="menu-item">
+      <a href="#notes" class="menu-item" onclick="switchTab('notes')">
         <div class="menu-icon">✅</div>
         <span>Заметки</span>
       </a>
-      <a href="#rating" class="menu-item">
+      <a href="#rating" class="menu-item" onclick="switchTab('rating')">
         <div class="menu-icon">🏆</div>
         <span>Рейтинг</span>
       </a>
     </div>
   </main>
+
+  <!-- === ЭКРАН ЗАМЕТОК === -->
+  <div id="notes-screen">
+    <div class="search-bar">
+      <svg width="16" height="16" fill="currentColor"><path d="M15.5 14.3l-3.7-3.7c1.2-1.5 1.8-3.4 1.5-5.3-0.4-2.3-2.2-4.1-4.5-4.5-3.9-0.8-7.2 2.4-6.4 6.3 0.4 2.3 2.2 4.1 4.5 4.5 1.9 0.3 3.8-0.3 5.3-1.5l3.7 3.7c0.4 0.4 1 0.4 1.4 0s0.4-1 0-1.4z"/></svg>
+      <input type="text" id="search-input" placeholder="Поиск по задачам..." />
+    </div>
+
+    <div class="task-list" id="task-list">
+      <!-- Сюда будут добавляться задачи -->
+      <p style="color: #6b7280; text-align: center;">Загрузка задач...</p>
+    </div>
+  </div>
+
+  <!-- === КНОПКА ДОБАВЛЕНИЯ === -->
+  <button id="add-task-fab" onclick="startAddTask()">+</button>
+
+  <!-- === НИЖНЯЯ ПАНЕЛЬ (фиксируется) === -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <a href="#home" class="nav-item active" data-tab="home">
+      <svg><use xlink:href="#icon-home"/></svg>
+    </a>
+    <a href="#notes" class="nav-item" data-tab="notes">
+      <svg><use xlink:href="#icon-notes"/></svg>
+    </a>
+    <a href="#profile" class="nav-item" data-tab="profile">
+      <svg><use xlink:href="#icon-profile"/></svg>
+    </a>
+    <a href="#duties" class="nav-item" data-tab="duties">
+      <svg><use xlink:href="#icon-duties"/></svg>
+    </a>
+    <a href="#admin" class="nav-item" data-tab="admin">
+      <svg><use xlink:href="#icon-admin"/></svg>
+    </a>
+  </nav>
+
+  <!-- === ИКОНКИ (спрятаны) === -->
+  <svg style="display: none;">
+    <symbol id="icon-home" viewBox="0 0 24 24">
+      <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+    </symbol>
+    <symbol id="icon-notes" viewBox="0 0 24 24">
+      <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/>
+    </symbol>
+    <symbol id="icon-profile" viewBox="0 0 24 24">
+      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+    </symbol>
+    <symbol id="icon-duties" viewBox="0 0 24 24">
+      <path d="M19 3h-4.18C14.4 1.84 13.3 1 12 1c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm-2 14l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/>
+    </symbol>
+    <symbol id="icon-admin" viewBox="0 0 24 24">
+      <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
+    </symbol>
+  </svg>
+
+  <!-- === МОДАЛЬНОЕ МЕНЮ (три точки) === -->
+  <div class="modal" id="task-menu" style="display:none;">
+    <div class="modal-content">
+      <div class="menu-item" id="edit-task">✏️ Редактировать</div>
+      <div class="menu-item" id="delete-task">🗑 Удалить</div>
+      <div class="menu-item" id="set-reminder">⏰ Установить напоминание</div>
+      <div class="menu-item cancel" id="close-menu">Отмена</div>
+    </div>
+  </div>
 </body>
 </html>

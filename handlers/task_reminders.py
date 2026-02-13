@@ -1,5 +1,3 @@
-# handlers/task_reminders.py — умные напоминания (исправленная версия)
-
 from telegram.ext import ContextTypes
 from datetime import datetime, timedelta
 from database import get_db
@@ -7,15 +5,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 🔁 РЕЖИМ РАБОТЫ: выбери ОДИН из двух
-REMINDER_MODE = "exact"  # "15min" — за 15 минут | "exact" — точно в момент
+# Режим напоминания: "exact" — точно в момент, "15min" — за 15 минут
+REMINDER_MODE = "exact"
+
 
 async def check_task_reminders(context: ContextTypes.DEFAULT_TYPE):
-    """
-    Умная проверка напоминаний:
-    - либо за ~15 минут до дедлайна
-    - либо точно в момент дедлайна
-    """
+    """Проверка и отправка напоминаний о задачах (каждые 30 сек)"""
     conn = None
     try:
         conn = get_db()
@@ -24,79 +19,43 @@ async def check_task_reminders(context: ContextTypes.DEFAULT_TYPE):
         now = datetime.now()
         tasks = []
 
-        # === РЕЖИМ 1: Напоминание за ~15 минут до дедлайна ===
         if REMINDER_MODE == "15min":
+            # За ~15 минут до дедлайна
             time_lower = now + timedelta(minutes=14, seconds=30)
             time_upper = now + timedelta(minutes=15, seconds=30)
             lower_str = time_lower.strftime('%Y-%m-%d %H:%M:%S')
             upper_str = time_upper.strftime('%Y-%m-%d %H:%M:%S')
 
-            logger.info(f"🔍 Проверка: за 15 мин до дедлайна | Окно: {lower_str} → {upper_str}")
-
             cursor.execute('''
-                SELECT t.id, t.text, t.deadline, t.user_id
-                FROM tasks t
-                WHERE t.done = 0 
-                  AND t.reminded = 0
-                  AND t.deadline IS NOT NULL
-                  AND datetime(t.deadline) >= datetime(?)
-                  AND datetime(t.deadline) < datetime(?)
+                SELECT id, text, deadline, user_id FROM tasks
+                WHERE done = 0 AND reminded = 0 AND deadline IS NOT NULL
+                  AND datetime(deadline) >= datetime(?) AND datetime(deadline) < datetime(?)
             ''', (lower_str, upper_str))
 
-            tasks = cursor.fetchall()
-
-        # === РЕЖИМ 2: Напоминание ТОЧНО в момент дедлайна ===
         elif REMINDER_MODE == "exact":
-            # Окно ±15 секунд от текущего времени
+            # Точно в момент дедлайна ±15 секунд
             time_lower = now - timedelta(seconds=15)
             time_upper = now + timedelta(seconds=15)
             lower_str = time_lower.strftime('%Y-%m-%d %H:%M:%S')
             upper_str = time_upper.strftime('%Y-%m-%d %H:%M:%S')
 
-            logger.info(f"⏰ Проверка: напоминание СЕЙЧАС? Окно: {lower_str} → {upper_str}")
-
             cursor.execute('''
-                SELECT t.id, t.text, t.deadline, t.user_id
-                FROM tasks t
-                WHERE t.done = 0 
-                  AND t.reminded = 0
-                  AND t.deadline IS NOT NULL
-                  AND datetime(t.deadline) >= datetime(?)
-                  AND datetime(t.deadline) < datetime(?)
+                SELECT id, text, deadline, user_id FROM tasks
+                WHERE done = 0 AND reminded = 0 AND deadline IS NOT NULL
+                  AND datetime(deadline) >= datetime(?) AND datetime(deadline) < datetime(?)
             ''', (lower_str, upper_str))
 
-            tasks = cursor.fetchall()
-
-        # === ПОКАЗ АКТИВНЫХ ЗАДАЧ ===
-        try:
-            all_active = cursor.execute('''
-                SELECT id, text, deadline, done, reminded 
-                FROM tasks 
-                WHERE done = 0 AND reminded = 0 AND deadline IS NOT NULL
-            ''').fetchall()
-
-            logger.info(f"📋 Активные задачи в БД: {len(all_active)}")
-            for t in all_active:
-                logger.info(f"  🔹 {t['id']} | '{t['text'][:30]}...' | {t['deadline']}")
-        except Exception as e:
-            logger.warning(f"⚠️ Ошибка при получении активных задач: {e}")
-
-        # === ОТПРАВКА НАПОМИНАНИЙ ===
-        logger.info(f"📊 Найдено для напоминания: {len(tasks)}")
+        tasks = cursor.fetchall()
+        logger.info(f"📊 Найдено задач для напоминания: {len(tasks)}")
 
         for task in tasks:
             try:
+                task_id = task['id']
                 user_id = task['user_id']
                 task_text = task['text']
-                task_id = task['id']
 
-                # Формируем сообщение
-                if REMINDER_MODE == "15min":
-                    msg = f"⏰ <b>Напоминание о задаче</b>\n\n{task_text}"
-                else:
-                    msg = f"⏰ <b>Время настало!</b>\n\n{task_text}"
+                msg = f"⏰ <b>Время выполнить задачу!</b>\n\n{task_text}"
 
-                # Отправляем напоминание
                 await context.bot.send_message(
                     chat_id=user_id,
                     text=msg,
@@ -104,26 +63,115 @@ async def check_task_reminders(context: ContextTypes.DEFAULT_TYPE):
                 )
                 logger.info(f"✅ Напоминание отправлено: задача {task_id} → {user_id}")
 
-                # Отмечаем, что напоминание отправлено
+                # Отмечаем как напомянутое
                 cursor.execute("UPDATE tasks SET reminded = 1 WHERE id = ?", (task_id,))
                 conn.commit()
 
             except Exception as e:
-                # Частые ошибки
-                if "Forbidden: bot was blocked by the user" in str(e):
-                    logger.warning(f"🚫 Пользователь {user_id} заблокировал бота. Пропускаем задачу {task_id}.")
-                elif "Bad Request: chat not found" in str(e):
-                    logger.warning(f"❌ Чат не найден (удалён) для пользователя {user_id}. Пропускаем задачу {task_id}.")
-                elif "Timed out" in str(e):
-                    logger.warning(f"⏳ Таймаут при отправке напоминания {task_id}. Повторим позже.")
+                if "bot was blocked" in str(e).lower():
+                    logger.warning(f"🚫 Пользователь {user_id} заблокировал бота")
                 else:
-                    logger.error(f"❌ Ошибка при отправке задачи {task_id} пользователю {user_id}: {e}", exc_info=True)
+                    logger.error(f"❌ Ошибка отправки напоминания {task_id}: {e}")
 
     except Exception as e:
-        logger.critical(f"❌ Критическая ошибка в check_task_reminders: {e}", exc_info=True)
+        logger.critical(f"❌ Критическая ошибка в check_task_reminders: {e}")
     finally:
-        if conn is not None:
+        if conn:
+            conn.close()
+
+
+# === ВОССТАНОВЛЕНИЕ ЗАДАЧ ПРИ ПЕРЕЗАПУСКЕ ===
+async def restore_task_reminders(context: ContextTypes.DEFAULT_TYPE):
+    """
+    При старте бота — пересоздаёт job'ы для всех активных задач
+    """
+    job_queue = context.application.job_queue
+    conn = None
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, text, deadline, user_id FROM tasks
+            WHERE done = 0 AND reminded = 0 AND deadline IS NOT NULL
+        ''')
+        pending_tasks = cursor.fetchall()
+
+        now = datetime.now()
+        restored_count = 0
+        skipped_count = 0
+
+        for task in pending_tasks:
             try:
-                conn.close()
+                deadline = datetime.fromisoformat(task['deadline'])
+
+                # 🔒 Если дедлайн уже прошёл — не ставим job, просто отмечаем
+                if deadline < now:
+                    cursor.execute("UPDATE tasks SET reminded = 1 WHERE id = ?", (task['id'],))
+                    conn.commit()
+                    skipped_count += 1
+                    logger.info(f"⏭️ Пропущено (просрочено): задача {task['id']}")
+                    continue
+
+                # ✅ Ставим напоминание на точное время
+                job_queue.run_once(
+                    send_delayed_task_reminder,
+                    when=deadline,
+                    data={
+                        'user_id': task['user_id'],
+                        'task_text': task['text'],
+                        'task_id': task['id']
+                    },
+                    name=f"task_reminder_{task['id']}"
+                )
+                restored_count += 1
+
             except Exception as e:
-                logger.warning(f"⚠️ Ошибка при закрытии соединения с БД: {e}")
+                logger.warning(f"⚠️ Не удалось восстановить напоминание для задачи {task['id']}: {e}")
+
+        logger.info(f"🔄 Восстановлено {restored_count} напоминаний")
+        if skipped_count:
+            logger.info(f"⏭️ Пропущено {skipped_count} (просрочены)")
+
+    except Exception as e:
+        logger.error(f"❌ Ошибка при восстановлении напоминаний: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# === ОТПРАВКА ЧЕРЕЗ run_once (для точного времени) ===
+async def send_delayed_task_reminder(context: ContextTypes.DEFAULT_TYPE):
+    job_data = context.job.data
+    user_id = job_data['user_id']
+    task_text = job_data['task_text']
+    task_id = job_data['task_id']
+
+    try:
+        # 🔍 Проверим, не было ли уже напоминания (на всякий случай)
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT reminded FROM tasks WHERE id = ?", (task_id,))
+        row = cur.fetchone()
+        if row and row['reminded']:
+            logger.info(f"ℹ️ Напоминание уже отправлено ранее: задача {task_id}")
+            return
+        conn.close()
+
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"⏰ <b>Напоминание:</b>\n\n{task_text}",
+            parse_mode="HTML"
+        )
+        logger.info(f"✅ Отправлено отложенное напоминание: задача {task_id}")
+
+        # ✅ Отмечаем как напомянутое
+        conn = get_db()
+        conn.execute("UPDATE tasks SET reminded = 1 WHERE id = ?", (task_id,))
+        conn.commit()
+        conn.close()
+
+    except Exception as e:
+        if "bot was blocked" in str(e).lower():
+            logger.warning(f"🚫 Пользователь {user_id} заблокировал бота")
+        else:
+            logger.error(f"❌ Ошибка при отправке отложенного напоминания {task_id}: {e}")
