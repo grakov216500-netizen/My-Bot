@@ -1,6 +1,18 @@
-// app/script.js — финальная версия (с отображением профиля)
+// app/script.js — финальная версия (с full_name + гибкий baseUrl)
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // === Определяем baseUrl: зависит от того, где запущено ===
+    const CURRENT_HOST = window.location.hostname;
+    let baseUrl;
+
+    if (CURRENT_HOST.includes('github.io')) {
+        // На GitHub Pages → API на VPS
+        baseUrl = "http://85.239.60.6:8000";
+    } else {
+        // На VPS → относительный путь
+        baseUrl = "";
+    }
+
     let userId;
 
     // === Определяем пользователя: из Telegram или тестовый ID ===
@@ -14,8 +26,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             return showError("Не удалось определить пользователя");
         }
     } else {
-        // 🔧 Режим тестирования: подставляем ваш ID
-        userId = 1027070834; // Замените на ID из schedules.json
+        // 🔧 Режим тестирования
+        userId = 1027070834;
         console.log("🔧 Тестовый режим: userId =", userId);
     }
 
@@ -28,8 +40,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // Загружаем профиль и наряды
-    await loadUserProfile(userId);
-    await loadDuties(userId);
+    await loadUserProfile(userId, baseUrl);
+    await loadDuties(userId, baseUrl);
 });
 
 /**
@@ -46,9 +58,9 @@ function showError(message) {
 /**
  * Загружает профиль пользователя
  */
-async function loadUserProfile(userId) {
+async function loadUserProfile(userId, baseUrl) {
     try {
-        const response = await fetch(`/api/user?telegram_id=${userId}`);
+        const response = await fetch(`${baseUrl}/api/user?telegram_id=${userId}`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -64,31 +76,33 @@ async function loadUserProfile(userId) {
         // Обновляем аватарку
         const avatar = document.querySelector('.avatar');
         if (avatar) {
-            const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(data.fio)}&background=3B82F6&color=fff`;
+            const name = data.full_name || "Аноним";
+            const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=3B82F6&color=fff`;
             avatar.src = avatarUrl;
         }
 
-        // ✅ Обновляем текст профиля
+        // Обновляем текст профиля
         const userNameEl = document.getElementById('userName');
         const userCourseEl = document.getElementById('userCourse');
         const userGroupEl = document.getElementById('userGroup');
 
-        if (userNameEl) userNameEl.textContent = data.fio;
+        if (userNameEl) userNameEl.textContent = data.full_name;
         if (userCourseEl) userCourseEl.textContent = `Курс: ${data.course}`;
         if (userGroupEl) userGroupEl.textContent = `Группа: ${data.group}`;
 
-        console.log("✅ Профиль загружен:", data.fio);
+        console.log("✅ Профиль загружен:", data.full_name);
     } catch (err) {
         console.error("❌ Ошибка загрузки профиля:", err);
+        showError("Не удалось загрузить профиль");
     }
 }
 
 /**
  * Загружает наряды пользователя
  */
-async function loadDuties(userId) {
+async function loadDuties(userId, baseUrl) {
     try {
-        const response = await fetch(`/api/duties?telegram_id=${userId}`);
+        const response = await fetch(`${baseUrl}/api/duties?telegram_id=${userId}`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);

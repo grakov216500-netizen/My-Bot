@@ -1,17 +1,16 @@
-# server.py — FastAPI сервер для Mini App (финальная версия)
+# server.py — FastAPI сервер для Mini App (автоопределение схемы БД)
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
-import json
-import os
 from datetime import datetime
-from database import get_db
+import os
+import sqlite3
 
 app = FastAPI()
 
-# === Настройки CORS ===
+# === CORS (временно разрешено всё) ===
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,140 +19,215 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# === Пути ===
-DATA_DIR = "data"
-SCHEDULES_FILE = os.path.join(DATA_DIR, "schedules.json")
-os.makedirs(DATA_DIR, exist_ok=True)
+# === Путь к БД ===
+DB_PATH = os.path.join(os.path.dirname(__file__), "bot.db")
 
-# === Словарь для расшифровки ролей ===
+# === Словарь ролей ===
 ROLE_NAMES = {
     'к': 'Комендантский',
     'дк': 'Дежурный по каморке',
     'с': 'Столовая',
     'дс': 'Дежурный по столовой',
     'ад': 'Административный',
-    'п': 'Патруль'
+    'п': 'Патруль',
+    'ж': 'Железо',
+    'т': 'Тарелки',
+    'кпп': 'КПП'
 }
 
-def load_all_schedules():
-    """Загружает schedules.json"""
-    if not os.path.exists(SCHEDULES_FILE):
-        return {}
-    try:
-        with open(SCHEDULES_FILE, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            if not content:
-                return {}
-            data = json.loads(content)
-        return data if isinstance(data, dict) else {}
-    except Exception as e:
-        print(f"❌ Ошибка чтения schedules.json: {e}")
-        return {}
+def get_full_role(role_code: str) -> str:
+    return ROLE_NAMES.get(role_code.lower(), role_code.upper())
 
-def get_full_role(role: str) -> str:
-    """Возвращает полное название роли"""
-    return ROLE_NAMES.get(role.lower(), role.title())
+def get_db():
+    """Соединение с БД + Row фабрика"""
+    if not os.path.exists(DB_PATH):
+        print(f"❌ Файл БД не найден: {DB_PATH}")
+        return None
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-# === API: Получить профиль пользователя ===
+# ============================================
+# 1. ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ
+# ============================================
 @app.get("/api/user")
 async def get_user(telegram_id: int):
     conn = get_db()
-    cursor = conn.cursor()
-    # 🔧 Исправлено: запрашиваем enrollment_year вместо course
-    cursor.execute(
-        "SELECT fio, enrollment_year, group_name FROM users WHERE telegram_id = ?", 
-        (telegram_id,)
-    )
-    row = cursor.fetchone()
-    conn.close()
+    if not conn:
+        return {"error": "База данных не найдена"}
 
-    if not row:
-        return {"error": "Пользователь не найден"}
-
-    # 🔢 Рассчитываем курс динамически
     try:
-        from utils.course_calculator import get_current_course
-        current_course = get_current_course(row['enrollment_year'])
-    except ImportError:
-        # На случай, если папка utils не найдена
-        current_year = datetime.now().year
-        current_course = max(1, min(6, current_year - row['enrollment_year'] + 1))
+        # --- Узнаём, какие колонки есть в таблице users ---
+        cursor = conn.execute("PRAGMA table_info(users)")
+        columns = [row['name'] for row in cursor.fetchall()]
+        print(f"[INFO] Колонки в users: {columns}")
 
-    return {
-        "fio": row['fio'],
-        "course": str(current_course),
-        "group": row['group_name']
-    }
+        # --- Определяем имя поля с ФИО ---
+        if 'full_name' in columns:
+            name_col = 'full_name'
+        elif 'fio' in columns:
+            name_col = 'fio'
+        else:
+            return {"error": "В таблице users нет поля для ФИО"}
 
-# === API: Получить наряды пользователя ===
-@app.get("/api/duties")
-async def get_duties(telegram_id: int):
-    schedules = load_all_schedules()
-    if not schedules:
-        return {"error": "График ещё не загружен"}
+        # --- Определяем имя поля с группой ---
+        if 'group_name' in columns:
+            group_col = 'group_name'
+        elif 'group' in columns:
+            group_col = 'group'
+        else:
+            group_col = None   # необязательное поле
 
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT fio FROM users WHERE telegram_id = ?", (telegram_id,))
-    user = cursor.fetchone()
-    conn.close()
+        # --- Формируем запрос динамически ---
+        select_parts = [f"{name_col} as full_name", "enrollment_year"]
+        if group_col:
+            select_parts.append(f"{group_col} as group_name")
+        else:
+            select_parts.append("'' as group_name")
+
+        query = f"SELECT {', '.join(select_parts)} FROM users WHERE telegram_id = ?"
+        user = conn.execute(query, (telegram_id,)).fetchone()
+
+    except Exception as e:
+        print(f"[ERROR] Ошибка запроса пользователя: {e}")
+        return {"error": f"Ошибка БД: {str(e)}"}
+    finally:
+        conn.close()
 
     if not user:
         return {"error": "Пользователь не найден"}
 
-    fio = user['fio']
+    # --- Расчёт курса из enrollment_year ---
+    try:
+        enrollment = int(user['enrollment_year'])
+        current_year = datetime.now().year
+        course = max(1, min(6, current_year - enrollment + 1))
+    except:
+        course = 1
 
-    all_duties = []
-    for month, groups in schedules.items():
-        for group_name, duties in groups.items():
-            if isinstance(duties, list):
-                for duty in duties:
-                    if duty.get('fio') == fio:
-                        all_duties.append({
-                            "date": duty['date'],
-                            "role": duty['role'],
-                            "role_full": get_full_role(duty['role']),
-                            "group": group_name
-                        })
+    return {
+        "full_name": user['full_name'],
+        "course": str(course),
+        "group": user['group_name'] if 'group_name' in user else ""
+    }
 
-    all_duties.sort(key=lambda x: x['date'])
+# ============================================
+# 2. НАРЯДЫ ПОЛЬЗОВАТЕЛЯ
+# ============================================
+@app.get("/api/duties")
+async def get_duties(telegram_id: int):
+    conn = get_db()
+    if not conn:
+        return {"error": "База данных не найдена"}
+
+    try:
+        # --- Получаем user_id ---
+        user = conn.execute(
+            "SELECT id FROM users WHERE telegram_id = ?",
+            (telegram_id,)
+        ).fetchone()
+    except Exception as e:
+        print(f"[ERROR] Ошибка при поиске user_id: {e}")
+        return {"error": f"Ошибка БД: {str(e)}"}
+
+    if not user:
+        conn.close()
+        return {"error": "Пользователь не найден"}
+
+    user_id = user['id']
+
+    try:
+        # --- Проверяем структуру таблицы duties ---
+        cursor = conn.execute("PRAGMA table_info(duties)")
+        columns = [row['name'] for row in cursor.fetchall()]
+        print(f"[INFO] Колонки в duties: {columns}")
+
+        # --- Если есть object_type — используем, иначе пустая строка ---
+        if 'object_type' in columns:
+            query = """
+                SELECT date, role, object_type
+                FROM duties
+                WHERE user_id = ?
+                ORDER BY date
+            """
+            rows = conn.execute(query, (user_id,)).fetchall()
+            duties_list = [
+                {
+                    "date": row['date'],
+                    "role": row['role'],
+                    "role_full": get_full_role(row['role']),
+                    "object": row['object_type'] or "—"
+                }
+                for row in rows
+            ]
+        else:
+            # Если поля object_type нет — только дата и роль
+            query = """
+                SELECT date, role
+                FROM duties
+                WHERE user_id = ?
+                ORDER BY date
+            """
+            rows = conn.execute(query, (user_id,)).fetchall()
+            duties_list = [
+                {
+                    "date": row['date'],
+                    "role": row['role'],
+                    "role_full": get_full_role(row['role']),
+                    "object": "—"
+                }
+                for row in rows
+            ]
+
+    except Exception as e:
+        print(f"[ERROR] Ошибка при запросе нарядов: {e}")
+        return {"error": f"Ошибка БД: {str(e)}"}
+    finally:
+        conn.close()
+
+    # --- Ближайший наряд ---
     today = datetime.now().strftime("%Y-%m-%d")
-    upcoming = [d for d in all_duties if d['date'] >= today]
+    upcoming = [d for d in duties_list if d['date'] >= today]
     next_duty = upcoming[0] if upcoming else None
 
     return {
-        "duties": all_duties,
+        "duties": duties_list,
         "next_duty": next_duty,
-        "total": len(all_duties)
+        "total": len(duties_list)
     }
 
-# === API: Получить всё расписание ===
+# ============================================
+# 3. ВСЁ РАСПИСАНИЕ (заглушка)
+# ============================================
 @app.get("/api/schedule/all")
-async def get_full_schedule(month: str = None):
-    schedules = load_all_schedules()
-    if not schedules:
-        return {"error": "Нет данных"}
+async def get_full_schedule():
+    return {"info": "Модуль в разработке"}
 
-    target_month = month or sorted(schedules.keys(), reverse=True)[0]
-    return schedules.get(target_month, {})
-
-# === Монтируем статику: /static/style.css → работает ===
+# ============================================
+# 4. СТАТИКА И ГЛАВНАЯ
+# ============================================
 app.mount("/static", StaticFiles(directory="app"), name="static")
 
-# === Главная страница Mini App ===
 @app.get("/app", response_class=HTMLResponse)
 async def serve_app():
     file_path = os.path.join("app", "index.html")
     if not os.path.exists(file_path):
-        return HTMLResponse(content="<h1>❌ index.html не найден</h1>", status_code=404)
-    
+        return HTMLResponse("<h1>❌ index.html не найден</h1>", 404)
+
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
-    
-    # 🔧 Надёжная замена путей к CSS/JS
+
+    # Корректировка путей к CSS/JS
     content = content.replace('href="style.css"', 'href="/static/style.css"')
     content = content.replace("href='style.css'", "href='/static/style.css'")
     content = content.replace('src="script.js"', 'src="/static/script.js"')
     content = content.replace("src='script.js'", "src='/static/script.js'")
 
     return HTMLResponse(content=content)
+
+# ============================================
+# 5. ЗАПУСК
+# ============================================
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

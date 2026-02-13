@@ -1,9 +1,8 @@
-# main.py — финальная версия: работает и локально, и на Replit, с Mini App
+# main.py — финальная версия: работает на VPS
 
 import logging
 import os
 import sys
-import threading
 from datetime import datetime
 from typing import Dict, Any
 
@@ -35,7 +34,6 @@ try:
 except ImportError:
     print("📁 .env не найден — работает в облаке (Replit)")
 
-
 # === Настройка логирования ===
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -43,15 +41,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-# === Определяем, где запущен: локально или в облаке ===
-IS_REPLIT = "REPL_SLUG" in os.environ
-IS_LOCAL = not IS_REPLIT
-
-
-# === Загружаем переменные: в зависимости от среды ===
-TOKEN = os.getenv("TOKEN")
+# === Загружаем переменные: используем BOT_TOKEN ===
+TOKEN = os.getenv("BOT_TOKEN")  # ← Ключевое исправление: было TOKEN, стало BOT_TOKEN
 ADMIN_ID_STR = os.getenv("ADMIN_ID", "1027070834")
+
+if not TOKEN:
+    logger.critical("❌ Не задан BOT_TOKEN в .env файле!")
+    sys.exit(1)
 
 try:
     ADMIN_ID = int(ADMIN_ID_STR)
@@ -70,8 +66,7 @@ if DATABASE == "bot.dbP":
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs("utils", exist_ok=True)
 os.makedirs("handlers", exist_ok=True)
-os.makedirs("data", exist_ok=True)  # Для schedules.json и др.
-
+os.makedirs("data", exist_ok=True)
 
 # === Отложенные импорты ===
 def import_modules():
@@ -82,7 +77,7 @@ def import_modules():
     global tasks_router, profile_router, get_profile_edit_handler
     global admin_router, assistant_router, edit_schedule_handler
     global load_all_schedules, handle_duty_date_input, handle_global_duty_date_input
-    global handle_excel_upload  # Добавили явно
+    global handle_excel_upload
 
     try:
         from database import check_and_update_courses, init_db, get_db
@@ -179,7 +174,6 @@ def import_modules():
         logger.critical(f"❌ Ошибка загрузки utils.storage: {e}")
         sys.exit(1)
 
-
 import_modules()
 
 # === ПЕРЕДАЁМ ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ В МОДУЛИ ===
@@ -200,7 +194,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Бот запущен. Используйте /menu для главного меню.")
         except:
             pass
-
 
 # === Единый обработчик текста ===
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -230,7 +223,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"❌ Ошибка в handle_text: {e}", exc_info=True)
 
-
 # === Загрузка editors из БД ===
 def load_editors_from_db(application):
     try:
@@ -258,7 +250,6 @@ def load_editors_from_db(application):
         logger.info(f"🟢 Загружено {len(editors)} редакторов")
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки editors: {e}", exc_info=True)
-
 
 # === post_init — инициализация при старте ===
 async def post_init(application):
@@ -337,43 +328,19 @@ async def post_init(application):
 
     logger.info("✅ post_init завершён")
 
-
 # === Обработчик ошибок ===
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("❗ Произошла ошибка", exc_info=context.error)
 
-
-# === ЗАПУСК: БОТ + API ===
+# === ЗАПУСК: ТОЛЬКО БОТ (FastAPI — отдельно через uvicorn) ===
 if __name__ == "__main__":
-    # --- 1. Запуск keep_alive.py (Flask) ---
+    logger.info("🤖 Запуск Telegram-бота...")
+
+    # Инициализация persistence
+    persistence = PicklePersistence(filepath="bot_data.pkl")
+
+    # Создаём приложение
     try:
-        from keep_alive import keep_alive
-        keep_alive()  # Запускает Flask-сервер в фоне
-        logger.info("🌐 keep_alive.py запущен — Replit не уснёт")
-    except Exception as e:
-        logger.warning(f"⚠️ Ошибка запуска keep_alive: {e}")
-
-    # --- 2. Запуск FastAPI (server.py) ---
-    try:
-        import uvicorn
-        from server import app as fastapi_app
-
-        def run_fastapi():
-            uvicorn.run(fastapi_app, host="0.0.0.0", port=8000, log_level="info")
-
-        threading.Thread(target=run_fastapi, daemon=True).start()
-        logger.info("🚀 FastAPI сервер запущен на порту 8000")
-    except Exception as e:
-        logger.error(f"❌ Ошибка запуска FastAPI: {e}")
-
-    # --- 3. Запуск Telegram-бота ---
-    try:
-        logger.info("🤖 Запуск Telegram-бота...")
-
-        # Инициализация persistence
-        persistence = PicklePersistence(filepath="bot_data.pkl")
-
-        # Создаём приложение
         application = ApplicationBuilder() \
             .token(TOKEN) \
             .persistence(persistence) \
@@ -391,50 +358,41 @@ if __name__ == "__main__":
             else:
                 logger.warning("⚠️ get_registration_handler вернул None")
 
-        # Добавляем edit_schedule_handler
         application.add_handler(edit_schedule_handler)
         logger.info("✅ Обработчик редактирования графика добавлен")
 
-        # Добавляем back_router
         application.add_handler(back_router)
         logger.info("✅ back_router добавлен")
 
-        # Меню
         for handler in menu_router:
             application.add_handler(handler)
         logger.info("✅ Обработчики меню добавлены")
 
-        # Мои наряды
         for handler in my_duties_router:
             application.add_handler(handler)
         logger.info("✅ Обработчики my_duties добавлены")
 
-        # Задачи
         for handler in tasks_router:
             application.add_handler(handler)
         logger.info("✅ Обработчики задач добавлены")
 
-        # Профиль
         for handler in profile_router:
             application.add_handler(handler)
         logger.info("✅ Обработчики профиля добавлены")
 
-        # Редактирование профиля
         if 'get_profile_edit_handler' in globals() and callable(get_profile_edit_handler):
             application.add_handler(get_profile_edit_handler())
             logger.info("✅ Обработчик редактирования профиля добавлен")
 
-        # Админ
         for handler in admin_router:
             application.add_handler(handler)
         logger.info("✅ Обработчики админа добавлены")
 
-        # Ассистент
         for handler in assistant_router:
             application.add_handler(handler)
         logger.info("✅ Обработчики ассистента добавлены")
 
-        # === ЗАГРУЗКА EXCEL (.xlsx) — до текста ===
+        # === ЗАГРУЗКА EXCEL (.xlsx) ===
         try:
             application.add_handler(
                 MessageHandler(
@@ -446,7 +404,7 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f"❌ Ошибка подключения обработчика Excel: {e}")
 
-        # === ГЛОБАЛЬНЫЙ ТЕКСТОВОЙ ОБРАБОТЧИК — В КОНЦЕ ===
+        # === ГЛОБАЛЬНЫЙ ТЕКСТОВОЙ ОБРАБОТЧИК ===
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
         logger.info("✅ Глобальный текстовый обработчик добавлен")
 
