@@ -3,33 +3,98 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="theme-color" content="#1f2937" />
   <title>VITECHBOT</title>
-  <!-- ✅ Пути к статике -->
-  <link rel="stylesheet" href="/static/style.css" />
-  <script src="/static/script.js" defer></script>
+
+  <!-- 🔁 Универсальные пути: работают везде -->
+  <link rel="stylesheet" href="./style.css" />
+  <script src="./script.js" defer></script>
+
+  <!-- 🎨 Стили под Telegram (тёмная тема) -->
+  <style>
+    body {
+      background-color: #1f2937;
+      color: #e5e7eb;
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 0;
+      min-height: 100vh;
+    }
+
+    .header {
+      background: #374151;
+      padding: 16px 20px;
+      border-bottom: 1px solid #4b5563;
+    }
+
+    .avatar {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+
+    .profile-info {
+      color: #f3f4f6;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .widget {
+      background: #374151;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    h3 {
+      color: #d1d5db;
+      margin: 0 0 8px 0;
+    }
+
+    .menu-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .menu-item {
+      background: #374151;
+      border-radius: 12px;
+      padding: 16px 8px;
+      text-align: center;
+      color: #f3f4f6;
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    .menu-icon {
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
+  </style>
 </head>
 <body>
   <!-- Шапка с динамическим профилем -->
   <header class="header">
     <div class="user-section" style="display: flex; align-items: center; gap: 12px;">
-      <!-- Аватар обновляется через script.js -->
       <img src="https://ui-avatars.com/api/?name=Загрузка...&background=3B82F6&color=fff" 
            alt="Аватар" class="avatar" />
-      <div class="profile-info" style="color: #E2E8F0; font-size: 14px;">
-        <!-- Эти элементы обновятся через JS -->
+      <div class="profile-info">
         <p id="userName">Загрузка...</p>
         <p id="userCourse">Курс: —</p>
         <p id="userGroup">Группа: —</p>
       </div>
     </div>
     <div class="header-icons">
-      <button class="icon-btn" onclick="openNotifications()">🔔</button>
-      <button class="icon-btn" onclick="openSettings()">⋮</button>
+      <button class="icon-btn" onclick="openNotifications()" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">🔔</button>
+      <button class="icon-btn" onclick="openSettings()" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">⋮</button>
     </div>
   </header>
 
   <!-- Основные виджеты -->
-  <main class="main">
+  <main class="main" style="padding: 16px;">
     <!-- Погода -->
     <div class="widget">
       <h3>🌡️ Погода в Воронеже</h3>
@@ -39,10 +104,10 @@
     <!-- Расписание -->
     <div class="widget">
       <h3>📚 Расписание на сегодня</h3>
-      <ul class="schedule-list">
-        <li>9:00 — Математика (310) — Иванов И.И.</li>
-        <li>11:00 — Физика (215) — Петров П.П.</li>
-        <li>14:00 — Химия (405) — Сидорова А.К.</li>
+      <ul class="schedule-list" style="list-style: none; padding: 0; margin: 0;">
+        <li style="margin-bottom: 6px;">9:00 — Математика (310) — Иванов И.И.</li>
+        <li style="margin-bottom: 6px;">11:00 — Физика (215) — Петров П.П.</li>
+        <li style="margin-bottom: 6px;">14:00 — Химия (405) — Сидорова А.К.</li>
         <li>16:00 — Физ-ра (стадион) — Козлов В.С.</li>
       </ul>
     </div>
@@ -56,9 +121,9 @@
     <!-- Уведомления -->
     <div class="widget">
       <h3>🔔 Уведомления</h3>
-      <ul class="notification-list">
-        <li>Сержант: График изменён на 15.02</li>
-        <li>Админ: Отмена пары по физике</li>
+      <ul class="notification-list" style="list-style: none; padding: 0; margin: 0;">
+        <li style="margin-bottom: 6px;">Сержант: График изменён на 15.02</li>
+        <li style="margin-bottom: 6px;">Админ: Отмена пары по физике</li>
         <li>Система: Напоминание: сдать форму</li>
       </ul>
     </div>
