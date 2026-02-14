@@ -6,238 +6,35 @@
   <meta name="theme-color" content="#1f2937" />
   <title>VITECHBOT</title>
 
-  <!-- 🔁 Подключаем стили и скрипты -->
+  <!-- Подключаем внешние стили и скрипты -->
   <link rel="stylesheet" href="./style.css" />
   <script src="./script.js" defer></script>
 
-  <!-- 🎨 Стили под Telegram (тёмная тема) -->
+  <!-- Дополнительные стили для верхней панели (можно позже перенести в style.css) -->
   <style>
-    body {
-      background-color: #1f2937;
-      color: #e5e7eb;
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      padding: 0;
-      min-height: 100vh;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .header {
-      background: #374151;
-      padding: 16px 20px;
-      border-bottom: 1px solid #4b5563;
+    .top-icon-panel {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .avatar {
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      object-fit: cover;
-    }
-
-    .profile-info {
-      color: #f3f4f6;
-      font-size: 14px;
-      line-height: 1.4;
-    }
-
-    .widget {
-      background: #374151;
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-
-    h3 {
-      color: #d1d5db;
-      margin: 0 0 8px 0;
-    }
-
-    .menu-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 12px;
-      margin-top: 20px;
-    }
-
-    .menu-item {
-      background: #374151;
-      border-radius: 12px;
-      padding: 16px 8px;
-      text-align: center;
-      color: #f3f4f6;
-      text-decoration: none;
-      font-size: 13px;
-    }
-
-    .menu-icon {
-      font-size: 20px;
-      margin-bottom: 4px;
-    }
-
-    /* === НОВОЕ: Экран заметок (скрыт по умолчанию) === */
-    #notes-screen {
-      display: none;
-      padding: 16px;
-      animation: fadeIn 0.3s ease;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    .search-bar {
-      display: flex;
-      align-items: center;
-      background: #374151;
-      border-radius: 8px;
-      padding: 8px 12px;
-      margin-bottom: 16px;
-    }
-
-    .search-bar svg {
-      fill: #8e8e93;
-      margin-right: 8px;
-    }
-
-    #search-input {
-      flex: 1;
-      border: none;
-      background: transparent;
-      font-size: 15px;
-      outline: none;
-      color: #e5e7eb;
-    }
-
-    .task-list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .task-card {
-      display: flex;
-      align-items: center;
-      background: #374151;
-      border-radius: 12px;
-      padding: 12px 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      font-size: 15px;
-    }
-
-    .task-checkbox {
-      width: 20px;
-      height: 20px;
-      border: 2px solid #6b7280;
-      border-radius: 6px;
-      margin-right: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      cursor: pointer;
-    }
-
-    .task-checkbox.checked {
-      background: #007AFF;
-      border-color: #007AFF;
-      color: white;
-      font-size: 14px;
-    }
-
-    .task-text {
-      flex: 1;
-      word-break: break-word;
-    }
-
-    .task-actions button {
-      background: none;
-      border: none;
-      font-size: 18px;
-      cursor: pointer;
-      color: #8e8e93;
-      margin-left: 8px;
-    }
-
-    .task-actions button:hover {
-      color: #007AFF;
-    }
-
-    /* === Круглая кнопка + === */
-    #add-task-fab {
-      position: absolute;
-      right: 20px;
-      bottom: 80px;
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      background: #007AFF;
-      color: white;
-      font-size: 24px;
-      border: none;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      cursor: pointer;
+      justify-content: space-around;
+      padding: 10px 0;
+      background: #1f2937;
+      border-bottom: 1px solid #374151;
+      position: sticky;
+      top: 0;
       z-index: 10;
-      display: none;
     }
-
-    /* === Фиксированная нижняя панель === */
-    .bottom-nav {
-      display: none;
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 60px;
-      background: #374151;
-      border-top: 1px solid #4b5563;
-      display: flex;
-      z-index: 100;
-    }
-
-    .nav-item {
-      flex: 1;
+    .top-icon-panel .icon-item {
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      text-decoration: none;
-      color: #8e8e93;
-      font-size: 10px;
-      position: relative;
+      cursor: pointer;
     }
-
-    .nav-item svg {
-      width: 20px;
-      height: 20px;
+    .top-icon-panel .icon {
+      font-size: 20px;
       margin-bottom: 2px;
     }
-
-    .nav-item.active::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 10%;
-      width: 80%;
-      height: 32px;
-      background: #007AFF;
-      border-radius: 12px;
-      z-index: -1;
-    }
-
-    .main {
-      padding: 16px;
-      display: block;
-    }
-
-    /* Скрываем основной экран, когда открыт notes */
-    .main.hidden {
-      display: none;
+    .top-icon-panel .icon-label {
+      font-size: 10px;
+      color: #9ca3af;
     }
   </style>
 </head>
@@ -258,6 +55,30 @@
       <button class="icon-btn" onclick="openSettings()">⋮</button>
     </div>
   </header>
+
+  <!-- Верхняя панель быстрого доступа (пять иконок) -->
+  <div class="top-icon-panel">
+    <div class="icon-item" onclick="switchTab('duties')">
+      <span class="icon">📅</span>
+      <span class="icon-label">Наряды</span>
+    </div>
+    <div class="icon-item" onclick="switchTab('schedule')">
+      <span class="icon">🗂️</span>
+      <span class="icon-label">Распис.</span>
+    </div>
+    <div class="icon-item" onclick="switchTab('study')">
+      <span class="icon">📚</span>
+      <span class="icon-label">Учёба</span>
+    </div>
+    <div class="icon-item" onclick="switchTab('notes')">
+      <span class="icon">✅</span>
+      <span class="icon-label">Заметки</span>
+    </div>
+    <div class="icon-item" onclick="switchTab('rating')">
+      <span class="icon">🏆</span>
+      <span class="icon-label">Рейтинг</span>
+    </div>
+  </div>
 
   <!-- Основной контент (виджеты) -->
   <main class="main" id="main-content">
@@ -314,23 +135,21 @@
     </div>
   </main>
 
-  <!-- === ЭКРАН ЗАМЕТОК === -->
+  <!-- Экран заметок (изначально скрыт) -->
   <div id="notes-screen">
     <div class="search-bar">
       <svg width="16" height="16" fill="currentColor"><path d="M15.5 14.3l-3.7-3.7c1.2-1.5 1.8-3.4 1.5-5.3-0.4-2.3-2.2-4.1-4.5-4.5-3.9-0.8-7.2 2.4-6.4 6.3 0.4 2.3 2.2 4.1 4.5 4.5 1.9 0.3 3.8-0.3 5.3-1.5l3.7 3.7c0.4 0.4 1 0.4 1.4 0s0.4-1 0-1.4z"/></svg>
       <input type="text" id="search-input" placeholder="Поиск по задачам..." />
     </div>
-
     <div class="task-list" id="task-list">
-      <!-- Сюда будут добавляться задачи -->
       <p style="color: #6b7280; text-align: center;">Загрузка задач...</p>
     </div>
   </div>
 
-  <!-- === КНОПКА ДОБАВЛЕНИЯ === -->
+  <!-- Кнопка добавления задачи -->
   <button id="add-task-fab" onclick="startAddTask()">+</button>
 
-  <!-- === НИЖНЯЯ ПАНЕЛЬ (фиксируется) === -->
+  <!-- Нижняя панель навигации -->
   <nav class="bottom-nav" id="bottom-nav">
     <a href="#home" class="nav-item active" data-tab="home">
       <svg><use xlink:href="#icon-home"/></svg>
@@ -349,7 +168,7 @@
     </a>
   </nav>
 
-  <!-- === ИКОНКИ (спрятаны) === -->
+  <!-- Иконки SVG (скрыты) -->
   <svg style="display: none;">
     <symbol id="icon-home" viewBox="0 0 24 24">
       <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
@@ -368,7 +187,7 @@
     </symbol>
   </svg>
 
-  <!-- === МОДАЛЬНОЕ МЕНЮ (три точки) === -->
+  <!-- Модальное меню для задач -->
   <div class="modal" id="task-menu" style="display:none;">
     <div class="modal-content">
       <div class="menu-item" id="edit-task">✏️ Редактировать</div>

@@ -6,8 +6,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     let baseUrl;
 
     if (CURRENT_HOST.includes('github.io')) {
-        // На GitHub Pages → API на VPS
-        baseUrl = "http://85.239.60.6:8000";
+        // На GitHub Pages → API на VPS (теперь по HTTPS)
+        baseUrl = "https://vitechbot.online";
     } else {
         // На VPS → относительный путь
         baseUrl = "";
