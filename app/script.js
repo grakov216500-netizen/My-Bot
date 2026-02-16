@@ -1,11 +1,10 @@
-// Глобальные переменные (объявляем ДО обработчика)
+// Глобальные переменные
 let baseUrl = '';
 let userId = null;
 let tasks = [];
 const taskMap = {};
 
 document.addEventListener('DOMContentLoaded', async () => {
-    // === Определяем baseUrl: зависит от того, где запущено ===
     const CURRENT_HOST = window.location.hostname;
 
     if (CURRENT_HOST.includes('github.io')) {
@@ -14,83 +13,72 @@ document.addEventListener('DOMContentLoaded', async () => {
         baseUrl = "";
     }
 
-    // === Определяем пользователя: из Telegram или тестовый ID ===
     if (window.Telegram && window.Telegram.WebApp) {
         window.Telegram.WebApp.expand();
         const user = window.Telegram.WebApp.initDataUnsafe.user;
         userId = user?.id;
-
         if (!userId) {
             console.warn("⚠️ Не удалось получить user.id из Telegram");
             return showError("Не удалось определить пользователя");
         }
     } else {
-        // 🔧 Режим тестирования (если открыть в браузере)
         userId = 1027070834;
         console.log("🔧 Тестовый режим: userId =", userId);
     }
 
     console.log("✅ Загружаем данные для пользователя:", userId);
 
-    // Инициализация интерфейса
     setupNavigation();
     setupEventListeners();
 
-    // Загружаем профиль и наряды
     await loadUserProfile(userId);
     await loadDuties(userId);
 });
 
-// --- Глобальные переменные (уже объявлены выше) ---
 let currentTab = 'home';
 
-/**
- * Инициализация навигации
- */
 function setupNavigation() {
     switchTab('home');
 }
 
-/**
- * Назначение обработчиков
- */
 function setupEventListeners() {
     const addBtn = document.getElementById('add-task-fab');
-    if (addBtn) {
-        addBtn.addEventListener('click', startAddTask);
-    }
+    if (addBtn) addBtn.addEventListener('click', startAddTask);
 
     const closeMenu = document.getElementById('close-menu');
-    if (closeMenu) {
-        closeMenu.addEventListener('click', () => hideModal());
-    }
+    if (closeMenu) closeMenu.addEventListener('click', hideModal);
 
     const searchInput = document.getElementById('search-input');
-    if (searchInput) {
-        searchInput.addEventListener('input', filterTasks);
-    }
+    if (searchInput) searchInput.addEventListener('input', filterTasks);
 }
 
-/**
- * Переключение вкладок (панель всегда видна)
- */
 function switchTab(tabName) {
     currentTab = tabName;
 
-    // Скрываем/показываем нужный экран
+    // Скрываем все экраны
     document.getElementById('main-content').classList.add('hidden');
     document.getElementById('notes-screen').style.display = 'none';
+    document.getElementById('duties-screen').style.display = 'none';
+    document.getElementById('study-screen').style.display = 'none';
+    document.getElementById('rating-screen').style.display = 'none';
     document.getElementById('add-task-fab').style.display = 'none';
 
+    // Показываем нужный экран
     if (tabName === 'notes') {
         document.getElementById('notes-screen').style.display = 'block';
         document.getElementById('add-task-fab').style.display = 'flex';
         loadTasks();
-    } else {
+    } else if (tabName === 'duties') {
+        document.getElementById('duties-screen').style.display = 'block';
+    } else if (tabName === 'study') {
+        document.getElementById('study-screen').style.display = 'block';
+    } else if (tabName === 'rating') {
+        document.getElementById('rating-screen').style.display = 'block';
+    } else { // home
         document.getElementById('main-content').classList.remove('hidden');
     }
 
-    // Обновляем активную иконку в нижней панели
+    // Обновляем активную иконку
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.tab === tabName);
     });
