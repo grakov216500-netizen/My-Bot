@@ -1,4 +1,4 @@
-# server.py — FastAPI сервер для Mini App (с поддержкой задачника и корректным курсом)
+# server.py — FastAPI сервер для Mini App (финальная версия, с исправлением группы)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,7 +51,7 @@ def get_db():
     return conn
 
 # ============================================
-# 1. ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ
+# 1. ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (ИСПРАВЛЕНО)
 # ============================================
 @app.get("/api/user")
 async def get_user(telegram_id: int):
@@ -89,36 +89,33 @@ async def get_user(telegram_id: int):
             select_parts.append("'' as group_name")
 
         query = f"SELECT {', '.join(select_parts)} FROM users WHERE telegram_id = ?"
-        user = conn.execute(query, (telegram_id,)).fetchone()
+        row = conn.execute(query, (telegram_id,)).fetchone()
 
-        # Добавим отладку
-        if user:
-            print(f"[DEBUG] Данные из БД для {telegram_id}: {dict(user)}")
-        else:
-            print(f"[DEBUG] Пользователь {telegram_id} не найден")
+        if not row:
+            return {"error": "Пользователь не найден"}
+
+        # КОПИРУЕМ ДАННЫЕ В ОБЫЧНЫЙ СЛОВАРЬ (это важно!)
+        user_data = dict(row)
+        print(f"[DEBUG] Данные из БД для {telegram_id}: {user_data}")
 
     except Exception as e:
         print(f"[ERROR] Ошибка запроса пользователя: {e}")
         return {"error": f"Ошибка БД: {str(e)}"}
     finally:
-        conn.close()
-
-    if not user:
-        return {"error": "Пользователь не найден"}
+        conn.close()  # соединение закрыто, но данные уже скопированы
 
     # --- Расчёт курса с помощью course_calculator ---
     try:
-        enrollment = int(user['enrollment_year'])
-        # Используем правильную функцию
+        enrollment = int(user_data['enrollment_year'])
         course = get_current_course(enrollment)
     except Exception as e:
         print(f"[ERROR] Ошибка расчёта курса: {e}")
         course = 1
 
     return {
-        "full_name": user['full_name'],
+        "full_name": user_data['full_name'],
         "course": str(course),
-        "group": user['group_name'] if 'group_name' in user else ""
+        "group": user_data.get('group_name', '')
     }
 
 # ============================================
@@ -400,9 +397,13 @@ async def get_full_schedule():
 
 
 # ============================================
-# 5. СТАТИКА И ГЛАВНАЯ
+# 5. СТАТИКА И ГЛАВНАЯ (исправлено: не подменяем пути)
 # ============================================
-app.mount("/static", StaticFiles(directory="app"), name="static")
+# Если ты не используешь прямой доступ к /app на сервере,
+# этот блок можно вообще удалить или закомментировать.
+# Оставим его, но без подмены путей, чтобы при открытии /app
+# браузер искал style.css и script.js в той же папке (./) на сервере.
+# Если они там не нужны, просто удали этот эндпоинт.
 
 @app.get("/app", response_class=HTMLResponse)
 async def serve_app():
@@ -413,12 +414,7 @@ async def serve_app():
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Корректировка путей к CSS/JS
-    content = content.replace('href="style.css"', 'href="/static/style.css"')
-    content = content.replace("href='style.css'", "href='/static/style.css'")
-    content = content.replace('src="script.js"', 'src="/static/script.js"')
-    content = content.replace("src='script.js'", "src='/static/script.js'")
-
+    # НИКАКОЙ ПОДМЕНЫ — оставляем пути как в исходном HTML
     return HTMLResponse(content=content)
 
 
