@@ -1,23 +1,22 @@
-// app/script.js — финальная версия (с full_name + гибкий baseUrl + задачник)
+// Глобальные переменные (объявляем ДО обработчика)
+let baseUrl = '';
+let userId = null;
+let tasks = [];
+const taskMap = {};
 
 document.addEventListener('DOMContentLoaded', async () => {
     // === Определяем baseUrl: зависит от того, где запущено ===
     const CURRENT_HOST = window.location.hostname;
-    let baseUrl;
 
     if (CURRENT_HOST.includes('github.io')) {
-        // На GitHub Pages → API на VPS (теперь по HTTPS)
         baseUrl = "https://vitechbot.online";
     } else {
-        // На VPS → относительный путь
         baseUrl = "";
     }
 
-    let userId;
-
     // === Определяем пользователя: из Telegram или тестовый ID ===
     if (window.Telegram && window.Telegram.WebApp) {
-        window.Telegram.WebApp.expand(); // На весь экран
+        window.Telegram.WebApp.expand();
         const user = window.Telegram.WebApp.initDataUnsafe.user;
         userId = user?.id;
 
@@ -26,7 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return showError("Не удалось определить пользователя");
         }
     } else {
-        // 🔧 Режим тестирования
+        // 🔧 Режим тестирования (если открыть в браузере)
         userId = 1027070834;
         console.log("🔧 Тестовый режим: userId =", userId);
     }
@@ -38,21 +37,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
 
     // Загружаем профиль и наряды
-    await loadUserProfile(userId, baseUrl);
-    await loadDuties(userId, baseUrl);
+    await loadUserProfile(userId);
+    await loadDuties(userId);
 });
 
-// --- Глобальные переменные ---
+// --- Глобальные переменные (уже объявлены выше) ---
 let currentTab = 'home';
-let userId = null;
-let tasks = [];
-const taskMap = {}; // { id: task }
 
 /**
  * Инициализация навигации
  */
 function setupNavigation() {
-    // Показываем основную вкладку
     switchTab('home');
 }
 
@@ -60,19 +55,16 @@ function setupNavigation() {
  * Назначение обработчиков
  */
 function setupEventListeners() {
-    // Кнопка добавления задачи
     const addBtn = document.getElementById('add-task-fab');
     if (addBtn) {
         addBtn.addEventListener('click', startAddTask);
     }
 
-    // Модальное меню
     const closeMenu = document.getElementById('close-menu');
     if (closeMenu) {
         closeMenu.addEventListener('click', () => hideModal());
     }
 
-    // Поиск
     const searchInput = document.getElementById('search-input');
     if (searchInput) {
         searchInput.addEventListener('input', filterTasks);
@@ -85,26 +77,20 @@ function setupEventListeners() {
 function switchTab(tabName) {
     currentTab = tabName;
 
-    // Скрываем всё
     document.getElementById('main-content').classList.add('hidden');
     document.getElementById('notes-screen').style.display = 'none';
     document.getElementById('bottom-nav').style.display = 'none';
     document.getElementById('add-task-fab').style.display = 'none';
 
     if (tabName === 'notes') {
-        // Показываем задачник
         document.getElementById('notes-screen').style.display = 'block';
         document.getElementById('bottom-nav').style.display = 'flex';
         document.getElementById('add-task-fab').style.display = 'flex';
-
-        // Загружаем задачи
         loadTasks();
     } else {
-        // Показываем основной экран
         document.getElementById('main-content').classList.remove('hidden');
     }
 
-    // Обновляем активную иконку
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.tab === tabName);
     });
@@ -117,7 +103,6 @@ async function loadTasks() {
     try {
         const response = await fetch(`${baseUrl}/api/tasks?user_id=${userId}`);
         tasks = await response.json();
-
         renderTaskList();
         console.log(`✅ Загружено ${tasks.length} задач`);
     } catch (err) {
@@ -147,7 +132,6 @@ function renderTaskList(filterText = '') {
         div.className = `task-card ${task.done ? 'task-done' : ''}`;
         div.dataset.id = task.id;
 
-        // Галочка
         const checkbox = document.createElement('div');
         checkbox.className = `task-checkbox ${task.done ? 'checked' : ''}`;
         checkbox.onclick = (e) => {
@@ -155,12 +139,10 @@ function renderTaskList(filterText = '') {
             toggleTaskDone(task.id);
         };
 
-        // Текст
         const textSpan = document.createElement('span');
         textSpan.className = 'task-text';
         textSpan.textContent = task.text;
 
-        // Действия
         const actions = document.createElement('div');
         actions.className = 'task-actions';
 
@@ -191,17 +173,11 @@ function renderTaskList(filterText = '') {
     });
 }
 
-/**
- * Фильтрация по поиску
- */
 function filterTasks() {
     const query = document.getElementById('search-input').value;
     renderTaskList(query);
 }
 
-/**
- * Переключение статуса задачи
- */
 async function toggleTaskDone(taskId) {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
@@ -223,9 +199,6 @@ async function toggleTaskDone(taskId) {
     }
 }
 
-/**
- * Начало добавления задачи
- */
 async function startAddTask() {
     const text = prompt("Введите текст задачи:");
     if (!text || !text.trim()) return;
@@ -238,7 +211,7 @@ async function startAddTask() {
         });
 
         if (response.ok) {
-            await loadTasks(); // Обновляем список
+            await loadTasks();
             console.log("✅ Задача добавлена");
         }
     } catch (err) {
@@ -246,29 +219,19 @@ async function startAddTask() {
     }
 }
 
-/**
- * Открытие меню задачи (⋮)
- */
 function openTaskMenu(taskId) {
     const menu = document.getElementById('task-menu');
     menu.style.display = 'flex';
 
-    // Назначаем действия
     document.getElementById('edit-task').onclick = () => editTask(taskId);
     document.getElementById('delete-task').onclick = () => deleteTask(taskId);
     document.getElementById('set-reminder').onclick = () => setReminder(taskId);
 }
 
-/**
- * Скрытие модального окна
- */
 function hideModal() {
     document.getElementById('task-menu').style.display = 'none';
 }
 
-/**
- * Редактирование задачи
- */
 async function editTask(taskId) {
     hideModal();
     const task = tasks.find(t => t.id === taskId);
@@ -292,9 +255,6 @@ async function editTask(taskId) {
     }
 }
 
-/**
- * Удаление задачи
- */
 async function deleteTask(taskId) {
     hideModal();
     if (!confirm("Удалить задачу?")) return;
@@ -314,9 +274,6 @@ async function deleteTask(taskId) {
     }
 }
 
-/**
- * Установка напоминания
- */
 async function setReminder(taskId) {
     hideModal();
     const dateStr = prompt("Введите дату и время (ДД ЧЧ:ММ):", "05 20:30");
@@ -350,15 +307,13 @@ async function setReminder(taskId) {
             body: JSON.stringify({ task_id: taskId, deadline, user_id: userId })
         });
 
-        loadTasks(); // Обновляем
+        loadTasks();
         alert("✅ Напоминание установлено");
     } catch (err) {
         console.error("❌ Ошибка установки напоминания:", err);
         alert("Ошибка при установке напоминания");
     }
 }
-
-// === Остальные функции (остаются без изменений) ===
 
 function showError(message) {
     const widget = document.getElementById('next-duty-widget');
@@ -368,7 +323,7 @@ function showError(message) {
     console.error("❌", message);
 }
 
-async function loadUserProfile(userId, baseUrl) {
+async function loadUserProfile(userId) {
     try {
         const response = await fetch(`${baseUrl}/api/user?telegram_id=${userId}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -396,7 +351,7 @@ async function loadUserProfile(userId, baseUrl) {
     }
 }
 
-async function loadDuties(userId, baseUrl) {
+async function loadDuties(userId) {
     try {
         const response = await fetch(`${baseUrl}/api/duties?telegram_id=${userId}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -445,7 +400,6 @@ function formatDate(dateStr) {
     return new Date(dateStr).toLocaleDateString('ru-RU', options);
 }
 
-// === Кнопки ===
 function openNotifications() {
     alert("🔔 Уведомления\n(в разработке)");
 }
