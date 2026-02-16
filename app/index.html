@@ -6,37 +6,9 @@
   <meta name="theme-color" content="#1f2937" />
   <title>VITECHBOT</title>
 
-  <!-- Подключаем внешние стили и скрипты -->
+  <!-- Подключаем внешние стили и скрипты (относительные пути) -->
   <link rel="stylesheet" href="./style.css" />
   <script src="./script.js" defer></script>
-
-  <!-- Дополнительные стили для верхней панели (можно позже перенести в style.css) -->
-  <style>
-    .top-icon-panel {
-      display: flex;
-      justify-content: space-around;
-      padding: 10px 0;
-      background: #1f2937;
-      border-bottom: 1px solid #374151;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-    }
-    .top-icon-panel .icon-item {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      cursor: pointer;
-    }
-    .top-icon-panel .icon {
-      font-size: 20px;
-      margin-bottom: 2px;
-    }
-    .top-icon-panel .icon-label {
-      font-size: 10px;
-      color: #9ca3af;
-    }
-  </style>
 </head>
 <body>
   <!-- Шапка -->
@@ -55,30 +27,6 @@
       <button class="icon-btn" onclick="openSettings()">⋮</button>
     </div>
   </header>
-
-  <!-- Верхняя панель быстрого доступа (пять иконок) -->
-  <div class="top-icon-panel">
-    <div class="icon-item" onclick="switchTab('duties')">
-      <span class="icon">📅</span>
-      <span class="icon-label">Наряды</span>
-    </div>
-    <div class="icon-item" onclick="switchTab('schedule')">
-      <span class="icon">🗂️</span>
-      <span class="icon-label">Распис.</span>
-    </div>
-    <div class="icon-item" onclick="switchTab('study')">
-      <span class="icon">📚</span>
-      <span class="icon-label">Учёба</span>
-    </div>
-    <div class="icon-item" onclick="switchTab('notes')">
-      <span class="icon">✅</span>
-      <span class="icon-label">Заметки</span>
-    </div>
-    <div class="icon-item" onclick="switchTab('rating')">
-      <span class="icon">🏆</span>
-      <span class="icon-label">Рейтинг</span>
-    </div>
-  </div>
 
   <!-- Основной контент (виджеты) -->
   <main class="main" id="main-content">
@@ -110,29 +58,6 @@
         <li>Система: Напоминание: сдать форму</li>
       </ul>
     </div>
-
-    <div class="menu-grid">
-      <a href="#duties" class="menu-item" onclick="switchTab('duties')">
-        <div class="menu-icon">📅</div>
-        <span>Наряды</span>
-      </a>
-      <a href="#schedule" class="menu-item" onclick="switchTab('schedule')">
-        <div class="menu-icon">🗂️</div>
-        <span>Распис.</span>
-      </a>
-      <a href="#study" class="menu-item" onclick="switchTab('study')">
-        <div class="menu-icon">📚</div>
-        <span>Учёба</span>
-      </a>
-      <a href="#notes" class="menu-item" onclick="switchTab('notes')">
-        <div class="menu-icon">✅</div>
-        <span>Заметки</span>
-      </a>
-      <a href="#rating" class="menu-item" onclick="switchTab('rating')">
-        <div class="menu-icon">🏆</div>
-        <span>Рейтинг</span>
-      </a>
-    </div>
   </main>
 
   <!-- Экран заметок (изначально скрыт) -->
@@ -149,7 +74,7 @@
   <!-- Кнопка добавления задачи -->
   <button id="add-task-fab" onclick="startAddTask()">+</button>
 
-  <!-- Нижняя панель навигации -->
+  <!-- Нижняя панель навигации (всегда видна) -->
   <nav class="bottom-nav" id="bottom-nav">
     <a href="#home" class="nav-item active" data-tab="home">
       <svg><use xlink:href="#icon-home"/></svg>

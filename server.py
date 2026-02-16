@@ -1,4 +1,4 @@
-# server.py — FastAPI сервер для Mini App (с поддержкой задачника)
+# server.py — FastAPI сервер для Mini App (с поддержкой задачника и корректным курсом)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +7,9 @@ from fastapi.responses import HTMLResponse
 from datetime import datetime
 import os
 import sqlite3
+
+# Импортируем функцию расчёта курса
+from utils.course_calculator import get_current_course
 
 app = FastAPI()
 
@@ -88,6 +91,12 @@ async def get_user(telegram_id: int):
         query = f"SELECT {', '.join(select_parts)} FROM users WHERE telegram_id = ?"
         user = conn.execute(query, (telegram_id,)).fetchone()
 
+        # Добавим отладку
+        if user:
+            print(f"[DEBUG] Данные из БД для {telegram_id}: {dict(user)}")
+        else:
+            print(f"[DEBUG] Пользователь {telegram_id} не найден")
+
     except Exception as e:
         print(f"[ERROR] Ошибка запроса пользователя: {e}")
         return {"error": f"Ошибка БД: {str(e)}"}
@@ -97,12 +106,13 @@ async def get_user(telegram_id: int):
     if not user:
         return {"error": "Пользователь не найден"}
 
-    # --- Расчёт курса из enrollment_year ---
+    # --- Расчёт курса с помощью course_calculator ---
     try:
         enrollment = int(user['enrollment_year'])
-        current_year = datetime.now().year
-        course = max(1, min(6, current_year - enrollment + 1))
-    except:
+        # Используем правильную функцию
+        course = get_current_course(enrollment)
+    except Exception as e:
+        print(f"[ERROR] Ошибка расчёта курса: {e}")
         course = 1
 
     return {
