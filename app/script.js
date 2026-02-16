@@ -42,6 +42,15 @@ function setupNavigation() {
 }
 
 function setupEventListeners() {
+    // Обработчики для нижней панели навигации
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.preventDefault(); // отменяем переход по ссылке
+            const tab = item.dataset.tab;
+            if (tab) switchTab(tab);
+        });
+    });
+
     const addBtn = document.getElementById('add-task-fab');
     if (addBtn) addBtn.addEventListener('click', startAddTask);
 
