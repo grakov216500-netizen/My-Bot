@@ -72,25 +72,25 @@ function setupEventListeners() {
 }
 
 /**
- * Переключение вкладок
+ * Переключение вкладок (панель всегда видна)
  */
 function switchTab(tabName) {
     currentTab = tabName;
 
+    // Скрываем/показываем нужный экран
     document.getElementById('main-content').classList.add('hidden');
     document.getElementById('notes-screen').style.display = 'none';
-    document.getElementById('bottom-nav').style.display = 'none';
     document.getElementById('add-task-fab').style.display = 'none';
 
     if (tabName === 'notes') {
         document.getElementById('notes-screen').style.display = 'block';
-        document.getElementById('bottom-nav').style.display = 'flex';
         document.getElementById('add-task-fab').style.display = 'flex';
         loadTasks();
     } else {
         document.getElementById('main-content').classList.remove('hidden');
     }
 
+    // Обновляем активную иконку в нижней панели
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.tab === tabName);
     });
