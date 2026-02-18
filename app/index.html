@@ -71,11 +71,37 @@
     </div>
   </div>
 
-  <!-- Экран нарядов (заглушка) – скрыт по умолчанию -->
+  <!-- Экран нарядов – скрыт по умолчанию -->
   <div id="duties-screen" style="display: none;">
-    <div class="widget">
-      <h3>📅 Наряды</h3>
-      <p>Здесь будет список ваших нарядов (в разработке).</p>
+    <div style="padding: 16px;">
+      <!-- Навигация по месяцам -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <button id="prev-month-btn" onclick="changeMonth(-1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">←</button>
+        <h3 id="current-month" style="color: #93C5FD; margin: 0; font-size: 18px;">Февраль 2026</h3>
+        <button id="next-month-btn" onclick="changeMonth(1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">→</button>
+      </div>
+      
+      <!-- Поиск по дате -->
+      <div style="margin-bottom: 16px;">
+        <input 
+          type="date" 
+          id="duty-date-search" 
+          style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #CBD5E1; font-size: 14px;"
+          onchange="searchDutyByDate(this.value)"
+        />
+        <button onclick="clearDateSearch()" style="margin-top: 8px; background: #3B82F6; border: none; color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; width: 100%;">Очистить поиск</button>
+      </div>
+      
+      <!-- Список нарядов -->
+      <div id="duties-list-container">
+        <p style="color: #64748B; text-align: center;">Загрузка нарядов...</p>
+      </div>
+      
+      <!-- Результаты поиска по дате -->
+      <div id="date-search-results" style="display: none; margin-top: 20px;">
+        <h4 style="color: #93C5FD; margin-bottom: 12px;">Участники наряда на выбранную дату:</h4>
+        <div id="date-search-content"></div>
+      </div>
     </div>
   </div>
 
@@ -87,14 +113,69 @@
     </div>
   </div>
 
-  <!-- Экран опроса – скрыт по умолчанию -->
-  <div id="survey-screen" style="display: none;">
-    <h2 style="color: #93C5FD; margin-bottom: 16px;">📊 Опрос сложности нарядов</h2>
-    <p style="color: #CBD5E1; margin-bottom: 16px;">Оцените каждый объект по шкале от 1 (очень легко) до 5 (очень тяжело). Ваше мнение поможет справедливо распределять нагрузку.</p>
-    <div id="survey-objects-container">
-      <p style="color: #6b7280; text-align: center;">Загрузка объектов...</p>
+  <!-- Экран опроса – теперь в виде полноэкранного всплывающего окна (модалки) -->
+  <div
+    id="survey-screen"
+    style="
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15,23,42,0.9);
+      z-index: 1000;
+      padding: 16px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    "
+  >
+    <div
+      style="
+        max-width: 600px;
+        margin: 0 auto;
+        background: #0f172a;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      "
+    >
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <h2 style="color: #93C5FD; margin: 0;">📊 Опрос сложности нарядов</h2>
+        <button
+          type="button"
+          onclick="switchTab('home')"
+          style="
+            background: transparent;
+            border: none;
+            color: #9CA3AF;
+            font-size: 20px;
+            cursor: pointer;
+          "
+        >
+          ✕
+        </button>
+      </div>
+      <p style="color: #CBD5E1; margin-bottom: 16px;">
+        Оцените каждый объект по шкале от 1 (очень легко) до 5 (очень тяжело).
+        Ваше мнение поможет справедливо распределять нагрузку.
+      </p>
+      <div id="survey-objects-container">
+        <p style="color: #6b7280; text-align: center;">Загрузка объектов...</p>
+      </div>
+      <button
+        id="submit-survey-btn"
+        style="
+          background-color: #3B82F6;
+          color: white;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          width: 100%;
+          margin-top: 20px;
+          cursor: pointer;
+        "
+      >
+        Отправить все оценки
+      </button>
     </div>
-    <button id="submit-survey-btn" style="background-color: #3B82F6; color: white; border: none; padding: 12px 24px; border-radius: 8px; width: 100%; margin-top: 20px; cursor: pointer;">Отправить все оценки</button>
   </div>
 
   <!-- Кнопка добавления задачи (видна только в заметках) -->

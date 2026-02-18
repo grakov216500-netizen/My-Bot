@@ -36,7 +36,9 @@ ROLE_NAMES = {
     'п': 'Патруль',
     'ж': 'Железо',
     'т': 'Тарелки',
-    'кпп': 'КПП'
+    'кпп': 'КПП',
+    'гбр': 'ГБР (Группа быстрого реагирования)',
+    'зуб': 'Зуб'
 }
 
 def get_full_role(role_code: str) -> str:
@@ -123,15 +125,20 @@ async def get_user(telegram_id: int):
 # 2. НАРЯДЫ ПОЛЬЗОВАТЕЛЯ
 # ============================================
 @app.get("/api/duties")
-async def get_duties(telegram_id: int):
+async def get_duties(telegram_id: int, month: str = None, year: int = None):
+    """
+    Получает наряды пользователя.
+    Если указаны month и year - возвращает наряды за конкретный месяц.
+    Иначе возвращает все наряды и ближайший.
+    """
     conn = get_db()
     if not conn:
         return {"error": "База данных не найдена"}
 
     try:
-        # --- Получаем user_id ---
+        # --- Получаем user_id и ФИО ---
         user = conn.execute(
-            "SELECT id FROM users WHERE telegram_id = ?",
+            "SELECT id, fio FROM users WHERE telegram_id = ?",
             (telegram_id,)
         ).fetchone()
     except Exception as e:
@@ -143,14 +150,81 @@ async def get_duties(telegram_id: int):
         return {"error": "Пользователь не найден"}
 
     user_id = user['id']
+    user_fio = user['fio']
 
     try:
-        # --- Проверяем структуру таблицы duties ---
+        # Проверяем, какая таблица используется
+        # Сначала пробуем duty_schedule (новая структура)
+        try:
+            cursor = conn.execute("PRAGMA table_info(duty_schedule)")
+            schedule_columns = [row['name'] for row in cursor.fetchall()]
+            if schedule_columns:
+                # Используем duty_schedule
+                if month and year:
+                    # Фильтр по месяцу
+                    month_start = f"{year}-{month:02d}-01"
+                    if month == 12:
+                        month_end = f"{year + 1}-01-01"
+                    else:
+                        month_end = f"{year}-{int(month) + 1:02d}-01"
+                    
+                    query = """
+                        SELECT date, role, group_name, enrollment_year
+                        FROM duty_schedule
+                        WHERE fio = ? AND date >= ? AND date < ?
+                        ORDER BY date
+                    """
+                    rows = conn.execute(query, (user_fio, month_start, month_end)).fetchall()
+                else:
+                    query = """
+                        SELECT date, role, group_name, enrollment_year
+                        FROM duty_schedule
+                        WHERE fio = ?
+                        ORDER BY date
+                    """
+                    rows = conn.execute(query, (user_fio,)).fetchall()
+                
+                duties_list = []
+                for row in rows:
+                    # Получаем участников наряда на эту дату
+                    partners_query = """
+                        SELECT fio, group_name
+                        FROM duty_schedule
+                        WHERE date = ? AND role = ? AND enrollment_year = ?
+                        ORDER BY group_name, fio
+                    """
+                    partners = conn.execute(partners_query, (row['date'], row['role'], row['enrollment_year'])).fetchall()
+                    
+                    duties_list.append({
+                        "date": row['date'],
+                        "role": row['role'],
+                        "role_full": get_full_role(row['role']),
+                        "group": row['group_name'],
+                        "partners": [{"fio": p['fio'], "group": p['group_name']} for p in partners]
+                    })
+                
+                conn.close()
+                
+                # Ближайший наряд (если не указан месяц)
+                if not month:
+                    today = datetime.now().strftime("%Y-%m-%d")
+                    upcoming = [d for d in duties_list if d['date'] >= today]
+                    next_duty = upcoming[0] if upcoming else None
+                else:
+                    next_duty = None
+                
+                return {
+                    "duties": duties_list,
+                    "next_duty": next_duty,
+                    "total": len(duties_list)
+                }
+        except:
+            pass
+        
+        # Если duty_schedule не работает, пробуем duties (старая структура)
         cursor = conn.execute("PRAGMA table_info(duties)")
         columns = [row['name'] for row in cursor.fetchall()]
-        print(f"[INFO] Колонки в duties: {columns}")
-
-        # --- Если есть object_type — используем, иначе пустая строка ---
+        
         if 'object_type' in columns:
             query = """
                 SELECT date, role, object_type
@@ -164,12 +238,12 @@ async def get_duties(telegram_id: int):
                     "date": row['date'],
                     "role": row['role'],
                     "role_full": get_full_role(row['role']),
-                    "object": row['object_type'] or "—"
+                    "object": row['object_type'] or "—",
+                    "partners": []  # Старая структура не поддерживает участников
                 }
                 for row in rows
             ]
         else:
-            # Если поля object_type нет — только дата и роль
             query = """
                 SELECT date, role
                 FROM duties
@@ -182,7 +256,8 @@ async def get_duties(telegram_id: int):
                     "date": row['date'],
                     "role": row['role'],
                     "role_full": get_full_role(row['role']),
-                    "object": "—"
+                    "object": "—",
+                    "partners": []
                 }
                 for row in rows
             ]
@@ -203,6 +278,57 @@ async def get_duties(telegram_id: int):
         "next_duty": next_duty,
         "total": len(duties_list)
     }
+
+
+@app.get("/api/duties/by-date")
+async def get_duties_by_date(date: str):
+    """
+    Возвращает всех участников наряда на конкретную дату из всех групп.
+    Формат date: YYYY-MM-DD
+    """
+    conn = get_db()
+    if not conn:
+        return {"error": "База данных не найдена"}
+    
+    try:
+        # Пробуем duty_schedule
+        try:
+            query = """
+                SELECT fio, role, group_name, enrollment_year, gender
+                FROM duty_schedule
+                WHERE date = ?
+                ORDER BY role, group_name, fio
+            """
+            rows = conn.execute(query, (date,)).fetchall()
+            
+            # Группируем по ролям
+            by_role = {}
+            for row in rows:
+                role = row['role']
+                if role not in by_role:
+                    by_role[role] = []
+                by_role[role].append({
+                    "fio": row['fio'],
+                    "group": row['group_name'],
+                    "course": row['enrollment_year'],
+                    "gender": row['gender']
+                })
+            
+            conn.close()
+            return {
+                "date": date,
+                "by_role": by_role,
+                "total": len(rows)
+            }
+        except Exception as e:
+            print(f"[WARNING] duty_schedule не доступна: {e}")
+            return {"error": "Таблица duty_schedule не найдена"}
+    except Exception as e:
+        print(f"[ERROR] Ошибка при запросе нарядов по дате: {e}")
+        return {"error": f"Ошибка БД: {str(e)}"}
+    finally:
+        if conn:
+            conn.close()
 
 # ============================================
 # 3. ЗАДАЧНИК: API ДЛЯ WEBAPP
@@ -408,8 +534,12 @@ async def get_survey_objects():
     if not conn:
         raise HTTPException(status_code=500, detail="База данных не найдена")
     try:
-        # Получаем все объекты
-        cursor = conn.execute("SELECT id, name, parent_id FROM duty_objects ORDER BY parent_id NULLS FIRST, name")
+        # Получаем все объекты.
+        # ВАЖНО: SQLite не поддерживает конструкцию "NULLS FIRST",
+        # поэтому сортируем обычным ORDER BY parent_id, name.
+        cursor = conn.execute(
+            "SELECT id, name, parent_id FROM duty_objects ORDER BY parent_id, name"
+        )
         rows = cursor.fetchall()
         # Преобразуем в список словарей
         objects = []
@@ -454,7 +584,31 @@ async def submit_vote(data: dict):
             VALUES (?, ?, ?)
         """, (db_user_id, object_id, rating))
         conn.commit()
-        return {"status": "ok", "message": "Голос учтён"}
+        
+        # Проверяем, достигли ли мы 100 голосов (уникальных пользователей)
+        voted_count = conn.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM survey_responses").fetchone()['cnt']
+        
+        # Если достигли 100 голосов, автоматически рассчитываем медианы
+        if voted_count >= 100:
+            try:
+                objects = conn.execute("SELECT id FROM duty_objects").fetchall()
+                for obj in objects:
+                    obj_id = obj['id']
+                    ratings = conn.execute("SELECT rating FROM survey_responses WHERE object_id = ?", (obj_id,)).fetchall()
+                    if ratings:
+                        rating_values = [r['rating'] for r in ratings]
+                        median = statistics.median(rating_values)
+                        conn.execute("""
+                            INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
+                            ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
+                        """, (obj_id, median))
+                conn.commit()
+                print(f"[INFO] Автоматически рассчитаны медианы после достижения {voted_count} голосов")
+            except Exception as e:
+                print(f"[WARNING] Не удалось автоматически рассчитать медианы: {e}")
+                # Не прерываем выполнение, просто логируем
+        
+        return {"status": "ok", "message": "Голос учтён", "total_voted": voted_count}
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="Вы уже голосовали за этот объект")
     except Exception as e:
@@ -539,15 +693,66 @@ async def get_survey_results():
         raise HTTPException(status_code=500, detail="База данных не найдена")
     try:
         # Возвращаем все объекты с их весами (если есть)
+        # SQLite не поддерживает NULLS FIRST, поэтому сортируем так:
+        # сначала объекты без родителя (parent_id IS NULL), потом с родителем
         results = conn.execute("""
             SELECT o.id, o.name, o.parent_id, w.weight
             FROM duty_objects o
             LEFT JOIN object_weights w ON o.id = w.object_id
-            ORDER BY o.parent_id NULLS FIRST, o.name
+            ORDER BY o.parent_id IS NULL DESC, o.parent_id, o.name
         """).fetchall()
         return [dict(r) for r in results]
     except Exception as e:
         print(f"[ERROR] Ошибка получения результатов: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
+    finally:
+        conn.close()
+
+
+@app.get("/api/survey/user-results")
+async def get_user_survey_results(telegram_id: int):
+    """Возвращает результаты опроса для конкретного пользователя (если он прошёл опрос)"""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        # Проверяем, проходил ли пользователь опрос
+        user = conn.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        db_user_id = user['id']
+        
+        # Получаем оценки пользователя
+        user_votes = conn.execute("""
+            SELECT object_id, rating FROM survey_responses WHERE user_id = ?
+        """, (db_user_id,)).fetchall()
+        
+        if not user_votes:
+            return {"voted": False, "message": "Вы ещё не прошли опрос"}
+        
+        # Получаем все объекты с их весами (медианами) и оценками пользователя
+        # Используем правильную сортировку для SQLite (без NULLS FIRST)
+        results = conn.execute("""
+            SELECT 
+                o.id, 
+                o.name, 
+                o.parent_id, 
+                w.weight as median_weight,
+                sr.rating as user_rating
+            FROM duty_objects o
+            LEFT JOIN object_weights w ON o.id = w.object_id
+            LEFT JOIN survey_responses sr ON o.id = sr.object_id AND sr.user_id = ?
+            ORDER BY (o.parent_id IS NULL) DESC, o.parent_id, o.name
+        """, (db_user_id,)).fetchall()
+        
+        return {
+            "voted": True,
+            "results": [dict(r) for r in results]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Ошибка получения результатов пользователя: {e}")
         raise HTTPException(status_code=500, detail="Ошибка базы данных")
     finally:
         conn.close()
