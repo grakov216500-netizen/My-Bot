@@ -60,8 +60,8 @@
     </div>
   </main>
 
-  <!-- Экран заметок (задачник) -->
-  <div id="notes-screen">
+  <!-- Экран заметок (задачник) – скрыт по умолчанию -->
+  <div id="notes-screen" style="display: none;">
     <div class="search-bar">
       <svg width="16" height="16" fill="currentColor"><path d="M15.5 14.3l-3.7-3.7c1.2-1.5 1.8-3.4 1.5-5.3-0.4-2.3-2.2-4.1-4.5-4.5-3.9-0.8-7.2 2.4-6.4 6.3 0.4 2.3 2.2 4.1 4.5 4.5 1.9 0.3 3.8-0.3 5.3-1.5l3.7 3.7c0.4 0.4 1 0.4 1.4 0s0.4-1 0-1.4z"/></svg>
       <input type="text" id="search-input" placeholder="Поиск по задачам..." />
@@ -71,7 +71,7 @@
     </div>
   </div>
 
-  <!-- Экран нарядов (заглушка) -->
+  <!-- Экран нарядов (заглушка) – скрыт по умолчанию -->
   <div id="duties-screen" style="display: none;">
     <div class="widget">
       <h3>📅 Наряды</h3>
@@ -79,7 +79,7 @@
     </div>
   </div>
 
-  <!-- Экран учёбы (заглушка) -->
+  <!-- Экран учёбы (заглушка) – скрыт по умолчанию -->
   <div id="study-screen" style="display: none;">
     <div class="widget">
       <h3>📚 Учёба</h3>
@@ -87,18 +87,20 @@
     </div>
   </div>
 
-  <!-- Экран рейтинга (заглушка) -->
-  <div id="rating-screen" style="display: none;">
-    <div class="widget">
-      <h3>🏆 Рейтинг</h3>
-      <p>Скоро здесь появится рейтинг курсантов.</p>
+  <!-- Экран опроса – скрыт по умолчанию -->
+  <div id="survey-screen" style="display: none;">
+    <h2 style="color: #93C5FD; margin-bottom: 16px;">📊 Опрос сложности нарядов</h2>
+    <p style="color: #CBD5E1; margin-bottom: 16px;">Оцените каждый объект по шкале от 1 (очень легко) до 5 (очень тяжело). Ваше мнение поможет справедливо распределять нагрузку.</p>
+    <div id="survey-objects-container">
+      <p style="color: #6b7280; text-align: center;">Загрузка объектов...</p>
     </div>
+    <button id="submit-survey-btn" style="background-color: #3B82F6; color: white; border: none; padding: 12px 24px; border-radius: 8px; width: 100%; margin-top: 20px; cursor: pointer;">Отправить все оценки</button>
   </div>
 
   <!-- Кнопка добавления задачи (видна только в заметках) -->
   <button id="add-task-fab" onclick="startAddTask()">+</button>
 
-  <!-- Нижняя панель навигации (всегда видна) -->
+  <!-- Нижняя панель навигации (всегда видна) – временно заменил "Рейтинг" на "Опрос" -->
   <nav class="bottom-nav" id="bottom-nav">
     <a href="#notes" class="nav-item" data-tab="notes">
       <svg><use xlink:href="#icon-notes"/></svg>
@@ -116,13 +118,13 @@
       <svg><use xlink:href="#icon-study"/></svg>
       <span>Учеба</span>
     </a>
-    <a href="#rating" class="nav-item" data-tab="rating">
-      <svg><use xlink:href="#icon-rating"/></svg>
-      <span>Рейтинг</span>
+    <a href="#survey" class="nav-item" data-tab="survey">
+      <svg><use xlink:href="#icon-survey"/></svg>
+      <span>Опрос</span>
     </a>
   </nav>
 
-  <!-- Иконки SVG (скрыты) -->
+  <!-- Иконки SVG (скрыты) – добавил иконку для опроса -->
   <svg style="display: none;">
     <symbol id="icon-home" viewBox="0 0 24 24">
       <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
@@ -135,6 +137,9 @@
     </symbol>
     <symbol id="icon-study" viewBox="0 0 24 24">
       <path d="M12 3L1 9l11 6 11-6-11-6zm0 11l-9-4.5V15c0 2.8 4 5 9 5s9-2.2 9-5v-5.5l-9 4.5z"/>
+    </symbol>
+    <symbol id="icon-survey" viewBox="0 0 24 24">
+      <path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h-2v2z"/>
     </symbol>
     <symbol id="icon-rating" viewBox="0 0 24 24">
       <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>

@@ -1,4 +1,4 @@
-# server.py — FastAPI сервер для Mini App (финальная версия, с исправлением группы)
+# server.py — FastAPI сервер для Mini App (финальная версия, с исправлением группы и опросником)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from datetime import datetime
 import os
 import sqlite3
+import statistics  # для расчёта медианы
 
 # Импортируем функцию расчёта курса
 from utils.course_calculator import get_current_course
@@ -397,14 +398,164 @@ async def get_full_schedule():
 
 
 # ============================================
-# 5. СТАТИКА И ГЛАВНАЯ (исправлено: не подменяем пути)
+# 5. ОПРОСНИК (SURVEY) API
 # ============================================
-# Если ты не используешь прямой доступ к /app на сервере,
-# этот блок можно вообще удалить или закомментировать.
-# Оставим его, но без подмены путей, чтобы при открытии /app
-# браузер искал style.css и script.js в той же папке (./) на сервере.
-# Если они там не нужны, просто удали этот эндпоинт.
 
+@app.get("/api/survey/objects")
+async def get_survey_objects():
+    """Возвращает список объектов для голосования (с иерархией)"""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        # Получаем все объекты
+        cursor = conn.execute("SELECT id, name, parent_id FROM duty_objects ORDER BY parent_id NULLS FIRST, name")
+        rows = cursor.fetchall()
+        # Преобразуем в список словарей
+        objects = []
+        for row in rows:
+            objects.append({
+                "id": row['id'],
+                "name": row['name'],
+                "parent_id": row['parent_id']
+            })
+        return objects
+    except Exception as e:
+        print(f"[ERROR] Ошибка получения объектов: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
+    finally:
+        conn.close()
+
+
+@app.post("/api/survey/vote")
+async def submit_vote(data: dict):
+    """Принимает голос пользователя за объект"""
+    user_id = data.get('user_id')
+    object_id = data.get('object_id')
+    rating = data.get('rating')
+
+    if not all([user_id, object_id, rating]) or not (1 <= rating <= 5):
+        raise HTTPException(status_code=400, detail="Неверные данные")
+
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+
+    try:
+        # Проверяем, что пользователь существует
+        user = conn.execute("SELECT id FROM users WHERE telegram_id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        db_user_id = user['id']
+
+        # Вставляем голос (unique constraint предотвратит повтор)
+        conn.execute("""
+            INSERT INTO survey_responses (user_id, object_id, rating)
+            VALUES (?, ?, ?)
+        """, (db_user_id, object_id, rating))
+        conn.commit()
+        return {"status": "ok", "message": "Голос учтён"}
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="Вы уже голосовали за этот объект")
+    except Exception as e:
+        print(f"[ERROR] Ошибка голосования: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
+    finally:
+        conn.close()
+
+
+@app.get("/api/survey/status")
+async def get_survey_status():
+    """Возвращает статистику опроса: сколько проголосовало из скольких"""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        # Общее количество зарегистрированных пользователей (можно ограничить по курсу, но пока все)
+        total_users = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()['cnt']
+        # Количество проголосовавших (уникальных пользователей)
+        voted_users = conn.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM survey_responses").fetchone()['cnt']
+        return {"total": total_users, "voted": voted_users}
+    except Exception as e:
+        print(f"[ERROR] Ошибка статуса опроса: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
+    finally:
+        conn.close()
+
+
+@app.post("/api/survey/finalize")
+async def finalize_survey(data: dict):
+    """Завершает опрос и вычисляет веса объектов (медианы)"""
+    # Проверка админа (по telegram_id, переданному в data)
+    admin_id = data.get('admin_id')
+    if not admin_id:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    # Проверяем, является ли пользователь админом (по роли)
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute("SELECT role FROM users WHERE telegram_id = ?", (admin_id,)).fetchone()
+        if not user or user['role'] not in ['admin', 'assistant']:
+            raise HTTPException(status_code=403, detail="Недостаточно прав")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Ошибка проверки прав")
+    finally:
+        conn.close()
+
+    # Получаем все объекты
+    conn = get_db()
+    try:
+        objects = conn.execute("SELECT id FROM duty_objects").fetchall()
+        for obj in objects:
+            obj_id = obj['id']
+            # Получаем все оценки для этого объекта
+            ratings = conn.execute("SELECT rating FROM survey_responses WHERE object_id = ?", (obj_id,)).fetchall()
+            if ratings:
+                rating_values = [r['rating'] for r in ratings]
+                median = statistics.median(rating_values)
+                # Сохраняем или обновляем вес
+                conn.execute("""
+                    INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
+                    ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
+                """, (obj_id, median))
+            else:
+                # Если нет голосов, можно пропустить или установить значение по умолчанию
+                pass
+        conn.commit()
+        return {"status": "ok", "message": "Веса вычислены и сохранены"}
+    except Exception as e:
+        print(f"[ERROR] Ошибка финализации опроса: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка вычисления")
+    finally:
+        conn.close()
+
+
+@app.get("/api/survey/results")
+async def get_survey_results():
+    """Возвращает вычисленные веса объектов для отображения"""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        # Возвращаем все объекты с их весами (если есть)
+        results = conn.execute("""
+            SELECT o.id, o.name, o.parent_id, w.weight
+            FROM duty_objects o
+            LEFT JOIN object_weights w ON o.id = w.object_id
+            ORDER BY o.parent_id NULLS FIRST, o.name
+        """).fetchall()
+        return [dict(r) for r in results]
+    except Exception as e:
+        print(f"[ERROR] Ошибка получения результатов: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
+    finally:
+        conn.close()
+
+
+# ============================================
+# 6. СТАТИКА И ГЛАВНАЯ (исправлено: не подменяем пути)
+# ============================================
 @app.get("/app", response_class=HTMLResponse)
 async def serve_app():
     file_path = os.path.join("app", "index.html")
@@ -419,7 +570,7 @@ async def serve_app():
 
 
 # ============================================
-# 6. ЗАПУСК
+# 7. ЗАПУСК
 # ============================================
 if __name__ == "__main__":
     import uvicorn

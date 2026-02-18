@@ -74,6 +74,7 @@ function switchTab(tabName) {
     document.getElementById('duties-screen').style.display = 'none';
     document.getElementById('study-screen').style.display = 'none';
     document.getElementById('rating-screen').style.display = 'none';
+    document.getElementById('survey-screen').style.display = 'none'; // новый экран опроса
     document.getElementById('add-task-fab').style.display = 'none';
 
     // Показываем нужный экран
@@ -87,6 +88,9 @@ function switchTab(tabName) {
         document.getElementById('study-screen').style.display = 'block';
     } else if (tabName === 'rating') {
         document.getElementById('rating-screen').style.display = 'block';
+    } else if (tabName === 'survey') {
+        document.getElementById('survey-screen').style.display = 'block';
+        loadSurveyObjects(); // загружаем список объектов для опроса
     } else { // home
         document.getElementById('main-content').classList.remove('hidden');
     }
@@ -365,6 +369,15 @@ async function loadDuties(userId) {
         if (!widget) return;
 
         if (data.error) {
+            // Специальная обработка для отсутствия таблицы duties
+            if (data.error.includes('no such table')) {
+                widget.innerHTML = `
+                    <h3>🎖️ Ближайший наряд</h3>
+                    <p style="color: #f87171;">Нарядов пока нет.</p>
+                    <p>Чтобы настроить систему, <a href="#" onclick="switchTab('survey'); return false;" style="color: #3B82F6;">пройдите опрос</a> о сложности объектов.</p>
+                `;
+                return;
+            }
             widget.innerHTML = `<h3>🎖️ Ближайший наряд</h3><p style="color: #f87171;">${data.error}</p>`;
             return;
         }
@@ -388,6 +401,104 @@ async function loadDuties(userId) {
         console.error("❌ Ошибка загрузки нарядов:", err);
         document.getElementById('next-duty-widget').innerHTML = 
             `<h3>🎖️ Ближайший наряд</h3><p style="color: #f87171;">Не удалось загрузить данные</p>`;
+    }
+}
+
+// === НОВЫЕ ФУНКЦИИ ДЛЯ ОПРОСНИКА ===
+
+/**
+ * Загружает список объектов для голосования и отображает их
+ */
+async function loadSurveyObjects() {
+    const container = document.getElementById('survey-objects-container');
+    if (!container) return;
+
+    try {
+        const response = await fetch(`${baseUrl}/api/survey/objects`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const objects = await response.json();
+
+        // Группируем по parent_id
+        const byParent = {};
+        objects.forEach(obj => {
+            if (obj.parent_id === null) {
+                if (!byParent[obj.id]) byParent[obj.id] = { obj, children: [] };
+            } else {
+                if (!byParent[obj.parent_id]) byParent[obj.parent_id] = { obj: null, children: [] };
+                byParent[obj.parent_id].children.push(obj);
+            }
+        });
+
+        let html = '';
+        // Сначала выводим категории без родителей (основные)
+        for (const [parentId, group] of Object.entries(byParent)) {
+            if (group.obj) {
+                html += `<h3 style="color: #E2E8F0; margin: 20px 0 10px 0;">${group.obj.name}</h3>`;
+            }
+            // Выводим дочерние объекты
+            group.children.forEach(child => {
+                html += `
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: #1E293B; padding: 10px; border-radius: 8px; margin-bottom: 8px;">
+                        <span style="color: #CBD5E1;">${child.name}</span>
+                        <div style="display: flex; gap: 8px;">
+                            ${[1,2,3,4,5].map(i => `
+                                <label style="color: #94A3B8;">
+                                    <input type="radio" name="obj_${child.id}" value="${i}" style="margin-right: 2px;"> ${i}
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+        }
+        container.innerHTML = html;
+
+        // Добавляем обработчик для кнопки отправки
+        document.getElementById('submit-survey-btn').onclick = async () => {
+            const votes = [];
+            objects.forEach(obj => {
+                const radios = document.getElementsByName(`obj_${obj.id}`);
+                let selected = null;
+                for (const radio of radios) {
+                    if (radio.checked) {
+                        selected = radio.value;
+                        break;
+                    }
+                }
+                if (selected) {
+                    votes.push({ object_id: obj.id, rating: parseInt(selected) });
+                }
+            });
+            if (votes.length === 0) {
+                alert('Выберите хотя бы одну оценку');
+                return;
+            }
+            // Отправляем каждый голос
+            for (const vote of votes) {
+                try {
+                    const res = await fetch(`${baseUrl}/api/survey/vote`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: userId, object_id: vote.object_id, rating: vote.rating })
+                    });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        alert(`Ошибка: ${err.detail || 'Не удалось отправить голос'}`);
+                        break;
+                    }
+                } catch (err) {
+                    console.error(err);
+                    alert('Ошибка сети');
+                    break;
+                }
+            }
+            alert('Спасибо! Ваши оценки сохранены.');
+            // Можно переключиться на другой экран
+            switchTab('home');
+        };
+    } catch (err) {
+        console.error('❌ Ошибка загрузки объектов:', err);
+        container.innerHTML = '<p style="color: #f87171;">Ошибка загрузки опроса</p>';
     }
 }
 
