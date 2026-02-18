@@ -1,16 +1,13 @@
 // Глобальные переменные
 let baseUrl = '';
 let userId = null;
-let userFio = null; // ФИО текущего пользователя
+let userFio = null;
 let tasks = [];
 const taskMap = {};
 
 document.addEventListener('DOMContentLoaded', async () => {
     const CURRENT_HOST = window.location.hostname;
 
-    // API base URL:
-    // - локально (localhost/127.0.0.1) работаем с тем же origin (baseUrl = "")
-    // - во всех остальных случаях ходим на прод-домен API
     const isLocal =
         CURRENT_HOST === 'localhost' ||
         CURRENT_HOST === '127.0.0.1' ||
@@ -26,7 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!userId) {
             console.error("❌ Не удалось получить user.id из Telegram");
             showError("Это приложение должно открываться через Telegram. Закройте эту страницу и откройте бота.");
-            return; // останавливаем выполнение, если нет пользователя
+            return;
         }
     } else {
         console.error("❌ Telegram WebApp не доступен");
@@ -41,11 +38,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadUserProfile(userId);
     await loadDuties(userId);
-    await loadSurveyResults(); // Загружаем результаты опроса, если пользователь уже прошёл его
+    await loadSurveyResults();
 });
 
 let currentTab = 'home';
-let currentMonth = new Date().getMonth() + 1; // 1-12
+let currentMonth = new Date().getMonth() + 1;
 let currentYear = new Date().getFullYear();
 
 function setupNavigation() {
@@ -53,7 +50,6 @@ function setupNavigation() {
 }
 
 function setupEventListeners() {
-    // Обработчики для нижней панели навигации
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
@@ -66,12 +62,22 @@ function setupEventListeners() {
     if (addBtn) addBtn.addEventListener('click', startAddTask);
 
     const closeMenu = document.getElementById('close-menu');
-    if ( closeMenu) closeMenu.addEventListener('click', hideModal);
+    if (closeMenu) closeMenu.addEventListener('click', hideModal);
 
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.addEventListener('input', filterTasks);
+
+    // Закрытие модального меню при клике вне его
+    document.addEventListener('click', (e) => {
+        const menu = document.getElementById('task-menu');
+        const taskCard = e.target.closest('.task-card');
+        if (menu && menu.style.display === 'flex' && !taskCard && !e.target.closest('.modal-content')) {
+            hideModal();
+        }
+    });
 }
 
+// ✅ ИСПРАВЛЕНА: Теперь использует классы вместо inline-стилей
 function switchTab(tabName) {
     currentTab = tabName;
 
@@ -82,41 +88,50 @@ function switchTab(tabName) {
     const surveyScreen = document.getElementById('survey-screen');
     const addFab = document.getElementById('add-task-fab');
 
-    // Скрываем все экраны (без падения, даже если какого-то блока нет в DOM)
-    if (mainContent) mainContent.classList.add('hidden');
-    if (notesScreen) notesScreen.style.display = 'none';
-    if (dutiesScreen) dutiesScreen.style.display = 'none';
-    if (studyScreen) studyScreen.style.display = 'none';
-    if (surveyScreen) surveyScreen.style.display = 'none';
+    // Скрываем ВСЕ экраны через классы
+    const screens = [mainContent, notesScreen, dutiesScreen, studyScreen, surveyScreen];
+    screens.forEach(screen => {
+        if (screen) {
+            screen.classList.remove('active');
+            // Для main-content используем hidden класс
+            if (screen.id === 'main-content') {
+                screen.classList.add('hidden');
+            }
+        }
+    });
+
+    // Скрываем FAB по умолчанию
     if (addFab) addFab.style.display = 'none';
 
     // Показываем нужный экран
     if (tabName === 'notes') {
-        if (notesScreen) notesScreen.style.display = 'block';
+        if (notesScreen) notesScreen.classList.add('active');
         if (addFab) addFab.style.display = 'flex';
         loadTasks();
     } else if (tabName === 'duties') {
-        if (dutiesScreen) dutiesScreen.style.display = 'block';
-        loadDutiesForMonth(); // Загружаем наряды на текущий месяц
+        if (dutiesScreen) dutiesScreen.classList.add('active');
+        loadDutiesForMonth();
     } else if (tabName === 'study') {
-        if (studyScreen) studyScreen.style.display = 'block';
+        if (studyScreen) studyScreen.classList.add('active');
     } else if (tabName === 'survey') {
-        if (surveyScreen) surveyScreen.style.display = 'block';
-        // Проверяем, прошёл ли пользователь уже опрос
-        loadSurveyObjects(); // загружаем список объектов для опроса
+        if (surveyScreen) surveyScreen.classList.add('active');
+        loadSurveyObjects();
     } else { // home
-        if (mainContent) mainContent.classList.remove('hidden');
+        if (mainContent) {
+            mainContent.classList.remove('hidden');
+            mainContent.classList.add('active');
+        }
     }
 
     // Обновляем активную иконку
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.tab === tabName);
     });
+
+    // Прокрутка вверх при переключении
+    window.scrollTo(0, 0);
 }
 
-/**
- * Загружает задачи с сервера
- */
 async function loadTasks() {
     try {
         const response = await fetch(`${baseUrl}/api/tasks?user_id=${userId}`);
@@ -125,13 +140,10 @@ async function loadTasks() {
         console.log(`✅ Загружено ${tasks.length} задач`);
     } catch (err) {
         console.error("❌ Ошибка загрузки задач:", err);
-        document.getElementById('task-list').innerHTML = '<p style="color: #f87171;">Ошибка загрузки</p>';
+        document.getElementById('task-list').innerHTML = '<p style="color: #f87171; text-align: center; padding-top: 40px;">Ошибка загрузки</p>';
     }
 }
 
-/**
- * Отображает список задач
- */
 function renderTaskList(filterText = '') {
     const container = document.getElementById('task-list');
     if (!container) return;
@@ -139,7 +151,7 @@ function renderTaskList(filterText = '') {
     const filtered = tasks.filter(t => t.text.toLowerCase().includes(filterText.toLowerCase()));
 
     if (filtered.length === 0) {
-        container.innerHTML = '<p style="color: #64748B; text-align: center;">Нет задач</p>';
+        container.innerHTML = '<p style="color: #64748B; text-align: center; padding-top: 40px;">Нет задач</p>';
         return;
     }
 
@@ -182,11 +194,9 @@ function renderTaskList(filterText = '') {
 
         actions.appendChild(bellBtn);
         actions.appendChild(menuBtn);
-
         div.appendChild(checkbox);
         div.appendChild(textSpan);
         div.appendChild(actions);
-
         container.appendChild(div);
     });
 }
@@ -366,9 +376,7 @@ async function loadUserProfile(userId) {
         if (userCourseEl) userCourseEl.textContent = `Курс: ${data.course || "—"}`;
         if (userGroupEl) userGroupEl.textContent = `Группа: ${data.group || "—"}`;
         
-        // Сохраняем ФИО для использования в других функциях
         userFio = fullName;
-
         console.log("✅ Профиль загружен:", fullName);
     } catch (err) {
         console.error("❌ Ошибка загрузки профиля:", err);
@@ -386,7 +394,6 @@ async function loadDuties(userId) {
         if (!widget) return;
 
         if (data.error) {
-            // Специальная обработка для отсутствия таблицы duties
             if (data.error.includes('no such table')) {
                 widget.innerHTML = `
                     <h3>🎖️ Ближайший наряд</h3>
@@ -410,7 +417,6 @@ async function loadDuties(userId) {
                 <p>Через ${daysLeft} дней (${dateFormatted})</p>
             `;
         } else {
-            // Если таблица duties существует, но записей нет — предлагаем пройти опрос
             const total = Number.isFinite(Number(data.total)) ? Number(data.total) : 0;
             if (total === 0) {
                 widget.innerHTML = `
@@ -431,11 +437,6 @@ async function loadDuties(userId) {
     }
 }
 
-// === НОВЫЕ ФУНКЦИИ ДЛЯ ОПРОСНИКА ===
-
-/**
- * Загружает список объектов для голосования и отображает их
- */
 async function loadSurveyObjects() {
     const container = document.getElementById('survey-objects-container');
     if (!container) return;
@@ -445,11 +446,9 @@ async function loadSurveyObjects() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const objects = await response.json();
 
-        // Правильная группировка: сначала находим все родительские объекты
         const parents = objects.filter(obj => obj.parent_id === null);
         const childrenMap = {};
         
-        // Группируем дочерние объекты по parent_id
         objects.forEach(obj => {
             if (obj.parent_id !== null) {
                 if (!childrenMap[obj.parent_id]) {
@@ -461,12 +460,9 @@ async function loadSurveyObjects() {
 
         let html = '';
         
-        // Выводим только родительские объекты с их детьми
         parents.forEach(parent => {
-            // Заголовок категории (родитель)
             html += `<h3 style="color: #93C5FD; margin: 24px 0 12px 0; font-size: 18px; font-weight: 600;">${parent.name}</h3>`;
             
-            // Дочерние объекты этой категории
             const children = childrenMap[parent.id] || [];
             if (children.length === 0) {
                 html += `<p style="color: #64748B; font-style: italic; margin-bottom: 12px;">Нет подобъектов для оценки</p>`;
@@ -490,7 +486,6 @@ async function loadSurveyObjects() {
         
         container.innerHTML = html;
 
-        // Добавляем обработчик для кнопки отправки
         document.getElementById('submit-survey-btn').onclick = async () => {
             const votes = [];
             objects.forEach(obj => {
@@ -510,7 +505,7 @@ async function loadSurveyObjects() {
                 alert('Выберите хотя бы одну оценку');
                 return;
             }
-            // Отправляем каждый голос
+            
             let lastResult = null;
             let allSuccess = true;
             
@@ -541,23 +536,18 @@ async function loadSurveyObjects() {
                     ? 'Спасибо! Ваши оценки сохранены.\n\n✅ Опрос завершён! Медианы рассчитаны автоматически.'
                     : `Спасибо! Ваши оценки сохранены.\n\nПроголосовало: ${lastResult.total_voted} человек`;
                 alert(message);
-                // Перезагружаем результаты опроса для показа
                 await loadSurveyResults();
             } else if (allSuccess) {
                 alert('Спасибо! Ваши оценки сохранены.');
             }
-            // Можно переключиться на другой экран
             switchTab('home');
         };
     } catch (err) {
         console.error('❌ Ошибка загрузки объектов:', err);
-        container.innerHTML = '<p style="color: #f87171;">Ошибка загрузки опроса</p>';
+        container.innerHTML = '<p style="color: #f87171; text-align: center;">Ошибка загрузки опроса</p>';
     }
 }
 
-/**
- * Загружает и отображает результаты опроса для пользователя, который уже прошёл опрос
- */
 async function loadSurveyResults() {
     try {
         const response = await fetch(`${baseUrl}/api/survey/user-results?telegram_id=${userId}`);
@@ -565,18 +555,15 @@ async function loadSurveyResults() {
         const data = await response.json();
         
         if (!data.voted) {
-            // Пользователь ещё не прошёл опрос - ничего не показываем
             return;
         }
         
-        // Фильтруем только те объекты, которые пользователь оценил (имеют user_rating)
         const votedObjects = data.results.filter(r => r.user_rating !== null && r.parent_id !== null);
         
         if (votedObjects.length === 0) {
-            return; // Пользователь не оценил ни одного объекта
+            return;
         }
         
-        // Группируем по родителям
         const parentsMap = {};
         votedObjects.forEach(obj => {
             if (!parentsMap[obj.parent_id]) {
@@ -585,7 +572,6 @@ async function loadSurveyResults() {
             parentsMap[obj.parent_id].push(obj);
         });
         
-        // Получаем названия родителей
         const parentNames = {};
         data.results.forEach(r => {
             if (r.parent_id === null) {
@@ -593,11 +579,9 @@ async function loadSurveyResults() {
             }
         });
         
-        // Создаём виджет результатов на главной странице
         const mainContent = document.getElementById('main-content');
         if (!mainContent) return;
         
-        // Проверяем, есть ли уже виджет результатов
         let resultsWidget = document.getElementById('survey-results-widget');
         if (!resultsWidget) {
             resultsWidget = document.createElement('div');
@@ -609,12 +593,10 @@ async function loadSurveyResults() {
         let html = '<h3>📊 Результаты опроса</h3>';
         html += '<p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Ваши оценки и медианы по объектам:</p>';
         
-        // Выводим результаты по категориям с объяснением
         Object.keys(parentsMap).forEach(parentId => {
             const parentName = parentNames[parentId] || 'Неизвестная категория';
             const children = parentsMap[parentId];
             
-            // Рассчитываем среднюю медиану для родительского объекта
             const medians = children.filter(c => c.median_weight !== null).map(c => c.median_weight);
             const avgMedian = medians.length > 0 
                 ? (medians.reduce((a, b) => a + b, 0) / medians.length).toFixed(1)
@@ -655,21 +637,12 @@ async function loadSurveyResults() {
     }
 }
 
-/**
- * Возвращает объяснение сложности на основе медианы
- */
 function getDifficultyExplanation(median) {
-    if (median < 2) {
-        return 'Очень лёгкий объект — минимальная нагрузка';
-    } else if (median < 3) {
-        return 'Лёгкий объект — небольшая нагрузка';
-    } else if (median < 4) {
-        return 'Средний объект — умеренная нагрузка';
-    } else if (median < 4.5) {
-        return 'Тяжёлый объект — высокая нагрузка';
-    } else {
-        return 'Очень тяжёлый объект — максимальная нагрузка';
-    }
+    if (median < 2) return 'Очень лёгкий объект — минимальная нагрузка';
+    else if (median < 3) return 'Лёгкий объект — небольшая нагрузка';
+    else if (median < 4) return 'Средний объект — умеренная нагрузка';
+    else if (median < 4.5) return 'Тяжёлый объект — высокая нагрузка';
+    else return 'Очень тяжёлый объект — максимальная нагрузка';
 }
 
 function getDaysLeft(dateStr) {
@@ -693,11 +666,6 @@ function openSettings() {
     alert("⚙️ Настройки\n(в разработке)");
 }
 
-// === ФУНКЦИИ ДЛЯ РАБОТЫ С НАРЯДАМИ ===
-
-/**
- * Загружает наряды пользователя на текущий месяц
- */
 async function loadDutiesForMonth() {
     const container = document.getElementById('duties-list-container');
     if (!container) return;
@@ -712,7 +680,6 @@ async function loadDutiesForMonth() {
             return;
         }
         
-        // Обновляем заголовок месяца
         const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
                            'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
         document.getElementById('current-month').textContent = `${monthNames[currentMonth - 1]} ${currentYear}`;
@@ -722,7 +689,6 @@ async function loadDutiesForMonth() {
             return;
         }
         
-        // Группируем наряды по датам
         const byDate = {};
         data.duties.forEach(duty => {
             if (!byDate[duty.date]) {
@@ -748,7 +714,6 @@ async function loadDutiesForMonth() {
                 }
                 html += `</div>`;
                 
-                // Показываем участников наряда
                 if (duty.partners && duty.partners.length > 0) {
                     html += `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #334155;">`;
                     html += `<p style="color: #94A3B8; font-size: 12px; margin: 0 0 6px 0;">Участники наряда:</p>`;
@@ -778,9 +743,6 @@ async function loadDutiesForMonth() {
     }
 }
 
-/**
- * Изменяет месяц для просмотра нарядов
- */
 function changeMonth(delta) {
     currentMonth += delta;
     if (currentMonth > 12) {
@@ -793,9 +755,6 @@ function changeMonth(delta) {
     loadDutiesForMonth();
 }
 
-/**
- * Поиск нарядов по дате (показывает всех участников на эту дату из всех групп)
- */
 async function searchDutyByDate(dateStr) {
     if (!dateStr) return;
     
@@ -849,15 +808,11 @@ async function searchDutyByDate(dateStr) {
     }
 }
 
-/**
- * Очищает поиск по дате
- */
 function clearDateSearch() {
     document.getElementById('duty-date-search').value = '';
     document.getElementById('date-search-results').style.display = 'none';
 }
 
-// Вспомогательная функция для получения полного названия роли (если её нет в глобальной области)
 function get_full_role(roleCode) {
     const roles = {
         'к': 'Комендантский',
