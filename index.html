@@ -1,10 +1,26 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-    <meta http-equiv="refresh" content="0; url=/My-Bot/app/" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Перенаправление в Mini App</title>
+    <script>
+        (function () {
+            // GitHub Pages (репозиторий в подпапке) vs custom domain (корень сайта)
+            var host = window.location.hostname || '';
+            var isGithubPages = host.endsWith('github.io');
+            var target = isGithubPages ? '/My-Bot/app/' : '/app/';
+            // Сохраняем query/hash (если когда-то понадобится)
+            var suffix = (window.location.search || '') + (window.location.hash || '');
+            window.location.replace(target + suffix);
+        })();
+    </script>
 </head>
 <body>
-    <p>Перенаправление на Mini App... Если ничего не происходит, <a href="/My-Bot/app/">нажмите сюда</a>.</p>
+    <p>
+        Перенаправление на Mini App…
+        Если ничего не происходит, откройте вручную:
+        <a href="/app/">/app/</a>
+    </p>
 </body>
 </html>

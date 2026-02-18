@@ -7,11 +7,14 @@ const taskMap = {};
 document.addEventListener('DOMContentLoaded', async () => {
     const CURRENT_HOST = window.location.hostname;
 
-    if (CURRENT_HOST.includes('github.io')) {
-        baseUrl = "https://vitechbot.online";
-    } else {
-        baseUrl = "";
-    }
+    // API base URL:
+    // - локально (localhost/127.0.0.1) работаем с тем же origin (baseUrl = "")
+    // - во всех остальных случаях ходим на прод-домен API
+    const isLocal =
+        CURRENT_HOST === 'localhost' ||
+        CURRENT_HOST === '127.0.0.1' ||
+        CURRENT_HOST === '';
+    baseUrl = isLocal ? '' : 'https://vitechbot.online';
 
     // === Определяем пользователя ТОЛЬКО из Telegram ===
     if (window.Telegram && window.Telegram.WebApp) {
@@ -68,31 +71,35 @@ function setupEventListeners() {
 function switchTab(tabName) {
     currentTab = tabName;
 
-    // Скрываем все экраны
-    document.getElementById('main-content').classList.add('hidden');
-    document.getElementById('notes-screen').style.display = 'none';
-    document.getElementById('duties-screen').style.display = 'none';
-    document.getElementById('study-screen').style.display = 'none';
-    document.getElementById('rating-screen').style.display = 'none';
-    document.getElementById('survey-screen').style.display = 'none'; // новый экран опроса
-    document.getElementById('add-task-fab').style.display = 'none';
+    const mainContent = document.getElementById('main-content');
+    const notesScreen = document.getElementById('notes-screen');
+    const dutiesScreen = document.getElementById('duties-screen');
+    const studyScreen = document.getElementById('study-screen');
+    const surveyScreen = document.getElementById('survey-screen');
+    const addFab = document.getElementById('add-task-fab');
+
+    // Скрываем все экраны (без падения, даже если какого-то блока нет в DOM)
+    if (mainContent) mainContent.classList.add('hidden');
+    if (notesScreen) notesScreen.style.display = 'none';
+    if (dutiesScreen) dutiesScreen.style.display = 'none';
+    if (studyScreen) studyScreen.style.display = 'none';
+    if (surveyScreen) surveyScreen.style.display = 'none';
+    if (addFab) addFab.style.display = 'none';
 
     // Показываем нужный экран
     if (tabName === 'notes') {
-        document.getElementById('notes-screen').style.display = 'block';
-        document.getElementById('add-task-fab').style.display = 'flex';
+        if (notesScreen) notesScreen.style.display = 'block';
+        if (addFab) addFab.style.display = 'flex';
         loadTasks();
     } else if (tabName === 'duties') {
-        document.getElementById('duties-screen').style.display = 'block';
+        if (dutiesScreen) dutiesScreen.style.display = 'block';
     } else if (tabName === 'study') {
-        document.getElementById('study-screen').style.display = 'block';
-    } else if (tabName === 'rating') {
-        document.getElementById('rating-screen').style.display = 'block';
+        if (studyScreen) studyScreen.style.display = 'block';
     } else if (tabName === 'survey') {
-        document.getElementById('survey-screen').style.display = 'block';
+        if (surveyScreen) surveyScreen.style.display = 'block';
         loadSurveyObjects(); // загружаем список объектов для опроса
     } else { // home
-        document.getElementById('main-content').classList.remove('hidden');
+        if (mainContent) mainContent.classList.remove('hidden');
     }
 
     // Обновляем активную иконку
@@ -393,7 +400,17 @@ async function loadDuties(userId) {
                 <p>Через ${daysLeft} дней (${dateFormatted})</p>
             `;
         } else {
-            widget.innerHTML = `<h3>🎖️ Ближайший наряд</h3><p>Нарядов нет</p>`;
+            // Если таблица duties существует, но записей нет — предлагаем пройти опрос
+            const total = Number.isFinite(Number(data.total)) ? Number(data.total) : 0;
+            if (total === 0) {
+                widget.innerHTML = `
+                    <h3>🎖️ Ближайший наряд</h3>
+                    <p>Нарядов пока нет.</p>
+                    <p>Чтобы настроить систему, <a href="#" onclick="switchTab('survey'); return false;" style="color: #3B82F6;">пройдите опрос</a> о сложности объектов.</p>
+                `;
+            } else {
+                widget.innerHTML = `<h3>🎖️ Ближайший наряд</h3><p>Нарядов нет</p>`;
+            }
         }
 
         console.log("✅ Наряды загружены:", data.total);
