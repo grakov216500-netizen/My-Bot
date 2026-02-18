@@ -13,17 +13,21 @@ document.addEventListener('DOMContentLoaded', async () => {
         baseUrl = "";
     }
 
+    // === Определяем пользователя ТОЛЬКО из Telegram ===
     if (window.Telegram && window.Telegram.WebApp) {
         window.Telegram.WebApp.expand();
         const user = window.Telegram.WebApp.initDataUnsafe.user;
         userId = user?.id;
+
         if (!userId) {
-            console.warn("⚠️ Не удалось получить user.id из Telegram");
-            return showError("Не удалось определить пользователя");
+            console.error("❌ Не удалось получить user.id из Telegram");
+            showError("Это приложение должно открываться через Telegram. Закройте эту страницу и откройте бота.");
+            return; // останавливаем выполнение, если нет пользователя
         }
     } else {
-        userId = 1027070834;
-        console.log("🔧 Тестовый режим: userId =", userId);
+        console.error("❌ Telegram WebApp не доступен");
+        showError("Пожалуйста, откройте это приложение через Telegram бота.");
+        return;
     }
 
     console.log("✅ Загружаем данные для пользователя:", userId);
@@ -45,7 +49,7 @@ function setupEventListeners() {
     // Обработчики для нижней панели навигации
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
-            e.preventDefault(); // отменяем переход по ссылке
+            e.preventDefault();
             const tab = item.dataset.tab;
             if (tab) switchTab(tab);
         });
@@ -55,7 +59,7 @@ function setupEventListeners() {
     if (addBtn) addBtn.addEventListener('click', startAddTask);
 
     const closeMenu = document.getElementById('close-menu');
-    if (closeMenu) closeMenu.addEventListener('click', hideModal);
+    if ( closeMenu) closeMenu.addEventListener('click', hideModal);
 
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.addEventListener('input', filterTasks);
@@ -325,7 +329,10 @@ async function loadUserProfile(userId) {
         const response = await fetch(`${baseUrl}/api/user?telegram_id=${userId}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        if (data.error) return;
+        if (data.error) {
+            console.warn("⚠️ API вернуло ошибку:", data.error);
+            return;
+        }
 
         const avatar = document.querySelector('.avatar');
         if (avatar) {
@@ -337,9 +344,9 @@ async function loadUserProfile(userId) {
         const userCourseEl = document.getElementById('userCourse');
         const userGroupEl = document.getElementById('userGroup');
 
-        if (userNameEl) userNameEl.textContent = data.full_name;
-        if (userCourseEl) userCourseEl.textContent = `Курс: ${data.course}`;
-        if (userGroupEl) userGroupEl.textContent = `Группа: ${data.group}`;
+        if (userNameEl) userNameEl.textContent = data.full_name || "—";
+        if (userCourseEl) userCourseEl.textContent = `Курс: ${data.course || "—"}`;
+        if (userGroupEl) userGroupEl.textContent = `Группа: ${data.group || "—"}`;
 
         console.log("✅ Профиль загружен:", data.full_name);
     } catch (err) {
