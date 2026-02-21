@@ -12,372 +12,10 @@
   <!-- Подключаем внешние стили и скрипты -->
   <link rel="stylesheet" href="./style.css" />
   <script src="./script.js" defer></script>
-
-  <!-- Встроенные стили для гарантии работы экранов -->
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-      min-height: 100vh;
-      padding-bottom: 80px;
-    }
-
-    /* === ЭКРАНЫ (Полноэкранные контейнеры) === */
-    .screen {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      min-height: 100vh;
-      background: #0f172a;
-      display: none;
-      flex-direction: column;
-      z-index: 10;
-      padding-bottom: 80px;
-      overflow-y: auto;
-    }
-
-    .screen.active {
-      display: flex;
-    }
-
-    /* Главный контент тоже как экран */
-    #main-content {
-      position: relative;
-      padding: 16px;
-    }
-
-    #main-content:not(.hidden) {
-      display: block;
-    }
-
-    #main-content.hidden {
-      display: none;
-    }
-
-    /* === ШАПКА === */
-    .header {
-      position: sticky;
-      top: 0;
-      background: #1e293b;
-      padding: 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      z-index: 20;
-      border-bottom: 1px solid #334155;
-    }
-
-    .user-section {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .avatar {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      object-fit: cover;
-    }
-
-    .profile-info p {
-      margin: 2px 0;
-      font-size: 14px;
-      color: #94a3b8;
-    }
-
-    .profile-info p:first-child {
-      color: #e2e8f0;
-      font-weight: 600;
-    }
-
-    .header-icons {
-      display: flex;
-      gap: 8px;
-    }
-
-    .icon-btn {
-      background: transparent;
-      border: none;
-      color: #e2e8f0;
-      font-size: 20px;
-      cursor: pointer;
-      padding: 8px;
-      border-radius: 8px;
-    }
-
-    .icon-btn:hover {
-      background: #334155;
-    }
-
-    /* === ВИДЖЕТЫ === */
-    .widget {
-      background: #1e293b;
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 16px;
-      border-left: 4px solid #3b82f6;
-    }
-
-    .widget h3 {
-      color: #93c5fd;
-      margin-bottom: 8px;
-      font-size: 16px;
-    }
-
-    .widget p {
-      color: #cbd5e1;
-      font-size: 14px;
-    }
-
-    /* === ЭКРАН ЗАМЕТОК === */
-    #notes-screen {
-      padding-top: 80px; /* Отступ для шапки */
-    }
-
-    .search-bar {
-      position: fixed;
-      top: 73px; /* Высота header */
-      left: 0;
-      right: 0;
-      background: #1e293b;
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      z-index: 15;
-      border-bottom: 1px solid #334155;
-    }
-
-    .search-bar svg {
-      color: #64748b;
-      flex-shrink: 0;
-    }
-
-    .search-bar input {
-      flex: 1;
-      background: #0f172a;
-      border: 1px solid #334155;
-      border-radius: 8px;
-      padding: 10px 12px;
-      color: #e2e8f0;
-      font-size: 14px;
-      outline: none;
-    }
-
-    .search-bar input:focus {
-      border-color: #3b82f6;
-    }
-
-    #task-list {
-      padding: 80px 16px 16px; /* Отступ сверху для search-bar */
-    }
-
-    .task-card {
-      background: #1e293b;
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .task-card:hover {
-      background: #334155;
-    }
-
-    .task-card.task-done {
-      opacity: 0.6;
-    }
-
-    .task-card.task-done .task-text {
-      text-decoration: line-through;
-    }
-
-    .task-checkbox {
-      width: 24px;
-      height: 24px;
-      border: 2px solid #3b82f6;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .task-checkbox.checked {
-      background: #3b82f6;
-    }
-
-    .task-checkbox.checked::after {
-      content: '✓';
-      color: white;
-      font-size: 14px;
-    }
-
-    .task-text {
-      flex: 1;
-      color: #e2e8f0;
-      font-size: 14px;
-    }
-
-    .task-actions {
-      display: flex;
-      gap: 8px;
-    }
-
-    .task-actions button {
-      background: transparent;
-      border: none;
-      color: #94a3b8;
-      font-size: 16px;
-      cursor: pointer;
-      padding: 4px;
-    }
-
-    .task-actions button:hover {
-      color: #e2e8f0;
-    }
-
-    /* === FAB КНОПКА === */
-    #add-task-fab {
-      position: fixed;
-      bottom: 90px; /* Над навигацией */
-      right: 20px;
-      width: 56px;
-      height: 56px;
-      background: #3b82f6;
-      color: white;
-      border: none;
-      border-radius: 50%;
-      font-size: 28px;
-      cursor: pointer;
-      display: none; /* Скрыта по умолчанию */
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-      z-index: 30;
-      transition: transform 0.2s;
-    }
-
-    #add-task-fab:hover {
-      transform: scale(1.1);
-    }
-
-    #add-task-fab:active {
-      transform: scale(0.95);
-    }
-
-    /* === НИЖНЯЯ НАВИГАЦИЯ === */
-    .bottom-nav {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: #1e293b;
-      display: flex;
-      justify-content: space-around;
-      padding: 8px 0;
-      border-top: 1px solid #334155;
-      z-index: 40;
-    }
-
-    .nav-item {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-      color: #64748b;
-      text-decoration: none;
-      font-size: 12px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      transition: color 0.2s;
-    }
-
-    .nav-item.active {
-      color: #3b82f6;
-    }
-
-    .nav-item svg {
-      width: 24px;
-      height: 24px;
-      fill: currentColor;
-    }
-
-    /* === МОДАЛЬНОЕ МЕНЮ === */
-    .modal {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.7);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-    }
-
-    .modal-content {
-      background: #1e293b;
-      border-radius: 12px;
-      padding: 16px;
-      min-width: 280px;
-      max-width: 90%;
-    }
-
-    .menu-item {
-      padding: 12px 16px;
-      color: #e2e8f0;
-      cursor: pointer;
-      border-radius: 8px;
-      transition: background 0.2s;
-    }
-
-    .menu-item:hover {
-      background: #334155;
-    }
-
-    .menu-item.cancel {
-      color: #f87171;
-      margin-top: 8px;
-      border-top: 1px solid #334155;
-      padding-top: 12px;
-    }
-
-    /* === ЭКРАН ОПРОСА === */
-    #survey-screen {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(15, 23, 42, 0.95);
-      z-index: 50;
-      padding: 16px;
-      overflow-y: auto;
-    }
-
-    #survey-screen .survey-container {
-      max-width: 600px;
-      margin: 40px auto;
-      background: #0f172a;
-      border-radius: 16px;
-      padding: 20px;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-    }
-  </style>
 </head>
 <body>
-  <!-- Шапка -->
-  <header class="header">
+  <!-- Шапка (только на главной) -->
+  <header class="header" id="main-header">
     <div class="user-section" style="display: flex; align-items: center; gap: 12px;">
       <img src="https://ui-avatars.com/api/?name=Загрузка...&background=3B82F6&color=fff" 
            alt="Аватар" class="avatar" />
@@ -393,8 +31,8 @@
     </div>
   </header>
 
-  <!-- === ГЛАВНЫЙ ЭКРАН (виджеты) === -->
-  <main class="screen active" id="main-content">
+  <!-- Основной контент (виджеты) для главной -->
+  <main class="main" id="main-content">
     <div class="widget">
       <h3>🌡️ Погода в Воронеже</h3>
       <p>-3°C, снег ❄️</p>
@@ -422,20 +60,30 @@
     </div>
   </main>
 
-  <!-- === ЭКРАН ЗАМЕТОК (ЗАДАЧНИК) === -->
-  <div id="notes-screen" class="screen">
+  <!-- Экран заметок (задачник) – скрыт по умолчанию -->
+  <div id="notes-screen" style="display: none;">
+    <div class="notes-tabs">
+      <button id="tab-active" class="notes-tab active" onclick="setNotesTab('active')">Активные</button>
+      <button id="tab-done" class="notes-tab" onclick="setNotesTab('done')">Выполненные</button>
+    </div>
     <div class="search-bar">
-      <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M15.5 14.3l-3.7-3.7c1.2-1.5 1.8-3.4 1.5-5.3-0.4-2.3-2.2-4.1-4.5-4.5-3.9-0.8-7.2 2.4-6.4 6.3 0.4 2.3 2.2 4.1 4.5 4.5 1.9 0.3 3.8-0.3 5.3-1.5l3.7 3.7c0.4 0.4 1 0.4 1.4 0s0.4-1 0-1.4z"/></svg>
+      <svg width="16" height="16" fill="currentColor"><path d="M15.5 14.3l-3.7-3.7c1.2-1.5 1.8-3.4 1.5-5.3-0.4-2.3-2.2-4.1-4.5-4.5-3.9-0.8-7.2 2.4-6.4 6.3 0.4 2.3 2.2 4.1 4.5 4.5 1.9 0.3 3.8-0.3 5.3-1.5l3.7 3.7c0.4 0.4 1 0.4 1.4 0s0.4-1 0-1.4z"/></svg>
       <input type="text" id="search-input" placeholder="Поиск по задачам..." />
     </div>
     <div class="task-list" id="task-list">
-      <p style="color: #6b7280; text-align: center; padding-top: 40px;">Загрузка задач...</p>
+      <p style="color: #6b7280; text-align: center;">Загрузка задач...</p>
     </div>
   </div>
 
-  <!-- === ЭКРАН НАРЯДОВ === -->
-  <div id="duties-screen" class="screen">
-    <div style="padding: 80px 16px 16px;">
+  <!-- Экран нарядов – скрыт по умолчанию -->
+  <div id="duties-screen" style="display: none;">
+    <div style="padding: 16px;">
+      <!-- Баннер: сначала проголосуйте -->
+      <div id="duty-survey-banner" style="background: #1E293B; border: 1px solid #3B82F6; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+        <p style="color: #93C5FD; margin: 0 0 8px 0; font-weight: 600;">📊 Для работы нарядов сначала проголосуйте</p>
+        <p style="color: #94A3B8; font-size: 14px; margin: 0 0 12px 0;">Оцените сложность объектов. Без опроса веса нарядов не рассчитаются.</p>
+        <a href="#" onclick="switchTab('survey'); return false;" style="display: inline-block; background: #3B82F6; color: white; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-size: 14px;">Пройти опрос →</a>
+      </div>
       <!-- Навигация по месяцам -->
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <button id="prev-month-btn" onclick="changeMonth(-1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">←</button>
@@ -467,19 +115,38 @@
     </div>
   </div>
 
-  <!-- === ЭКРАН УЧЁБЫ === -->
-  <div id="study-screen" class="screen">
-    <div style="padding: 80px 16px 16px;">
-      <div class="widget">
-        <h3>📚 Учёба</h3>
-        <p>Модуль в разработке. Здесь будут учебные материалы и расписание.</p>
-      </div>
+  <!-- Экран учёбы (заглушка) – скрыт по умолчанию -->
+  <div id="study-screen" style="display: none;">
+    <div class="widget">
+      <h3>📚 Учёба</h3>
+      <p>Модуль в разработке. Здесь будут учебные материалы и расписание.</p>
     </div>
   </div>
 
-  <!-- === ЭКРАН ОПРОСА === -->
-  <div id="survey-screen" class="screen">
-    <div class="survey-container">
+  <!-- Экран опроса – теперь в виде полноэкранного всплывающего окна (модалки) -->
+  <div
+    id="survey-screen"
+    style="
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15,23,42,0.9);
+      z-index: 1000;
+      padding: 16px;
+      box-sizing: border-box;
+      overflow-y: auto;
+    "
+  >
+    <div
+      style="
+        max-width: 600px;
+        margin: 0 auto;
+        background: #0f172a;
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+      "
+    >
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <h2 style="color: #93C5FD; margin: 0;">📊 Опрос сложности нарядов</h2>
         <button
@@ -496,12 +163,12 @@
           ✕
         </button>
       </div>
-      <p style="color: #CBD5E1; margin-bottom: 16px;">
-        Оцените каждый объект по шкале от 1 (очень легко) до 5 (очень тяжело).
-        Ваше мнение поможет справедливо распределять нагрузку.
+      <p style="color: #CBD5E1; margin-bottom: 16px;" id="survey-description">
+        Какой наряд сложнее морально/физически? Выберите один вариант.
       </p>
+      <div id="survey-stage-indicator" style="color: #93C5FD; font-size: 14px; margin-bottom: 12px;"></div>
       <div id="survey-objects-container">
-        <p style="color: #6b7280; text-align: center;">Загрузка объектов...</p>
+        <p style="color: #6b7280; text-align: center;">Загрузка пар...</p>
       </div>
       <button
         id="submit-survey-btn"
@@ -516,7 +183,7 @@
           cursor: pointer;
         "
       >
-        Отправить все оценки
+        Отправить
       </button>
     </div>
   </div>
@@ -524,7 +191,7 @@
   <!-- Кнопка добавления задачи (видна только в заметках) -->
   <button id="add-task-fab" onclick="startAddTask()">+</button>
 
-  <!-- Нижняя панель навигации -->
+  <!-- Нижняя панель навигации (всегда видна) – временно заменил "Рейтинг" на "Опрос" -->
   <nav class="bottom-nav" id="bottom-nav">
     <a href="#notes" class="nav-item" data-tab="notes">
       <svg><use xlink:href="#icon-notes"/></svg>
@@ -548,7 +215,7 @@
     </a>
   </nav>
 
-  <!-- Иконки SVG -->
+  <!-- Иконки SVG (скрыты) – добавил иконку для опроса -->
   <svg style="display: none;">
     <symbol id="icon-home" viewBox="0 0 24 24">
       <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
@@ -565,10 +232,13 @@
     <symbol id="icon-survey" viewBox="0 0 24 24">
       <path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h-2v2z"/>
     </symbol>
+    <symbol id="icon-rating" viewBox="0 0 24 24">
+      <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+    </symbol>
   </svg>
 
   <!-- Модальное меню для задач -->
-  <div class="modal" id="task-menu">
+  <div class="modal" id="task-menu" style="display:none;">
     <div class="modal-content">
       <div class="menu-item" id="edit-task">✏️ Редактировать</div>
       <div class="menu-item" id="delete-task">🗑 Удалить</div>

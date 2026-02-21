@@ -168,7 +168,7 @@ body::-webkit-scrollbar-thumb:hover {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: calc(100vh - 200px);
+  max-height: calc(100vh - 280px); /* место под шапку, табы, поиск, FAB, nav */
   overflow-y: auto;
 }
 .task-list::-webkit-scrollbar {
@@ -338,8 +338,46 @@ body::-webkit-scrollbar-thumb:hover {
 }
 
 /* === Отступ для контента, чтобы не перекрывать панель === */
-.main, #notes-screen {
-  padding-bottom: 80px; /* увеличен, так как панель приподнята */
+.main {
+  padding-bottom: 80px;
+}
+#notes-screen {
+  padding-bottom: 150px; /* FAB + nav bar — чтобы + не накладывалась на список */
+}
+#notes-screen .search-bar {
+  margin-top: 12px;
+}
+
+/* === Заметки: вкладки Активные / Выполненные === */
+.notes-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.notes-tab {
+  flex: 1;
+  padding: 10px 16px;
+  background: #1E293B;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #94A3B8;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.notes-tab:hover {
+  border-color: #3B82F6;
+  color: #CBD5E1;
+}
+.notes-tab.active {
+  background: #3B82F6;
+  border-color: #3B82F6;
+  color: white;
+}
+
+/* === Экран нарядов: отступ снизу === */
+#duties-screen {
+  padding-bottom: 100px;
 }
 
 /* === Модальное меню (три точки) === */

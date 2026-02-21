@@ -91,21 +91,45 @@ def init_db():
         )
     ''')
 
-    # === 3.2 ТАБЛИЦА ГОЛОСОВ (ИСПРАВЛЕНО: survey_responses + user_id) ===
+    # === 3.2 ТАБЛИЦА ГОЛОСОВ — попарное сравнение (2/1/0) ===
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS survey_responses (
+        CREATE TABLE IF NOT EXISTS survey_pair_votes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            object_id INTEGER NOT NULL,
-            rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+            object_a_id INTEGER NOT NULL,
+            object_b_id INTEGER NOT NULL,
+            choice TEXT NOT NULL CHECK(choice IN ('a', 'b', 'equal')),
+            stage TEXT NOT NULL CHECK(stage IN ('main', 'canteen')),
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id),
-            FOREIGN KEY (object_id) REFERENCES duty_objects (id),
-            UNIQUE(user_id, object_id) ON CONFLICT REPLACE
+            FOREIGN KEY (object_a_id) REFERENCES duty_objects (id),
+            FOREIGN KEY (object_b_id) REFERENCES duty_objects (id),
+            UNIQUE(user_id, object_a_id, object_b_id) ON CONFLICT REPLACE
         )
     ''')
 
-    # === 3.3 ТАБЛИЦА ВЕСОВ/МЕДИАН (НОВОЕ!) ===
+    # Миграция: создать survey_pair_votes если ещё нет (старые БД)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='survey_pair_votes'")
+    if not cursor.fetchone():
+        cursor.execute('''
+            CREATE TABLE survey_pair_votes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                object_a_id INTEGER NOT NULL,
+                object_b_id INTEGER NOT NULL,
+                choice TEXT NOT NULL CHECK(choice IN ('a', 'b', 'equal')),
+                stage TEXT NOT NULL CHECK(stage IN ('main', 'canteen')),
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id),
+                FOREIGN KEY (object_a_id) REFERENCES duty_objects (id),
+                FOREIGN KEY (object_b_id) REFERENCES duty_objects (id),
+                UNIQUE(user_id, object_a_id, object_b_id) ON CONFLICT REPLACE
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pair_votes_user ON survey_pair_votes (user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pair_votes_stage ON survey_pair_votes (stage)')
+
+    # === 3.3 ТАБЛИЦА ВЕСОВ (k = S/avg, итог = 10 × k) ===
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS object_weights (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,9 +176,9 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_duty_group_year ON duty_schedule (group_name, enrollment_year)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_duty_gender ON duty_schedule (gender)')
     
-    # Индексы для опроса
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_survey_user ON survey_responses (user_id)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_survey_object ON survey_responses (object_id)')
+    # Индексы для опроса (попарное голосование)
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_pair_votes_user ON survey_pair_votes (user_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_pair_votes_stage ON survey_pair_votes (stage)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_duty_objects_parent ON duty_objects (parent_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_object_weights_object ON object_weights (object_id)')
 
@@ -256,7 +280,10 @@ def check_and_update_courses():
 # === НОВЫЕ ФУНКЦИИ ДЛЯ ОПРОСА (синхронизировано с server.py) ===
 
 def init_survey_objects():
-    """Инициализирует объекты для голосования (вызывается один раз при старте server.py)"""
+    """Инициализирует объекты для попарного голосования (2/1/0).
+    Этап 1: Курс, ГБР, Столовая, ЗУБ (4 объекта, 6 пар).
+    Этап 2: ГЦ, Овощной цех, Тарелки, Железо, Стаканы, Лента (6 подобъектов столовой, 15 пар).
+    """
     conn = get_db()
     cursor = conn.cursor()
     
@@ -267,61 +294,36 @@ def init_survey_objects():
         print("ℹ️ Объекты для опроса уже существуют")
         return
     
-    # Родительские категории
-    categories = [
-        ('Столовая', None),
-        ('КПП', None),
-        ('Патруль', None),
-        ('Смена', None),
-    ]
-    
-    for name, parent_id in categories:
-        cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, parent_id))
+    # Этап 1: Основные наряды (4 шт.)
+    main_duties = ['Курс', 'ГБР', 'Столовая', 'ЗУБ']
+    for name in main_duties:
+        cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, None))
     
     conn.commit()
     
-    # Получаем ID категорий для добавления подобъектов
-    cursor.execute("SELECT id, name FROM duty_objects WHERE parent_id IS NULL")
-    categories = cursor.fetchall()
-    
-    # Дочерние объекты
-    subobjects = {
-        'Столовая': ['Раздача', 'Тарелки', 'Полы', 'Мусор'],
-        'КПП': ['Документы', 'Ключи', 'Журнал'],
-        'Патруль': ['Этажи', 'Территория', 'Парковка'],
-        'Смена': ['Утро', 'День', 'Вечер', 'Ночь'],
-    }
-    
-    for category in categories:
-        cat_id = category['id']
-        cat_name = category['name']
-        if cat_name in subobjects:
-            for subname in subobjects[cat_name]:
-                cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (subname, cat_id))
+    # Этап 2: Объекты столовой (6 шт.)
+    cursor.execute("SELECT id FROM duty_objects WHERE name='Столовая' AND parent_id IS NULL")
+    row = cursor.fetchone()
+    if row:
+        canteen_id = row['id']
+        canteen_objects = ['Горячий цех', 'Овощной цех', 'Тарелки', 'Железо', 'Стаканы', 'Лента']
+        for name in canteen_objects:
+            cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, canteen_id))
     
     conn.commit()
     conn.close()
-    print("✅ Объекты для опроса инициализированы")
+    print("✅ Объекты для опроса (попарное голосование) инициализированы")
 
 def get_survey_results_by_course(course_year):
-    """Получает результаты опроса для конкретного курса"""
+    """Получает результаты опроса (веса объектов). course_year пока не фильтрует — веса глобальные."""
     conn = get_db()
     cursor = conn.cursor()
-    
     cursor.execute('''
-        SELECT 
-            o.id, o.name, o.parent_id,
-            AVG(sr.rating) as avg_rating,
-            COUNT(sr.rating) as vote_count
+        SELECT o.id, o.name, o.parent_id, w.weight as avg_rating
         FROM duty_objects o
-        LEFT JOIN survey_responses sr ON o.id = sr.object_id
-        LEFT JOIN users u ON sr.user_id = u.id
-        WHERE u.enrollment_year = ? OR ? IS NULL
-        GROUP BY o.id
+        LEFT JOIN object_weights w ON o.id = w.object_id
         ORDER BY o.parent_id, o.id
-    ''', (course_year, course_year))
-    
+    ''')
     results = cursor.fetchall()
     conn.close()
-    
     return [dict(r) for r in results]

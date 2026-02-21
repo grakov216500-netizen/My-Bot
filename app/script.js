@@ -1,13 +1,17 @@
 // Глобальные переменные
 let baseUrl = '';
 let userId = null;
-let userFio = null;
+let userFio = null; // ФИО текущего пользователя
 let tasks = [];
 const taskMap = {};
+let notesTab = 'active'; // 'active' | 'done'
 
 document.addEventListener('DOMContentLoaded', async () => {
     const CURRENT_HOST = window.location.hostname;
 
+    // API base URL:
+    // - локально (localhost/127.0.0.1) работаем с тем же origin (baseUrl = "")
+    // - во всех остальных случаях ходим на прод-домен API
     const isLocal =
         CURRENT_HOST === 'localhost' ||
         CURRENT_HOST === '127.0.0.1' ||
@@ -23,7 +27,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!userId) {
             console.error("❌ Не удалось получить user.id из Telegram");
             showError("Это приложение должно открываться через Telegram. Закройте эту страницу и откройте бота.");
-            return;
+            return; // останавливаем выполнение, если нет пользователя
         }
     } else {
         console.error("❌ Telegram WebApp не доступен");
@@ -38,11 +42,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadUserProfile(userId);
     await loadDuties(userId);
-    await loadSurveyResults();
+    await loadSurveyResults(); // Загружаем результаты опроса, если пользователь уже прошёл его
 });
 
 let currentTab = 'home';
-let currentMonth = new Date().getMonth() + 1;
+let currentMonth = new Date().getMonth() + 1; // 1-12
 let currentYear = new Date().getFullYear();
 
 function setupNavigation() {
@@ -50,6 +54,7 @@ function setupNavigation() {
 }
 
 function setupEventListeners() {
+    // Обработчики для нижней панели навигации
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
@@ -62,22 +67,12 @@ function setupEventListeners() {
     if (addBtn) addBtn.addEventListener('click', startAddTask);
 
     const closeMenu = document.getElementById('close-menu');
-    if (closeMenu) closeMenu.addEventListener('click', hideModal);
+    if ( closeMenu) closeMenu.addEventListener('click', hideModal);
 
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.addEventListener('input', filterTasks);
-
-    // Закрытие модального меню при клике вне его
-    document.addEventListener('click', (e) => {
-        const menu = document.getElementById('task-menu');
-        const taskCard = e.target.closest('.task-card');
-        if (menu && menu.style.display === 'flex' && !taskCard && !e.target.closest('.modal-content')) {
-            hideModal();
-        }
-    });
 }
 
-// ✅ ИСПРАВЛЕНА: Теперь использует классы вместо inline-стилей
 function switchTab(tabName) {
     currentTab = tabName;
 
@@ -88,50 +83,45 @@ function switchTab(tabName) {
     const surveyScreen = document.getElementById('survey-screen');
     const addFab = document.getElementById('add-task-fab');
 
-    // Скрываем ВСЕ экраны через классы
-    const screens = [mainContent, notesScreen, dutiesScreen, studyScreen, surveyScreen];
-    screens.forEach(screen => {
-        if (screen) {
-            screen.classList.remove('active');
-            // Для main-content используем hidden класс
-            if (screen.id === 'main-content') {
-                screen.classList.add('hidden');
-            }
-        }
-    });
+    // Шапка: показываем только на главной
+    const header = document.getElementById('main-header');
+    if (header) header.style.display = (tabName === 'home') ? 'flex' : 'none';
 
-    // Скрываем FAB по умолчанию
+    // Скрываем все экраны (без падения, даже если какого-то блока нет в DOM)
+    if (mainContent) mainContent.classList.add('hidden');
+    if (notesScreen) notesScreen.style.display = 'none';
+    if (dutiesScreen) dutiesScreen.style.display = 'none';
+    if (studyScreen) studyScreen.style.display = 'none';
+    if (surveyScreen) surveyScreen.style.display = 'none';
     if (addFab) addFab.style.display = 'none';
 
     // Показываем нужный экран
     if (tabName === 'notes') {
-        if (notesScreen) notesScreen.classList.add('active');
+        if (notesScreen) notesScreen.style.display = 'block';
         if (addFab) addFab.style.display = 'flex';
         loadTasks();
     } else if (tabName === 'duties') {
-        if (dutiesScreen) dutiesScreen.classList.add('active');
-        loadDutiesForMonth();
+        if (dutiesScreen) dutiesScreen.style.display = 'block';
+        loadDutiesForMonth(); // Загружаем наряды на текущий месяц
     } else if (tabName === 'study') {
-        if (studyScreen) studyScreen.classList.add('active');
+        if (studyScreen) studyScreen.style.display = 'block';
     } else if (tabName === 'survey') {
-        if (surveyScreen) surveyScreen.classList.add('active');
-        loadSurveyObjects();
+        if (surveyScreen) surveyScreen.style.display = 'block';
+        // Проверяем, прошёл ли пользователь уже опрос
+        loadSurveyObjects(); // загружаем список объектов для опроса
     } else { // home
-        if (mainContent) {
-            mainContent.classList.remove('hidden');
-            mainContent.classList.add('active');
-        }
+        if (mainContent) mainContent.classList.remove('hidden');
     }
 
     // Обновляем активную иконку
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.tab === tabName);
     });
-
-    // Прокрутка вверх при переключении
-    window.scrollTo(0, 0);
 }
 
+/**
+ * Загружает задачи с сервера
+ */
 async function loadTasks() {
     try {
         const response = await fetch(`${baseUrl}/api/tasks?user_id=${userId}`);
@@ -140,18 +130,38 @@ async function loadTasks() {
         console.log(`✅ Загружено ${tasks.length} задач`);
     } catch (err) {
         console.error("❌ Ошибка загрузки задач:", err);
-        document.getElementById('task-list').innerHTML = '<p style="color: #f87171; text-align: center; padding-top: 40px;">Ошибка загрузки</p>';
+        document.getElementById('task-list').innerHTML = '<p style="color: #f87171;">Ошибка загрузки</p>';
     }
 }
 
+/**
+ * Переключает вкладку Активные / Выполненные
+ */
+function setNotesTab(tab) {
+    notesTab = tab;
+    document.getElementById('tab-active').classList.toggle('active', tab === 'active');
+    document.getElementById('tab-done').classList.toggle('active', tab === 'done');
+    renderTaskList(document.getElementById('search-input').value);
+}
+
+/**
+ * Отображает список задач
+ */
 function renderTaskList(filterText = '') {
     const container = document.getElementById('task-list');
     if (!container) return;
 
-    const filtered = tasks.filter(t => t.text.toLowerCase().includes(filterText.toLowerCase()));
+    let filtered = tasks.filter(t => t.text.toLowerCase().includes((filterText || '').toLowerCase()));
+    // Фильтр по вкладке Активные / Выполненные
+    if (notesTab === 'active') {
+        filtered = filtered.filter(t => !t.done);
+    } else {
+        filtered = filtered.filter(t => t.done);
+    }
 
     if (filtered.length === 0) {
-        container.innerHTML = '<p style="color: #64748B; text-align: center; padding-top: 40px;">Нет задач</p>';
+        const msg = notesTab === 'active' ? 'Нет активных задач' : 'Нет выполненных задач';
+        container.innerHTML = `<p style="color: #64748B; text-align: center;">${msg}</p>`;
         return;
     }
 
@@ -194,9 +204,11 @@ function renderTaskList(filterText = '') {
 
         actions.appendChild(bellBtn);
         actions.appendChild(menuBtn);
+
         div.appendChild(checkbox);
         div.appendChild(textSpan);
         div.appendChild(actions);
+
         container.appendChild(div);
     });
 }
@@ -220,7 +232,8 @@ async function toggleTaskDone(taskId) {
         });
 
         task.done = newStatus;
-        renderTaskList(document.getElementById('search-input').value);
+        const q = document.getElementById('search-input');
+        renderTaskList(q ? q.value : '');
         console.log(`✅ Задача ${taskId} отмечена как ${newStatus ? 'выполнена' : 'активна'}`);
     } catch (err) {
         console.error("❌ Ошибка обновления статуса:", err);
@@ -276,7 +289,8 @@ async function editTask(taskId) {
         });
 
         task.text = newText.trim();
-        renderTaskList(document.getElementById('search-input').value);
+        const q = document.getElementById('search-input');
+        renderTaskList(q ? q.value : '');
         console.log("✅ Задача отредактирована");
     } catch (err) {
         console.error("❌ Ошибка редактирования:", err);
@@ -295,7 +309,8 @@ async function deleteTask(taskId) {
         });
 
         tasks = tasks.filter(t => t.id !== taskId);
-        renderTaskList(document.getElementById('search-input').value);
+        const q = document.getElementById('search-input');
+        renderTaskList(q ? q.value : '');
         console.log("✅ Задача удалена");
     } catch (err) {
         console.error("❌ Ошибка удаления:", err);
@@ -376,7 +391,9 @@ async function loadUserProfile(userId) {
         if (userCourseEl) userCourseEl.textContent = `Курс: ${data.course || "—"}`;
         if (userGroupEl) userGroupEl.textContent = `Группа: ${data.group || "—"}`;
         
+        // Сохраняем ФИО для использования в других функциях
         userFio = fullName;
+
         console.log("✅ Профиль загружен:", fullName);
     } catch (err) {
         console.error("❌ Ошибка загрузки профиля:", err);
@@ -394,6 +411,7 @@ async function loadDuties(userId) {
         if (!widget) return;
 
         if (data.error) {
+            // Специальная обработка для отсутствия таблицы duties
             if (data.error.includes('no such table')) {
                 widget.innerHTML = `
                     <h3>🎖️ Ближайший наряд</h3>
@@ -417,6 +435,7 @@ async function loadDuties(userId) {
                 <p>Через ${daysLeft} дней (${dateFormatted})</p>
             `;
         } else {
+            // Если таблица duties существует, но записей нет — предлагаем пройти опрос
             const total = Number.isFinite(Number(data.total)) ? Number(data.total) : 0;
             if (total === 0) {
                 widget.innerHTML = `
@@ -437,117 +456,171 @@ async function loadDuties(userId) {
     }
 }
 
+// === ОПРОСНИК — попарное сравнение 2/1/0 ===
+
+let surveyPairsMain = [];
+let surveyPairsCanteen = [];
+let surveyCurrentStage = 'main';
+
+/**
+ * Загружает пары для попарного голосования и отображает их
+ */
 async function loadSurveyObjects() {
     const container = document.getElementById('survey-objects-container');
+    const stageIndicator = document.getElementById('survey-stage-indicator');
     if (!container) return;
 
     try {
-        const response = await fetch(`${baseUrl}/api/survey/objects`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const objects = await response.json();
+        // Загружаем пары Этапа 1 (основные наряды)
+        const resMain = await fetch(`${baseUrl}/api/survey/pairs?stage=main`);
+        if (!resMain.ok) throw new Error(`HTTP ${resMain.status}`);
+        const dataMain = await resMain.json();
+        surveyPairsMain = dataMain.pairs || [];
 
-        const parents = objects.filter(obj => obj.parent_id === null);
-        const childrenMap = {};
-        
-        objects.forEach(obj => {
-            if (obj.parent_id !== null) {
-                if (!childrenMap[obj.parent_id]) {
-                    childrenMap[obj.parent_id] = [];
-                }
-                childrenMap[obj.parent_id].push(obj);
-            }
-        });
+        // Загружаем пары Этапа 2 (объекты столовой)
+        const resCanteen = await fetch(`${baseUrl}/api/survey/pairs?stage=canteen`);
+        if (!resCanteen.ok) surveyPairsCanteen = [];
+        else {
+            const dataCanteen = await resCanteen.json();
+            surveyPairsCanteen = dataCanteen.pairs || [];
+        }
 
-        let html = '';
-        
-        parents.forEach(parent => {
-            html += `<h3 style="color: #93C5FD; margin: 24px 0 12px 0; font-size: 18px; font-weight: 600;">${parent.name}</h3>`;
-            
-            const children = childrenMap[parent.id] || [];
-            if (children.length === 0) {
-                html += `<p style="color: #64748B; font-style: italic; margin-bottom: 12px;">Нет подобъектов для оценки</p>`;
-            } else {
-                children.forEach(child => {
-                    html += `
-                        <div style="display: flex; align-items: center; justify-content: space-between; background: #1E293B; padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid #3B82F6;">
-                            <span style="color: #CBD5E1; font-size: 14px;">${child.name}</span>
-                            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                                ${[1,2,3,4,5].map(i => `
-                                    <label style="color: #94A3B8; cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: background 0.2s;">
-                                        <input type="radio" name="obj_${child.id}" value="${i}" style="margin-right: 4px; cursor: pointer;"> ${i}
-                                    </label>
-                                `).join('')}
-                            </div>
-                        </div>
-                    `;
-                });
-            }
-        });
-        
-        container.innerHTML = html;
+        surveyCurrentStage = 'main';
+        renderSurveyPairs('main');
+        stageIndicator.textContent = 'Этап 1 из 2: Основные наряды (Курс, ГБР, Столовая, ЗУБ) — 6 пар';
 
-        document.getElementById('submit-survey-btn').onclick = async () => {
-            const votes = [];
-            objects.forEach(obj => {
-                const radios = document.getElementsByName(`obj_${obj.id}`);
-                let selected = null;
-                for (const radio of radios) {
-                    if (radio.checked) {
-                        selected = radio.value;
-                        break;
-                    }
-                }
-                if (selected) {
-                    votes.push({ object_id: obj.id, rating: parseInt(selected) });
-                }
-            });
-            if (votes.length === 0) {
-                alert('Выберите хотя бы одну оценку');
-                return;
-            }
-            
-            let lastResult = null;
-            let allSuccess = true;
-            
-            for (const vote of votes) {
-                try {
-                    const res = await fetch(`${baseUrl}/api/survey/vote`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_id: userId, object_id: vote.object_id, rating: vote.rating })
-                    });
-                    if (!res.ok) {
-                        const err = await res.json();
-                        alert(`Ошибка: ${err.detail || 'Не удалось отправить голос'}`);
-                        allSuccess = false;
-                        break;
-                    }
-                    lastResult = await res.json();
-                } catch (err) {
-                    console.error(err);
-                    alert('Ошибка сети');
-                    allSuccess = false;
-                    break;
-                }
-            }
-            
-            if (allSuccess && lastResult) {
-                const message = lastResult.total_voted >= 100 
-                    ? 'Спасибо! Ваши оценки сохранены.\n\n✅ Опрос завершён! Медианы рассчитаны автоматически.'
-                    : `Спасибо! Ваши оценки сохранены.\n\nПроголосовало: ${lastResult.total_voted} человек`;
-                alert(message);
-                await loadSurveyResults();
-            } else if (allSuccess) {
-                alert('Спасибо! Ваши оценки сохранены.');
-            }
-            switchTab('home');
-        };
+        document.getElementById('submit-survey-btn').onclick = handleSurveySubmit;
     } catch (err) {
-        console.error('❌ Ошибка загрузки объектов:', err);
-        container.innerHTML = '<p style="color: #f87171; text-align: center;">Ошибка загрузки опроса</p>';
+        console.error('❌ Ошибка загрузки опроса:', err);
+        container.innerHTML = '<p style="color: #f87171;">Ошибка загрузки опроса</p>';
     }
 }
 
+function renderSurveyPairs(stage) {
+    const container = document.getElementById('survey-objects-container');
+    const stageIndicator = document.getElementById('survey-stage-indicator');
+    if (!container) return;
+
+    const pairs = stage === 'main' ? surveyPairsMain : surveyPairsCanteen;
+
+    if (pairs.length === 0) {
+        container.innerHTML = '<p style="color: #64748B;">Нет пар для голосования</p>';
+        return;
+    }
+
+    let html = '';
+    pairs.forEach((pair, idx) => {
+        const a = pair.object_a;
+        const b = pair.object_b;
+        const name = `pair_${a.id}_${b.id}`;
+        html += `
+            <div style="background: #1E293B; border-radius: 8px; padding: 14px; margin-bottom: 12px; border-left: 4px solid #3B82F6;">
+                <p style="color: #94A3B8; font-size: 13px; margin-bottom: 10px;">Пара ${idx + 1} из ${pairs.length}</p>
+                <p style="color: #CBD5E1; margin-bottom: 10px;">Какой наряд сложнее морально/физически?</p>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    <label style="flex: 1; min-width: 120px; display: flex; align-items: center; justify-content: center; padding: 10px; background: #0f172a; border-radius: 8px; cursor: pointer; border: 2px solid #334155; transition: all 0.2s;" class="pair-choice" data-choice="a" data-name="${name}">
+                        <input type="radio" name="${name}" value="a" style="margin-right: 8px;"> <span>${a.name} сложнее</span>
+                    </label>
+                    <label style="flex: 1; min-width: 100px; display: flex; align-items: center; justify-content: center; padding: 10px; background: #0f172a; border-radius: 8px; cursor: pointer; border: 2px solid #334155; transition: all 0.2s;" class="pair-choice" data-choice="equal" data-name="${name}">
+                        <input type="radio" name="${name}" value="equal" style="margin-right: 8px;"> <span>Одинаково</span>
+                    </label>
+                    <label style="flex: 1; min-width: 120px; display: flex; align-items: center; justify-content: center; padding: 10px; background: #0f172a; border-radius: 8px; cursor: pointer; border: 2px solid #334155; transition: all 0.2s;" class="pair-choice" data-choice="b" data-name="${name}">
+                        <input type="radio" name="${name}" value="b" style="margin-right: 8px;"> <span>${b.name} сложнее</span>
+                    </label>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+
+    // Подсветка при выборе
+    container.querySelectorAll('.pair-choice').forEach(el => {
+        el.addEventListener('click', function() {
+            container.querySelectorAll(`[data-name="${this.dataset.name}"]`).forEach(l => l.style.borderColor = '#334155');
+            this.style.borderColor = '#3B82F6';
+        });
+    });
+}
+
+async function handleSurveySubmit() {
+    const stage = surveyCurrentStage;
+    const pairs = stage === 'main' ? surveyPairsMain : surveyPairsCanteen;
+
+    const votes = [];
+    for (const pair of pairs) {
+        const a = pair.object_a;
+        const b = pair.object_b;
+        const name = `pair_${a.id}_${b.id}`;
+        const radio = document.querySelector(`input[name="${name}"]:checked`);
+        if (radio) {
+            votes.push({ object_a_id: a.id, object_b_id: b.id, choice: radio.value, stage });
+        }
+    }
+
+    if (votes.length === 0) {
+        alert('Выберите хотя бы один вариант');
+        return;
+    }
+    if (votes.length < pairs.length) {
+        alert(`Ответьте на все ${pairs.length} пар(ы)`);
+        return;
+    }
+
+    let allSuccess = true;
+    let lastResult = null;
+
+    for (const v of votes) {
+        try {
+            const res = await fetch(`${baseUrl}/api/survey/pair-vote`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: userId,
+                    object_a_id: v.object_a_id,
+                    object_b_id: v.object_b_id,
+                    choice: v.choice,
+                    stage: v.stage
+                })
+            });
+            if (!res.ok) {
+                const err = await res.json();
+                alert(`Ошибка: ${err.detail || 'Не удалось отправить голос'}`);
+                allSuccess = false;
+                break;
+            }
+            lastResult = await res.json();
+        } catch (err) {
+            console.error(err);
+            alert('Ошибка сети');
+            allSuccess = false;
+            break;
+        }
+    }
+
+    if (!allSuccess) return;
+
+    // Если это был Этап 1 и есть Этап 2 — переключаемся
+    if (stage === 'main' && surveyPairsCanteen.length > 0) {
+        surveyCurrentStage = 'canteen';
+        renderSurveyPairs('canteen');
+        document.getElementById('survey-stage-indicator').textContent = 
+            'Этап 2 из 2: Объекты столовой (ГЦ, овощи, тарелки, железо, стаканы, лента) — 15 пар';
+        return;
+    }
+
+    // Этап 2 завершён или Этап 1 без Этапа 2
+    const msg = lastResult && lastResult.total_voted 
+        ? `Спасибо! Ваши голоса учтены. Проголосовало: ${lastResult.total_voted} чел.`
+        : 'Спасибо! Ваши голоса учтены.';
+    alert(msg);
+    await loadSurveyResults();
+    switchTab('home');
+}
+
+/**
+ * Загружает и отображает результаты опроса для пользователя, который уже прошёл опрос
+ */
 async function loadSurveyResults() {
     try {
         const response = await fetch(`${baseUrl}/api/survey/user-results?telegram_id=${userId}`);
@@ -555,33 +628,36 @@ async function loadSurveyResults() {
         const data = await response.json();
         
         if (!data.voted) {
+            // Пользователь ещё не прошёл опрос - ничего не показываем
             return;
         }
         
-        const votedObjects = data.results.filter(r => r.user_rating !== null && r.parent_id !== null);
+        // Показываем объекты с рассчитанными весами (родители и подобъекты)
+        const votedObjects = data.results.filter(r => r.median_weight != null);
         
         if (votedObjects.length === 0) {
-            return;
+            return; // Веса ещё не рассчитаны
         }
         
+        // Группируем по родителям (parent_id = null — основные наряды, иначе подобъекты столовой)
         const parentsMap = {};
         votedObjects.forEach(obj => {
-            if (!parentsMap[obj.parent_id]) {
-                parentsMap[obj.parent_id] = [];
-            }
-            parentsMap[obj.parent_id].push(obj);
+            const pid = obj.parent_id || 'main';
+            if (!parentsMap[pid]) parentsMap[pid] = [];
+            parentsMap[pid].push(obj);
         });
         
         const parentNames = {};
         data.results.forEach(r => {
-            if (r.parent_id === null) {
-                parentNames[r.id] = r.name;
-            }
+            if (r.parent_id === null) parentNames[r.id] = r.name;
         });
+        parentNames['main'] = 'Основные наряды';
         
+        // Создаём виджет результатов на главной странице
         const mainContent = document.getElementById('main-content');
         if (!mainContent) return;
         
+        // Проверяем, есть ли уже виджет результатов
         let resultsWidget = document.getElementById('survey-results-widget');
         if (!resultsWidget) {
             resultsWidget = document.createElement('div');
@@ -591,12 +667,14 @@ async function loadSurveyResults() {
         }
         
         let html = '<h3>📊 Результаты опроса</h3>';
-        html += '<p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Ваши оценки и медианы по объектам:</p>';
+        html += '<p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Веса объектов (рассчитаны по формуле k = S/avg):</p>';
         
+        // Выводим результаты по категориям с объяснением
         Object.keys(parentsMap).forEach(parentId => {
             const parentName = parentNames[parentId] || 'Неизвестная категория';
             const children = parentsMap[parentId];
             
+            // Рассчитываем среднюю медиану для родительского объекта
             const medians = children.filter(c => c.median_weight !== null).map(c => c.median_weight);
             const avgMedian = medians.length > 0 
                 ? (medians.reduce((a, b) => a + b, 0) / medians.length).toFixed(1)
@@ -609,21 +687,12 @@ async function loadSurveyResults() {
             }
             html += `</h4>`;
             
-            if (avgMedian) {
-                const explanation = getDifficultyExplanation(parseFloat(avgMedian));
-                html += `<p style="color: #94A3B8; font-size: 13px; margin: 0 0 12px 0; font-style: italic;">${explanation}</p>`;
-            }
-            
             children.forEach(child => {
-                const userRating = child.user_rating ? `Ваша оценка: ${child.user_rating}` : '';
-                const median = child.median_weight ? `Медиана: ${child.median_weight.toFixed(1)}` : 'Медиана ещё не рассчитана';
+                const w = child.median_weight ? child.median_weight.toFixed(1) : '—';
                 html += `
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #0f172a; border-radius: 6px; margin-bottom: 6px;">
                         <span style="color: #CBD5E1; font-weight: 500;">${child.name}</span>
-                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                            <span style="color: #3B82F6; font-size: 13px;">${userRating}</span>
-                            <span style="color: #94A3B8; font-size: 12px;">${median}</span>
-                        </div>
+                        <span style="color: #3B82F6; font-size: 14px;">Вес: ${w}</span>
                     </div>
                 `;
             });
@@ -637,12 +706,21 @@ async function loadSurveyResults() {
     }
 }
 
+/**
+ * Возвращает объяснение сложности на основе медианы
+ */
 function getDifficultyExplanation(median) {
-    if (median < 2) return 'Очень лёгкий объект — минимальная нагрузка';
-    else if (median < 3) return 'Лёгкий объект — небольшая нагрузка';
-    else if (median < 4) return 'Средний объект — умеренная нагрузка';
-    else if (median < 4.5) return 'Тяжёлый объект — высокая нагрузка';
-    else return 'Очень тяжёлый объект — максимальная нагрузка';
+    if (median < 2) {
+        return 'Очень лёгкий объект — минимальная нагрузка';
+    } else if (median < 3) {
+        return 'Лёгкий объект — небольшая нагрузка';
+    } else if (median < 4) {
+        return 'Средний объект — умеренная нагрузка';
+    } else if (median < 4.5) {
+        return 'Тяжёлый объект — высокая нагрузка';
+    } else {
+        return 'Очень тяжёлый объект — максимальная нагрузка';
+    }
 }
 
 function getDaysLeft(dateStr) {
@@ -666,6 +744,11 @@ function openSettings() {
     alert("⚙️ Настройки\n(в разработке)");
 }
 
+// === ФУНКЦИИ ДЛЯ РАБОТЫ С НАРЯДАМИ ===
+
+/**
+ * Загружает наряды пользователя на текущий месяц
+ */
 async function loadDutiesForMonth() {
     const container = document.getElementById('duties-list-container');
     if (!container) return;
@@ -680,6 +763,7 @@ async function loadDutiesForMonth() {
             return;
         }
         
+        // Обновляем заголовок месяца
         const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
                            'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
         document.getElementById('current-month').textContent = `${monthNames[currentMonth - 1]} ${currentYear}`;
@@ -689,6 +773,7 @@ async function loadDutiesForMonth() {
             return;
         }
         
+        // Группируем наряды по датам
         const byDate = {};
         data.duties.forEach(duty => {
             if (!byDate[duty.date]) {
@@ -714,6 +799,7 @@ async function loadDutiesForMonth() {
                 }
                 html += `</div>`;
                 
+                // Показываем участников наряда
                 if (duty.partners && duty.partners.length > 0) {
                     html += `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #334155;">`;
                     html += `<p style="color: #94A3B8; font-size: 12px; margin: 0 0 6px 0;">Участники наряда:</p>`;
@@ -743,6 +829,9 @@ async function loadDutiesForMonth() {
     }
 }
 
+/**
+ * Изменяет месяц для просмотра нарядов
+ */
 function changeMonth(delta) {
     currentMonth += delta;
     if (currentMonth > 12) {
@@ -755,6 +844,9 @@ function changeMonth(delta) {
     loadDutiesForMonth();
 }
 
+/**
+ * Поиск нарядов по дате (показывает всех участников на эту дату из всех групп)
+ */
 async function searchDutyByDate(dateStr) {
     if (!dateStr) return;
     
@@ -808,11 +900,15 @@ async function searchDutyByDate(dateStr) {
     }
 }
 
+/**
+ * Очищает поиск по дате
+ */
 function clearDateSearch() {
     document.getElementById('duty-date-search').value = '';
     document.getElementById('date-search-results').style.display = 'none';
 }
 
+// Вспомогательная функция для получения полного названия роли (если её нет в глобальной области)
 function get_full_role(roleCode) {
     const roles = {
         'к': 'Комендантский',

@@ -524,98 +524,110 @@ async def get_full_schedule():
 
 
 # ============================================
-# 5. ОПРОСНИК (SURVEY) API
+# 5. ОПРОСНИК (SURVEY) API — попарное сравнение 2/1/0
 # ============================================
 
-@app.get("/api/survey/objects")
-async def get_survey_objects():
-    """Возвращает список объектов для голосования (с иерархией)"""
+def _get_all_pairs(objects):
+    """Генерирует все пары из списка объектов [(id, name), ...]"""
+    pairs = []
+    for i in range(len(objects)):
+        for j in range(i + 1, len(objects)):
+            pairs.append({
+                "object_a": {"id": objects[i]["id"], "name": objects[i]["name"]},
+                "object_b": {"id": objects[j]["id"], "name": objects[j]["name"]}
+            })
+    return pairs
+
+
+@app.get("/api/survey/pairs")
+async def get_survey_pairs(stage: str = "main"):
+    """
+    Возвращает пары для попарного голосования.
+    stage: 'main' — 4 основных наряда (6 пар), 'canteen' — 6 объектов столовой (15 пар)
+    """
     conn = get_db()
     if not conn:
         raise HTTPException(status_code=500, detail="База данных не найдена")
     try:
-        # Получаем все объекты.
-        # ВАЖНО: SQLite не поддерживает конструкцию "NULLS FIRST",
-        # поэтому сортируем обычным ORDER BY parent_id, name.
-        cursor = conn.execute(
-            "SELECT id, name, parent_id FROM duty_objects ORDER BY parent_id, name"
-        )
-        rows = cursor.fetchall()
-        # Преобразуем в список словарей
-        objects = []
-        for row in rows:
-            objects.append({
-                "id": row['id'],
-                "name": row['name'],
-                "parent_id": row['parent_id']
-            })
-        return objects
-    except Exception as e:
-        print(f"[ERROR] Ошибка получения объектов: {e}")
-        raise HTTPException(status_code=500, detail="Ошибка базы данных")
-    finally:
+        if stage == "main":
+            rows = conn.execute(
+                "SELECT id, name FROM duty_objects WHERE parent_id IS NULL ORDER BY id"
+            ).fetchall()
+        else:  # canteen
+            canteen = conn.execute(
+                "SELECT id FROM duty_objects WHERE name='Столовая' AND parent_id IS NULL"
+            ).fetchone()
+            if not canteen:
+                conn.close()
+                return {"pairs": [], "stage": stage}
+            rows = conn.execute(
+                "SELECT id, name FROM duty_objects WHERE parent_id = ? ORDER BY id",
+                (canteen["id"],)
+            ).fetchall()
+        
+        objects = [{"id": r["id"], "name": r["name"]} for r in rows]
+        pairs = _get_all_pairs(objects)
         conn.close()
+        return {"pairs": pairs, "stage": stage}
+    except Exception as e:
+        print(f"[ERROR] Ошибка получения пар: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
 
 
-@app.post("/api/survey/vote")
-async def submit_vote(data: dict):
-    """Принимает голос пользователя за объект"""
+@app.post("/api/survey/pair-vote")
+async def submit_pair_vote(data: dict):
+    """
+    Принимает голос попарного сравнения.
+    choice: 'a' — первый сложнее (2/0), 'b' — второй сложнее (0/2), 'equal' — одинаково (1/1)
+    """
     user_id = data.get('user_id')
-    object_id = data.get('object_id')
-    rating = data.get('rating')
+    object_a_id = data.get('object_a_id')
+    object_b_id = data.get('object_b_id')
+    choice = data.get('choice')
+    stage = data.get('stage', 'main')
 
-    if not all([user_id, object_id, rating]) or not (1 <= rating <= 5):
+    if not all([user_id, object_a_id, object_b_id, choice]) or choice not in ('a', 'b', 'equal'):
         raise HTTPException(status_code=400, detail="Неверные данные")
 
+    # Упорядочиваем пару: object_a_id < object_b_id для уникальности
+    oa, ob = int(object_a_id), int(object_b_id)
+    if oa > ob:
+        oa, ob = ob, oa
+        choice = 'b' if choice == 'a' else ('a' if choice == 'b' else 'equal')
+
     conn = get_db()
     if not conn:
         raise HTTPException(status_code=500, detail="База данных не найдена")
 
     try:
-        # Проверяем, что пользователь существует
         user = conn.execute("SELECT id FROM users WHERE telegram_id = ?", (user_id,)).fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
         db_user_id = user['id']
 
-        # Вставляем голос (unique constraint предотвратит повтор)
         conn.execute("""
-            INSERT INTO survey_responses (user_id, object_id, rating)
-            VALUES (?, ?, ?)
-        """, (db_user_id, object_id, rating))
+            INSERT INTO survey_pair_votes (user_id, object_a_id, object_b_id, choice, stage)
+            VALUES (?, ?, ?, ?, ?)
+        """, (db_user_id, oa, ob, choice, stage))
         conn.commit()
-        
-        # Проверяем, достигли ли мы 100 голосов (уникальных пользователей)
-        voted_count = conn.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM survey_responses").fetchone()['cnt']
-        
-        # Если достигли 100 голосов, автоматически рассчитываем медианы
-        if voted_count >= 100:
-            try:
-                objects = conn.execute("SELECT id FROM duty_objects").fetchall()
-                for obj in objects:
-                    obj_id = obj['id']
-                    ratings = conn.execute("SELECT rating FROM survey_responses WHERE object_id = ?", (obj_id,)).fetchall()
-                    if ratings:
-                        rating_values = [r['rating'] for r in ratings]
-                        median = statistics.median(rating_values)
-                        conn.execute("""
-                            INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
-                            ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
-                        """, (obj_id, median))
-                conn.commit()
-                print(f"[INFO] Автоматически рассчитаны медианы после достижения {voted_count} голосов")
-            except Exception as e:
-                print(f"[WARNING] Не удалось автоматически рассчитать медианы: {e}")
-                # Не прерываем выполнение, просто логируем
-        
+
+        # Количество уникальных проголосовавших
+        voted_count = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) as cnt FROM survey_pair_votes"
+        ).fetchone()['cnt']
+
+        # При 100 голосах можно автоматически финализировать (вызывать расчёт весов)
+        # Пока оставляем ручную финализацию через админа
+        conn.close()
         return {"status": "ok", "message": "Голос учтён", "total_voted": voted_count}
     except sqlite3.IntegrityError:
-        raise HTTPException(status_code=409, detail="Вы уже голосовали за этот объект")
+        raise HTTPException(status_code=409, detail="Вы уже голосовали за эту пару")
     except Exception as e:
         print(f"[ERROR] Ошибка голосования: {e}")
         raise HTTPException(status_code=500, detail="Ошибка базы данных")
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 @app.get("/api/survey/status")
@@ -625,10 +637,13 @@ async def get_survey_status():
     if not conn:
         raise HTTPException(status_code=500, detail="База данных не найдена")
     try:
-        # Общее количество зарегистрированных пользователей (можно ограничить по курсу, но пока все)
-        total_users = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()['cnt']
-        # Количество проголосовавших (уникальных пользователей)
-        voted_users = conn.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM survey_responses").fetchone()['cnt']
+        total_users = conn.execute("SELECT COUNT(*) as cnt FROM users WHERE status='активен'").fetchone()['cnt']
+        try:
+            voted_users = conn.execute(
+                "SELECT COUNT(DISTINCT user_id) as cnt FROM survey_pair_votes"
+            ).fetchone()['cnt']
+        except Exception:
+            voted_users = 0
         return {"total": total_users, "voted": voted_users}
     except Exception as e:
         print(f"[ERROR] Ошибка статуса опроса: {e}")
@@ -637,45 +652,110 @@ async def get_survey_status():
         conn.close()
 
 
+def _calc_weights_from_pair_votes(conn):
+    """
+    Рассчитывает веса по формуле: S = сумма баллов объекта, avg = среднее, k = S/avg, вес = 10 × k.
+    Этап 1: основные наряды (4 шт.). Этап 2: объекты столовой (6 шт.).
+    """
+    # Этап 1: основные наряды
+    main_ids = [r['id'] for r in conn.execute(
+        "SELECT id FROM duty_objects WHERE parent_id IS NULL ORDER BY id"
+    ).fetchall()]
+
+    # Считаем баллы: choice 'a' → object_a +2, object_b +0; 'b' → object_a +0, object_b +2; 'equal' → +1 каждому
+    scores = {oid: 0.0 for oid in main_ids}
+    votes = conn.execute(
+        "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage='main'"
+    ).fetchall()
+    for v in votes:
+        a, b = v['object_a_id'], v['object_b_id']
+        if v['choice'] == 'a':
+            scores[a] = scores.get(a, 0) + 2
+            scores[b] = scores.get(b, 0) + 0
+        elif v['choice'] == 'b':
+            scores[a] = scores.get(a, 0) + 0
+            scores[b] = scores.get(b, 0) + 2
+        else:
+            scores[a] = scores.get(a, 0) + 1
+            scores[b] = scores.get(b, 0) + 1
+
+    if len(main_ids) > 0:
+        total = sum(scores.get(i, 0) for i in main_ids)
+        avg = total / len(main_ids) if total > 0 else 1
+        for oid in main_ids:
+            s = scores.get(oid, 0)
+            k = s / avg if avg > 0 else 1
+            w = 10 * k
+            conn.execute("""
+                INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
+                ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
+            """, (oid, w))
+
+    # Этап 2: объекты столовой — веса относительные к весу столовой
+    canteen_row = conn.execute(
+        "SELECT id FROM duty_objects WHERE name='Столовая' AND parent_id IS NULL"
+    ).fetchone()
+    if canteen_row:
+        canteen_id = canteen_row['id']
+        canteen_weight_row = conn.execute(
+            "SELECT weight FROM object_weights WHERE object_id = ?", (canteen_id,)
+        ).fetchone()
+        canteen_weight = canteen_weight_row['weight'] if canteen_weight_row else 10
+
+        sub_ids = [r['id'] for r in conn.execute(
+            "SELECT id FROM duty_objects WHERE parent_id = ? ORDER BY id", (canteen_id,)
+        ).fetchall()]
+
+        sub_scores = {oid: 0.0 for oid in sub_ids}
+        sub_votes = conn.execute(
+            "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage='canteen'"
+        ).fetchall()
+        for v in sub_votes:
+            a, b = v['object_a_id'], v['object_b_id']
+            if v['choice'] == 'a':
+                sub_scores[a] = sub_scores.get(a, 0) + 2
+                sub_scores[b] = sub_scores.get(b, 0) + 0
+            elif v['choice'] == 'b':
+                sub_scores[a] = sub_scores.get(a, 0) + 0
+                sub_scores[b] = sub_scores.get(b, 0) + 2
+            else:
+                sub_scores[a] = sub_scores.get(a, 0) + 1
+                sub_scores[b] = sub_scores.get(b, 0) + 1
+
+        if len(sub_ids) > 0:
+            sub_total = sum(sub_scores.get(i, 0) for i in sub_ids)
+            sub_avg = sub_total / len(sub_ids) if sub_total > 0 else 1
+            for oid in sub_ids:
+                s = sub_scores.get(oid, 0)
+                k_sub = s / sub_avg if sub_avg > 0 else 1
+                w_sub = canteen_weight * k_sub
+                conn.execute("""
+                    INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
+                    ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
+                """, (oid, w_sub))
+
+
 @app.post("/api/survey/finalize")
 async def finalize_survey(data: dict):
-    """Завершает опрос и вычисляет веса объектов (медианы)"""
-    # Проверка админа (по telegram_id, переданному в data)
+    """Завершает опрос и вычисляет веса по формуле k = S/avg, итог = 10 × k"""
     admin_id = data.get('admin_id')
     if not admin_id:
         raise HTTPException(status_code=401, detail="Не авторизован")
-    # Проверяем, является ли пользователь админом (по роли)
     conn = get_db()
     if not conn:
         raise HTTPException(status_code=500, detail="База данных не найдена")
     try:
         user = conn.execute("SELECT role FROM users WHERE telegram_id = ?", (admin_id,)).fetchone()
-        if not user or user['role'] not in ['admin', 'assistant']:
+        if not user or user['role'] not in ('admin', 'assistant'):
             raise HTTPException(status_code=403, detail="Недостаточно прав")
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Ошибка проверки прав")
     finally:
         conn.close()
 
-    # Получаем все объекты
     conn = get_db()
     try:
-        objects = conn.execute("SELECT id FROM duty_objects").fetchall()
-        for obj in objects:
-            obj_id = obj['id']
-            # Получаем все оценки для этого объекта
-            ratings = conn.execute("SELECT rating FROM survey_responses WHERE object_id = ?", (obj_id,)).fetchall()
-            if ratings:
-                rating_values = [r['rating'] for r in ratings]
-                median = statistics.median(rating_values)
-                # Сохраняем или обновляем вес
-                conn.execute("""
-                    INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
-                    ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
-                """, (obj_id, median))
-            else:
-                # Если нет голосов, можно пропустить или установить значение по умолчанию
-                pass
+        _calc_weights_from_pair_votes(conn)
         conn.commit()
         return {"status": "ok", "message": "Веса вычислены и сохранены"}
     except Exception as e:
@@ -722,29 +802,26 @@ async def get_user_survey_results(telegram_id: int):
             raise HTTPException(status_code=404, detail="Пользователь не найден")
         db_user_id = user['id']
         
-        # Получаем оценки пользователя
-        user_votes = conn.execute("""
-            SELECT object_id, rating FROM survey_responses WHERE user_id = ?
-        """, (db_user_id,)).fetchall()
-        
-        if not user_votes:
+        # Проверяем попарное голосование
+        try:
+            voted = conn.execute(
+                "SELECT 1 FROM survey_pair_votes WHERE user_id = ? LIMIT 1",
+                (db_user_id,)
+            ).fetchone() is not None
+        except Exception:
+            voted = False
+
+        if not voted:
             return {"voted": False, "message": "Вы ещё не прошли опрос"}
-        
-        # Получаем все объекты с их весами (медианами) и оценками пользователя
-        # Используем правильную сортировку для SQLite (без NULLS FIRST)
+
+        # Веса объектов (рассчитанные по формуле k = S/avg)
         results = conn.execute("""
-            SELECT 
-                o.id, 
-                o.name, 
-                o.parent_id, 
-                w.weight as median_weight,
-                sr.rating as user_rating
+            SELECT o.id, o.name, o.parent_id, w.weight as median_weight
             FROM duty_objects o
             LEFT JOIN object_weights w ON o.id = w.object_id
-            LEFT JOIN survey_responses sr ON o.id = sr.object_id AND sr.user_id = ?
             ORDER BY (o.parent_id IS NULL) DESC, o.parent_id, o.name
-        """, (db_user_id,)).fetchall()
-        
+        """).fetchall()
+
         return {
             "voted": True,
             "results": [dict(r) for r in results]
