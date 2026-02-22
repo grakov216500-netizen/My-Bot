@@ -39,6 +39,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     setupNavigation();
     setupEventListeners();
+    setupEditDeleteModals();
+    setupReminderModal();
 
     await loadUserProfile(userId);
     await loadDuties(userId);
@@ -90,6 +92,13 @@ function setupEventListeners() {
     // Тост (сообщение): один раз привязать ОК
     const toastOk = document.getElementById('toast-ok');
     if (toastOk) toastOk.addEventListener('click', closeToast);
+}
+
+function setupReminderModal() {
+    const ok = document.getElementById('reminder-ok');
+    const cancel = document.getElementById('reminder-cancel');
+    if (ok) ok.addEventListener('click', submitReminderFromModal);
+    if (cancel) cancel.addEventListener('click', closeReminderModal);
 }
 
 // --- Свои модальные окна вместо prompt/alert (без системного диалога и дубля) ---
@@ -180,8 +189,7 @@ function switchTab(tabName) {
         if (studyScreen) studyScreen.style.display = 'block';
     } else if (tabName === 'survey') {
         if (surveyScreen) surveyScreen.style.display = 'block';
-        // Проверяем, прошёл ли пользователь уже опрос
-        loadSurveyObjects(); // загружаем список объектов для опроса
+        showSurveyIntro();
     } else { // home
         if (mainContent) mainContent.classList.remove('hidden');
     }
@@ -321,97 +329,230 @@ function openTaskMenu(taskId) {
     const menu = document.getElementById('task-menu');
     menu.style.display = 'flex';
 
-    document.getElementById('edit-task').onclick = () => editTask(taskId);
-    document.getElementById('delete-task').onclick = () => deleteTask(taskId);
-    document.getElementById('set-reminder').onclick = () => setReminder(taskId);
+    document.getElementById('edit-task').onclick = () => { hideModal(); openEditTaskModal(taskId); };
+    document.getElementById('delete-task').onclick = () => { hideModal(); openConfirmDeleteModal(taskId); };
 }
 
 function hideModal() {
     document.getElementById('task-menu').style.display = 'none';
 }
 
-async function editTask(taskId) {
-    hideModal();
+let _editTaskId = null;
+let _deleteTaskId = null;
+let _reminderTaskId = null;
+
+function openEditTaskModal(taskId) {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
+    _editTaskId = taskId;
+    const modal = document.getElementById('edit-task-modal');
+    const input = document.getElementById('edit-task-input');
+    if (!modal || !input) return;
+    input.value = task.text;
+    modal.style.display = 'flex';
+    input.focus();
+}
 
-    const newText = prompt("Редактировать задачу:", task.text);
-    if (!newText || newText === task.text) return;
+function closeEditTaskModal() {
+    _editTaskId = null;
+    const modal = document.getElementById('edit-task-modal');
+    if (modal) modal.style.display = 'none';
+}
 
+function openConfirmDeleteModal(taskId) {
+    _deleteTaskId = taskId;
+    const modal = document.getElementById('confirm-delete-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeConfirmDeleteModal() {
+    _deleteTaskId = null;
+    const modal = document.getElementById('confirm-delete-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function setupEditDeleteModals() {
+    const editOk = document.getElementById('edit-task-ok');
+    const editCancel = document.getElementById('edit-task-cancel');
+    const editInput = document.getElementById('edit-task-input');
+    if (editOk) editOk.addEventListener('click', submitEditTaskFromModal);
+    if (editCancel) editCancel.addEventListener('click', closeEditTaskModal);
+    if (editInput) editInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') submitEditTaskFromModal();
+    });
+
+    const delOk = document.getElementById('confirm-delete-ok');
+    const delCancel = document.getElementById('confirm-delete-cancel');
+    if (delOk) delOk.addEventListener('click', submitDeleteTaskFromModal);
+    if (delCancel) delCancel.addEventListener('click', closeConfirmDeleteModal);
+}
+
+async function submitEditTaskFromModal() {
+    const taskId = _editTaskId;
+    const input = document.getElementById('edit-task-input');
+    const newText = input && input.value ? input.value.trim() : '';
+    closeEditTaskModal();
+    if (!taskId || !newText) return;
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || newText === task.text) return;
     try {
         await fetch(`${baseUrl}/api/edit_task`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task_id: taskId, text: newText.trim(), user_id: userId })
+            body: JSON.stringify({ task_id: taskId, text: newText, user_id: userId })
         });
-
-        task.text = newText.trim();
+        task.text = newText;
         const q = document.getElementById('search-input');
         renderTaskList(q ? q.value : '');
-        console.log("✅ Задача отредактирована");
+        showToast('Задача отредактирована');
     } catch (err) {
         console.error("❌ Ошибка редактирования:", err);
+        showToast('Ошибка редактирования');
     }
 }
 
-async function deleteTask(taskId) {
-    hideModal();
-    if (!confirm("Удалить задачу?")) return;
-
+async function submitDeleteTaskFromModal() {
+    const taskId = _deleteTaskId;
+    closeConfirmDeleteModal();
+    if (!taskId) return;
     try {
         await fetch(`${baseUrl}/api/delete_task`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ task_id: taskId, user_id: userId })
         });
-
         tasks = tasks.filter(t => t.id !== taskId);
         const q = document.getElementById('search-input');
         renderTaskList(q ? q.value : '');
-        console.log("✅ Задача удалена");
+        showToast('Задача удалена');
     } catch (err) {
         console.error("❌ Ошибка удаления:", err);
+        showToast('Ошибка удаления');
     }
 }
 
 async function setReminder(taskId) {
-    hideModal();
-    const dateStr = prompt("Введите дату и время (ДД ЧЧ:ММ):", "05 20:30");
-    if (!dateStr) return;
+    _reminderTaskId = taskId;
+    openReminderModal();
+}
 
-    const match = dateStr.match(/^(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
-    if (!match) {
-        showToast("Неверный формат. Пример: 05 20:30");
-        return;
+function openReminderModal() {
+    const modal = document.getElementById('reminder-modal');
+    if (!modal) return;
+    const now = new Date();
+    const hour = now.getHours();
+    const minute = now.getMinutes();
+    buildReminderWheels(hour, minute);
+    modal.style.display = 'flex';
+}
+
+function closeReminderModal() {
+    _reminderTaskId = null;
+    const modal = document.getElementById('reminder-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function buildReminderWheels(initialHour, initialMinute) {
+    const hourEl = document.getElementById('reminder-hour-wheel');
+    const minEl = document.getElementById('reminder-minute-wheel');
+    if (!hourEl || !minEl) return;
+
+    const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+    const minutes = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0')); // 00, 05, 10, ... 55
+
+    hourEl.innerHTML = '';
+    minEl.innerHTML = '';
+
+    const hIdx = Math.min(initialHour, 23);
+    const mIdx = Math.min(Math.round(initialMinute / 5) % 12, 11);
+
+    function makeWheel(container, items, selectedIndex, onSelect) {
+        container.classList.add('wheel');
+        const wrap = document.createElement('div');
+        wrap.className = 'wheel-inner';
+        items.forEach((label, i) => {
+            const div = document.createElement('div');
+            div.className = 'wheel-item' + (i === selectedIndex ? ' selected' : '');
+            div.textContent = label;
+            div.dataset.index = String(i);
+            wrap.appendChild(div);
+        });
+        container.appendChild(wrap);
+        let currentIdx = selectedIndex;
+        const updateSelection = () => {
+            wrap.querySelectorAll('.wheel-item').forEach((el, i) => {
+                el.classList.toggle('selected', i === currentIdx);
+            });
+            wrap.style.transform = `translateY(${-currentIdx * 44}px)`;
+            onSelect(currentIdx);
+        };
+        container.addEventListener('touchstart', (e) => { wheelTouchStart(e, container, items.length, (idx) => { currentIdx = idx; updateSelection(); }); });
+        container.addEventListener('touchmove', (e) => { wheelTouchMove(e, container); }, { passive: false });
+        container.addEventListener('touchend', (e) => { wheelTouchEnd(e, container, items.length); });
+        container.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            if (e.deltaY < 0) currentIdx = Math.max(0, currentIdx - 1);
+            else currentIdx = Math.min(items.length - 1, currentIdx + 1);
+            updateSelection();
+        }, { passive: false });
+        updateSelection();
+        return { getIndex: () => currentIdx, setIndex: (i) => { currentIdx = i; updateSelection(); } };
     }
 
+    let hourVal = hIdx, minVal = mIdx;
+    const hourControl = makeWheel(hourEl, hours, hIdx, (i) => { hourVal = i; });
+    const minControl = makeWheel(minEl, minutes, mIdx, (i) => { minVal = i; });
+
+    window._reminderGetTime = function() {
+        const h = hourControl.getIndex();
+        const m = minControl.getIndex() * 5;
+        return { hour: h, minute: m };
+    };
+}
+
+let _wheelStartY = 0, _wheelStartTransform = 0;
+function wheelTouchStart(e, container, itemCount, setIndex) {
+    container._wheelSetIndex = setIndex;
+    const inner = container.querySelector('.wheel-inner');
+    if (!inner) return;
+    _wheelStartY = e.touches[0].clientY;
+    const t = inner.style.transform || 'translateY(0px)';
+    const m = t.match(/-?\d+/);
+    _wheelStartTransform = m ? parseInt(m[0], 10) : 0;
+}
+function wheelTouchMove(e, container) {
+    e.preventDefault();
+}
+function wheelTouchEnd(e, container, itemCount) {
+    const setIndex = container._wheelSetIndex;
+    const inner = container.querySelector('.wheel-inner');
+    if (!inner || !setIndex) return;
+    const dy = e.changedTouches[0].clientY - _wheelStartY;
+    const step = 44;
+    let idx = Math.round(-_wheelStartTransform / step);
+    idx = Math.max(0, Math.min(itemCount - 1, idx + Math.round(dy / step)));
+    setIndex(idx);
+}
+
+async function submitReminderFromModal() {
+    const taskId = _reminderTaskId;
+    if (!taskId || !window._reminderGetTime) return;
+    const { hour, minute } = window._reminderGetTime();
+    const now = new Date();
+    const y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0'), d = String(now.getDate()).padStart(2, '0');
+    const deadline = `${y}-${m}-${d} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+    closeReminderModal();
     try {
-        const [_, day, hour, minute] = match.map(Number);
-        const now = new Date();
-        let year = now.getFullYear();
-        let month = now.getMonth() + 1;
-
-        if (day < now.getDate()) {
-            month += 1;
-            if (month > 12) {
-                month = 1;
-                year += 1;
-            }
-        }
-
-        const deadline = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')} ${hour}:${minute}:00`;
-
         await fetch(`${baseUrl}/api/set_reminder`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ task_id: taskId, deadline, user_id: userId })
         });
-
         loadTasks();
-        showToast("Напоминание установлено");
+        showToast('Напоминание установлено. В указанное время придёт сообщение в Telegram.');
     } catch (err) {
         console.error("❌ Ошибка установки напоминания:", err);
-        showToast("Ошибка при установке напоминания");
+        showToast('Ошибка при установке напоминания');
     }
 }
 
@@ -518,6 +659,66 @@ async function loadDuties(userId) {
 let surveyPairsMain = [];
 let surveyPairsCanteen = [];
 let surveyCurrentStage = 'main';
+const SURVEY_INTRO_CARD_COUNT = 5;
+let surveyIntroIndex = 0;
+
+function showSurveyIntro() {
+    const intro = document.getElementById('survey-intro');
+    const content = document.getElementById('survey-content');
+    if (intro) intro.style.display = 'block';
+    if (content) content.style.display = 'none';
+    surveyIntroIndex = 0;
+    setSurveyIntroCard(0);
+    renderSurveyIntroDots();
+    if (!window._surveyIntroBound) {
+        window._surveyIntroBound = true;
+        document.getElementById('survey-intro-prev').addEventListener('click', function() {
+            if (surveyIntroIndex > 0) {
+                surveyIntroIndex--;
+                setSurveyIntroCard(surveyIntroIndex);
+                renderSurveyIntroDots();
+            }
+        });
+        document.getElementById('survey-intro-next').addEventListener('click', function() {
+            if (surveyIntroIndex < SURVEY_INTRO_CARD_COUNT - 1) {
+                surveyIntroIndex++;
+                setSurveyIntroCard(surveyIntroIndex);
+                renderSurveyIntroDots();
+            }
+        });
+        document.getElementById('survey-intro-start').addEventListener('click', function() {
+            if (intro) intro.style.display = 'none';
+            if (content) content.style.display = 'block';
+            loadSurveyObjects();
+        });
+    }
+}
+
+function setSurveyIntroCard(idx) {
+    document.querySelectorAll('.survey-intro-card').forEach(function(card) {
+        card.classList.toggle('active', parseInt(card.dataset.card, 10) === idx);
+    });
+    const prev = document.getElementById('survey-intro-prev');
+    const next = document.getElementById('survey-intro-next');
+    if (prev) prev.disabled = idx === 0;
+    if (next) next.disabled = idx === SURVEY_INTRO_CARD_COUNT - 1;
+}
+
+function renderSurveyIntroDots() {
+    const dotsEl = document.getElementById('survey-intro-dots');
+    if (!dotsEl) return;
+    dotsEl.innerHTML = '';
+    for (let i = 0; i < SURVEY_INTRO_CARD_COUNT; i++) {
+        const dot = document.createElement('span');
+        dot.className = 'survey-intro-dot' + (i === surveyIntroIndex ? ' active' : '');
+        dot.onclick = function() {
+            surveyIntroIndex = i;
+            setSurveyIntroCard(surveyIntroIndex);
+            renderSurveyIntroDots();
+        };
+        dotsEl.appendChild(dot);
+    }
+}
 
 /**
  * Загружает пары для попарного голосования и отображает их
@@ -674,13 +875,15 @@ async function handleSurveySubmit() {
         return;
     }
 
-    // Этап 2 завершён или Этап 1 без Этапа 2
+    // Этап 2 завершён или Этап 1 без Этапа 2 — сначала закрываем опрос, потом показываем тост поверх главной
     const msg = lastResult && lastResult.total_voted 
         ? `Спасибо! Ваши голоса учтены. Проголосовало: ${lastResult.total_voted} чел.`
         : 'Спасибо! Ваши голоса учтены.';
-    showToast(msg);
-    await loadSurveyResults();
+    const surveyScreen = document.getElementById('survey-screen');
+    if (surveyScreen) surveyScreen.style.display = 'none';
     switchTab('home');
+    await loadSurveyResults();
+    showToast(msg);
 }
 
 /**
