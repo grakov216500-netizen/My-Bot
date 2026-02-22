@@ -437,6 +437,12 @@ body::-webkit-scrollbar-thumb:hover {
   z-index: 200;
   animation: fadeIn 0.3s ease;
 }
+.modal.modal-center {
+  align-items: center;
+}
+.modal.modal-center .modal-content {
+  border-radius: 12px;
+}
 .modal-content {
   width: 90%;
   max-width: 400px;

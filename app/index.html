@@ -32,7 +32,7 @@
   </header>
 
   <!-- Основной контент (виджеты) для главной -->
-  <main class="main" id="main-content">
+  <main class="main app-screen active" id="main-content">
     <div class="widget">
       <h3>🌡️ Погода в Воронеже</h3>
       <p>-3°C, снег ❄️</p>
@@ -60,23 +60,23 @@
     </div>
   </main>
 
-  <!-- Экран заметок (задачник) – скрыт по умолчанию -->
-  <div id="notes-screen" style="display: none;">
-    <div class="notes-tabs">
-      <button id="tab-active" class="notes-tab active" onclick="setNotesTab('active')">Активные</button>
-      <button id="tab-done" class="notes-tab" onclick="setNotesTab('done')">Выполненные</button>
-    </div>
+  <!-- Экран заметок: сначала поиск, под ним табы Активные/Выполненные -->
+  <div id="notes-screen" class="app-screen">
     <div class="search-bar">
       <svg width="16" height="16" fill="currentColor"><path d="M15.5 14.3l-3.7-3.7c1.2-1.5 1.8-3.4 1.5-5.3-0.4-2.3-2.2-4.1-4.5-4.5-3.9-0.8-7.2 2.4-6.4 6.3 0.4 2.3 2.2 4.1 4.5 4.5 1.9 0.3 3.8-0.3 5.3-1.5l3.7 3.7c0.4 0.4 1 0.4 1.4 0s0.4-1 0-1.4z"/></svg>
       <input type="text" id="search-input" placeholder="Поиск по задачам..." />
+    </div>
+    <div class="notes-tabs">
+      <button id="tab-active" class="notes-tab active" onclick="setNotesTab('active')">Активные</button>
+      <button id="tab-done" class="notes-tab" onclick="setNotesTab('done')">Выполненные</button>
     </div>
     <div class="task-list" id="task-list">
       <p style="color: #6b7280; text-align: center;">Загрузка задач...</p>
     </div>
   </div>
 
-  <!-- Экран нарядов – скрыт по умолчанию -->
-  <div id="duties-screen" style="display: none;">
+  <!-- Экран нарядов -->
+  <div id="duties-screen" class="app-screen">
     <div style="padding: 16px;">
       <!-- Баннер: сначала проголосуйте -->
       <div id="duty-survey-banner" style="background: #1E293B; border: 1px solid #3B82F6; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
@@ -115,8 +115,8 @@
     </div>
   </div>
 
-  <!-- Экран учёбы (заглушка) – скрыт по умолчанию -->
-  <div id="study-screen" style="display: none;">
+  <!-- Экран учёбы (заглушка) -->
+  <div id="study-screen" class="app-screen">
     <div class="widget">
       <h3>📚 Учёба</h3>
       <p>Модуль в разработке. Здесь будут учебные материалы и расписание.</p>
@@ -189,7 +189,28 @@
   </div>
 
   <!-- Кнопка добавления задачи (видна только в заметках) -->
-  <button id="add-task-fab" onclick="startAddTask()">+</button>
+  <button type="button" id="add-task-fab" aria-label="Добавить задачу">+</button>
+
+  <!-- Модальное окно: ввод текста задачи (вместо prompt) -->
+  <div id="add-task-modal" class="modal modal-center" style="display: none;">
+    <div class="modal-content" style="max-width: 340px; padding: 20px; border-radius: 12px;">
+      <p style="color: #E2E8F0; margin-bottom: 12px; font-weight: 600;">Новая задача</p>
+      <input type="text" id="add-task-input" placeholder="Введите текст задачи..." maxlength="500"
+             style="width: 100%; padding: 12px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0; font-size: 16px; margin-bottom: 16px; box-sizing: border-box;" />
+      <div style="display: flex; gap: 10px;">
+        <button type="button" id="add-task-cancel" style="flex: 1; padding: 12px; background: #334155; color: #E2E8F0; border: none; border-radius: 8px; cursor: pointer;">Отмена</button>
+        <button type="button" id="add-task-ok" style="flex: 1; padding: 12px; background: #3B82F6; color: white; border: none; border-radius: 8px; cursor: pointer;">ОК</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно: сообщение (вместо alert) -->
+  <div id="toast-modal" class="modal modal-center" style="display: none;">
+    <div class="modal-content" style="max-width: 320px; padding: 20px; border-radius: 12px;">
+      <p id="toast-message" style="color: #E2E8F0; margin-bottom: 16px; text-align: center;"></p>
+      <button type="button" id="toast-ok" style="width: 100%; padding: 12px; background: #3B82F6; color: white; border: none; border-radius: 8px; cursor: pointer;">ОК</button>
+    </div>
+  </div>
 
   <!-- Нижняя панель навигации (всегда видна) – временно заменил "Рейтинг" на "Опрос" -->
   <nav class="bottom-nav" id="bottom-nav">

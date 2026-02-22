@@ -54,23 +54,96 @@ function setupNavigation() {
 }
 
 function setupEventListeners() {
-    // Обработчики для нижней панели навигации
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             const tab = item.dataset.tab;
             if (tab) switchTab(tab);
         });
     });
 
+    // Один обработчик для кнопки «+» — открываем своё модальное окно (не prompt)
     const addBtn = document.getElementById('add-task-fab');
-    if (addBtn) addBtn.addEventListener('click', startAddTask);
+    if (addBtn) {
+        addBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            openAddTaskModal();
+        }, false);
+    }
 
     const closeMenu = document.getElementById('close-menu');
-    if ( closeMenu) closeMenu.addEventListener('click', hideModal);
+    if (closeMenu) closeMenu.addEventListener('click', hideModal);
 
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.addEventListener('input', filterTasks);
+
+    // Модальное окно добавления задачи: OK / Отмена
+    const addTaskModal = document.getElementById('add-task-modal');
+    const addTaskInput = document.getElementById('add-task-input');
+    const addTaskOk = document.getElementById('add-task-ok');
+    const addTaskCancel = document.getElementById('add-task-cancel');
+    if (addTaskOk) addTaskOk.addEventListener('click', submitAddTaskFromModal);
+    if (addTaskCancel) addTaskCancel.addEventListener('click', closeAddTaskModal);
+
+    // Тост (сообщение): один раз привязать ОК
+    const toastOk = document.getElementById('toast-ok');
+    if (toastOk) toastOk.addEventListener('click', closeToast);
+}
+
+// --- Свои модальные окна вместо prompt/alert (без системного диалога и дубля) ---
+function openAddTaskModal() {
+    var modal = document.getElementById('add-task-modal');
+    var input = document.getElementById('add-task-input');
+    if (!modal || !input) return;
+    input.value = '';
+    modal.style.display = 'flex';
+    input.focus();
+}
+
+function closeAddTaskModal() {
+    var modal = document.getElementById('add-task-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function submitAddTaskFromModal() {
+    var input = document.getElementById('add-task-input');
+    var text = input && input.value ? input.value.trim() : '';
+    closeAddTaskModal();
+    if (!text) return;
+    startAddTaskWithText(text);
+}
+
+async function startAddTaskWithText(text) {
+    try {
+        var response = await fetch(baseUrl + '/api/add_task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, text: text })
+        });
+        if (response.ok) {
+            await loadTasks();
+            showToast('Задача добавлена');
+        } else {
+            showToast('Ошибка добавления');
+        }
+    } catch (err) {
+        console.error(err);
+        showToast('Ошибка сети');
+    }
+}
+
+function showToast(message) {
+    var modal = document.getElementById('toast-modal');
+    var msgEl = document.getElementById('toast-message');
+    if (msgEl) msgEl.textContent = message;
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeToast() {
+    var modal = document.getElementById('toast-modal');
+    if (modal) modal.style.display = 'none';
 }
 
 function switchTab(tabName) {
@@ -240,24 +313,8 @@ async function toggleTaskDone(taskId) {
     }
 }
 
-async function startAddTask() {
-    const text = prompt("Введите текст задачи:");
-    if (!text || !text.trim()) return;
-
-    try {
-        const response = await fetch(`${baseUrl}/api/add_task`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId, text: text.trim() })
-        });
-
-        if (response.ok) {
-            await loadTasks();
-            console.log("✅ Задача добавлена");
-        }
-    } catch (err) {
-        console.error("❌ Ошибка добавления задачи:", err);
-    }
+function startAddTask() {
+    openAddTaskModal();
 }
 
 function openTaskMenu(taskId) {
@@ -324,7 +381,7 @@ async function setReminder(taskId) {
 
     const match = dateStr.match(/^(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
     if (!match) {
-        alert("❌ Неверный формат. Пример: 05 20:30");
+        showToast("Неверный формат. Пример: 05 20:30");
         return;
     }
 
@@ -351,10 +408,10 @@ async function setReminder(taskId) {
         });
 
         loadTasks();
-        alert("✅ Напоминание установлено");
+        showToast("Напоминание установлено");
     } catch (err) {
         console.error("❌ Ошибка установки напоминания:", err);
-        alert("Ошибка при установке напоминания");
+        showToast("Ошибка при установке напоминания");
     }
 }
 
@@ -508,37 +565,43 @@ function renderSurveyPairs(stage) {
         return;
     }
 
-    let html = '';
-    pairs.forEach((pair, idx) => {
-        const a = pair.object_a;
-        const b = pair.object_b;
-        const name = `pair_${a.id}_${b.id}`;
-        html += `
-            <div style="background: #1E293B; border-radius: 8px; padding: 14px; margin-bottom: 12px; border-left: 4px solid #3B82F6;">
-                <p style="color: #94A3B8; font-size: 13px; margin-bottom: 10px;">Пара ${idx + 1} из ${pairs.length}</p>
-                <p style="color: #CBD5E1; margin-bottom: 10px;">Какой наряд сложнее морально/физически?</p>
-                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-                    <label style="flex: 1; min-width: 120px; display: flex; align-items: center; justify-content: center; padding: 10px; background: #0f172a; border-radius: 8px; cursor: pointer; border: 2px solid #334155; transition: all 0.2s;" class="pair-choice" data-choice="a" data-name="${name}">
-                        <input type="radio" name="${name}" value="a" style="margin-right: 8px;"> <span>${a.name} сложнее</span>
-                    </label>
-                    <label style="flex: 1; min-width: 100px; display: flex; align-items: center; justify-content: center; padding: 10px; background: #0f172a; border-radius: 8px; cursor: pointer; border: 2px solid #334155; transition: all 0.2s;" class="pair-choice" data-choice="equal" data-name="${name}">
-                        <input type="radio" name="${name}" value="equal" style="margin-right: 8px;"> <span>Одинаково</span>
-                    </label>
-                    <label style="flex: 1; min-width: 120px; display: flex; align-items: center; justify-content: center; padding: 10px; background: #0f172a; border-radius: 8px; cursor: pointer; border: 2px solid #334155; transition: all 0.2s;" class="pair-choice" data-choice="b" data-name="${name}">
-                        <input type="radio" name="${name}" value="b" style="margin-right: 8px;"> <span>${b.name} сложнее</span>
-                    </label>
-                </div>
-            </div>
-        `;
-    });
+    if (!window._surveyChoices) window._surveyChoices = {};
+    var choices = window._surveyChoices;
 
+    var html = '';
+    for (var idx = 0; idx < pairs.length; idx++) {
+        var pair = pairs[idx];
+        var a = pair.object_a;
+        var b = pair.object_b;
+        var name = 'pair_' + a.id + '_' + b.id;
+        var selected = choices[name] || '';
+        var s = 'padding:14px 12px;border-radius:10px;border:2px solid #334155;background:#1E293B;color:#CBD5E1;font-size:15px;cursor:pointer;flex:1;min-width:100px;';
+        var sSel = 'border-color:#3B82F6;background:#2563EB;color:white;';
+        html += '<div style="background:#1E293B;border-radius:8px;padding:14px;margin-bottom:12px;border-left:4px solid #3B82F6;">';
+        html += '<p style="color:#94A3B8;font-size:13px;margin-bottom:10px;">Пара ' + (idx + 1) + ' из ' + pairs.length + '</p>';
+        html += '<p style="color:#CBD5E1;margin-bottom:12px;">Какой наряд сложнее?</p>';
+        html += '<div style="display:flex;flex-wrap:wrap;gap:10px;">';
+        html += '<button type="button" class="survey-pair-btn" data-name="' + name + '" data-choice="a" style="' + s + (selected === 'a' ? sSel : '') + '">' + a.name + ' сложнее</button>';
+        html += '<button type="button" class="survey-pair-btn" data-name="' + name + '" data-choice="equal" style="' + s + (selected === 'equal' ? sSel : '') + '">Одинаково</button>';
+        html += '<button type="button" class="survey-pair-btn" data-name="' + name + '" data-choice="b" style="' + s + (selected === 'b' ? sSel : '') + '">' + b.name + ' сложнее</button>';
+        html += '</div></div>';
+    }
     container.innerHTML = html;
 
-    // Подсветка при выборе
-    container.querySelectorAll('.pair-choice').forEach(el => {
-        el.addEventListener('click', function() {
-            container.querySelectorAll(`[data-name="${this.dataset.name}"]`).forEach(l => l.style.borderColor = '#334155');
+    container.querySelectorAll('.survey-pair-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var name = this.getAttribute('data-name');
+            var choice = this.getAttribute('data-choice');
+            choices[name] = choice;
+            var block = this.parentElement;
+            block.querySelectorAll('.survey-pair-btn').forEach(function(b) {
+                b.style.borderColor = '#334155';
+                b.style.background = '#1E293B';
+                b.style.color = '#CBD5E1';
+            });
             this.style.borderColor = '#3B82F6';
+            this.style.background = '#2563EB';
+            this.style.color = 'white';
         });
     });
 }
@@ -547,23 +610,25 @@ async function handleSurveySubmit() {
     const stage = surveyCurrentStage;
     const pairs = stage === 'main' ? surveyPairsMain : surveyPairsCanteen;
 
-    const votes = [];
-    for (const pair of pairs) {
-        const a = pair.object_a;
-        const b = pair.object_b;
-        const name = `pair_${a.id}_${b.id}`;
-        const radio = document.querySelector(`input[name="${name}"]:checked`);
-        if (radio) {
-            votes.push({ object_a_id: a.id, object_b_id: b.id, choice: radio.value, stage });
+    var choices = window._surveyChoices || {};
+    var votes = [];
+    for (var i = 0; i < pairs.length; i++) {
+        var pair = pairs[i];
+        var a = pair.object_a;
+        var b = pair.object_b;
+        var name = 'pair_' + a.id + '_' + b.id;
+        var choice = choices[name];
+        if (choice) {
+            votes.push({ object_a_id: a.id, object_b_id: b.id, choice: choice, stage: stage });
         }
     }
 
     if (votes.length === 0) {
-        alert('Выберите хотя бы один вариант');
+        showToast('Выберите хотя бы один вариант');
         return;
     }
     if (votes.length < pairs.length) {
-        alert(`Ответьте на все ${pairs.length} пар(ы)`);
+        showToast('Ответьте на все ' + pairs.length + ' пар(ы)');
         return;
     }
 
@@ -585,14 +650,14 @@ async function handleSurveySubmit() {
             });
             if (!res.ok) {
                 const err = await res.json();
-                alert(`Ошибка: ${err.detail || 'Не удалось отправить голос'}`);
+                showToast('Ошибка: ' + (err.detail || 'Не удалось отправить голос'));
                 allSuccess = false;
                 break;
             }
             lastResult = await res.json();
         } catch (err) {
             console.error(err);
-            alert('Ошибка сети');
+            showToast('Ошибка сети');
             allSuccess = false;
             break;
         }
@@ -613,7 +678,7 @@ async function handleSurveySubmit() {
     const msg = lastResult && lastResult.total_voted 
         ? `Спасибо! Ваши голоса учтены. Проголосовало: ${lastResult.total_voted} чел.`
         : 'Спасибо! Ваши голоса учтены.';
-    alert(msg);
+    showToast(msg);
     await loadSurveyResults();
     switchTab('home');
 }
@@ -737,11 +802,11 @@ function formatDate(dateStr) {
 }
 
 function openNotifications() {
-    alert("🔔 Уведомления\n(в разработке)");
+    showToast("Уведомления (в разработке)");
 }
 
 function openSettings() {
-    alert("⚙️ Настройки\n(в разработке)");
+    showToast("Настройки (в разработке)");
 }
 
 // === ФУНКЦИИ ДЛЯ РАБОТЫ С НАРЯДАМИ ===
