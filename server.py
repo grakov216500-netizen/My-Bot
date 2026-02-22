@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from datetime import datetime
 import os
+import random
 import sqlite3
 import statistics  # для расчёта медианы
 
@@ -25,6 +26,18 @@ app.add_middleware(
 
 # === Путь к БД ===
 DB_PATH = os.path.join(os.path.dirname(__file__), "bot.db")
+
+
+@app.on_event("startup")
+async def startup_init_db():
+    """При старте сервера создаём таблицы и объекты для опроса, если их ещё нет."""
+    try:
+        import database
+        database.DB_NAME = DB_PATH
+        database.init_db()
+        database.init_survey_objects()
+    except Exception as e:
+        print(f"[WARN] Инициализация БД при старте: {e}")
 
 # === Словарь ролей ===
 ROLE_NAMES = {
@@ -218,14 +231,23 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
                     "next_duty": next_duty,
                     "total": len(duties_list)
                 }
-        except:
+        except Exception:
             pass
-        
+
         # Если duty_schedule не работает, пробуем duties (старая структура)
-        cursor = conn.execute("PRAGMA table_info(duties)")
-        columns = [row['name'] for row in cursor.fetchall()]
-        
-        if 'object_type' in columns:
+        try:
+            cursor = conn.execute("PRAGMA table_info(duties)")
+            columns = [row['name'] for row in cursor.fetchall()]
+        except Exception:
+            conn.close()
+            return {
+                "duties": [],
+                "next_duty": None,
+                "total": 0,
+                "error": "График нарядов ещё не загружен. Когда данные появятся, здесь отобразятся ваши наряды."
+            }
+
+        if columns and 'object_type' in columns:
             query = """
                 SELECT date, role, object_type
                 FROM duties
@@ -264,6 +286,15 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
 
     except Exception as e:
         print(f"[ERROR] Ошибка при запросе нарядов: {e}")
+        err_msg = str(e).lower()
+        if "no such table" in err_msg or "duties" in err_msg:
+            conn.close()
+            return {
+                "duties": [],
+                "next_duty": None,
+                "total": 0,
+                "error": "График нарядов ещё не загружен. Когда данные появятся, здесь отобразятся ваши наряды."
+            }
         return {"error": f"Ошибка БД: {str(e)}"}
     finally:
         conn.close()
@@ -543,7 +574,7 @@ def _get_all_pairs(objects):
 async def get_survey_pairs(stage: str = "main"):
     """
     Возвращает пары для попарного голосования.
-    stage: 'main' — 4 основных наряда (6 пар), 'canteen' — 6 объектов столовой (15 пар)
+    stage: 'main' — 4 основных наряда (6 пар), 'canteen' — 14 случайных пар из 11 объектов столовой.
     """
     conn = get_db()
     if not conn:
@@ -567,6 +598,8 @@ async def get_survey_pairs(stage: str = "main"):
         
         objects = [{"id": r["id"], "name": r["name"]} for r in rows]
         pairs = _get_all_pairs(objects)
+        if stage == "canteen" and len(pairs) > 14:
+            pairs = random.sample(pairs, 14)
         conn.close()
         return {"pairs": pairs, "stage": stage}
     except Exception as e:

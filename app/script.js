@@ -491,7 +491,7 @@ function buildReminderWheels(initialHour, initialMinute) {
         container.addEventListener('touchend', (e) => { wheelTouchEnd(e, container, items.length); });
         container.addEventListener('wheel', (e) => {
             e.preventDefault();
-            if (e.deltaY < 0) currentIdx = Math.max(0, currentIdx - 1);
+            if (e.deltaY > 0) currentIdx = Math.max(0, currentIdx - 1);
             else currentIdx = Math.min(items.length - 1, currentIdx + 1);
             updateSelection();
         }, { passive: false });
@@ -530,7 +530,7 @@ function wheelTouchEnd(e, container, itemCount) {
     const dy = e.changedTouches[0].clientY - _wheelStartY;
     const step = 44;
     let idx = Math.round(-_wheelStartTransform / step);
-    idx = Math.max(0, Math.min(itemCount - 1, idx + Math.round(dy / step)));
+    idx = Math.max(0, Math.min(itemCount - 1, idx - Math.round(dy / step)));
     setIndex(idx);
 }
 
@@ -609,16 +609,10 @@ async function loadDuties(userId) {
         if (!widget) return;
 
         if (data.error) {
-            // Специальная обработка для отсутствия таблицы duties
-            if (data.error.includes('no such table')) {
-                widget.innerHTML = `
-                    <h3>🎖️ Ближайший наряд</h3>
-                    <p style="color: #f87171;">Нарядов пока нет.</p>
-                    <p>Чтобы настроить систему, <a href="#" onclick="switchTab('survey'); return false;" style="color: #3B82F6;">пройдите опрос</a> о сложности объектов.</p>
-                `;
-                return;
-            }
-            widget.innerHTML = `<h3>🎖️ Ближайший наряд</h3><p style="color: #f87171;">${data.error}</p>`;
+            const friendly = data.error.includes('График нарядов') || data.error.includes('не загружен');
+            widget.innerHTML = friendly
+                ? `<h3>🎖️ Ближайший наряд</h3><p style="color: #94A3B8;">${data.error}</p><p style="color: #64748B; font-size: 13px;">Пройти <a href="#" onclick="switchTab('survey'); return false;" style="color: #3B82F6;">опрос</a> о сложности нарядов.</p>`
+                : `<h3>🎖️ Ближайший наряд</h3><p style="color: #f87171;">${data.error}</p>`;
             return;
         }
 
@@ -870,8 +864,8 @@ async function handleSurveySubmit() {
     if (stage === 'main' && surveyPairsCanteen.length > 0) {
         surveyCurrentStage = 'canteen';
         renderSurveyPairs('canteen');
-        document.getElementById('survey-stage-indicator').textContent = 
-            'Этап 2 из 2: Объекты столовой (ГЦ, овощи, тарелки, железо, стаканы, лента) — 15 пар';
+        document.getElementById('survey-stage-indicator').textContent =
+            'Этап 2 из 2: Объекты столовой (14 случайных пар из 11 объектов)';
         return;
     }
 
@@ -1027,7 +1021,10 @@ async function loadDutiesForMonth() {
         const data = await response.json();
         
         if (data.error) {
-            container.innerHTML = `<p style="color: #f87171;">Ошибка: ${data.error}</p>`;
+            const friendly = data.error.includes('График нарядов') || data.error.includes('не загружен');
+            container.innerHTML = friendly
+                ? `<p style="color: #94A3B8; text-align: center;">${data.error}</p>`
+                : `<p style="color: #f87171;">Ошибка: ${data.error}</p>`;
             return;
         }
         
