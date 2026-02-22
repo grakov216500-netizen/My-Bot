@@ -87,38 +87,17 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         role_display = ROLE_TITLES.get(role_key, 'Курсант')
 
-        text = f"🏠 <b>Главное меню</b>\n\nДобро пожаловать, {first_name}!\n"
-        text += f"<b>Ваши данные:</b>\n"
-        text += f"• Факультет: {user.get('faculty', 'Не указано')}\n"
-        text += f"• Группа: {user.get('group_name', 'Не указано')}\n"
-        text += f"• Курс: {course_info['current']}\n"
-        text += f"• Роль: {role_display}\n\n"
-        
-        text += "Я помогу вам:\n"
-        text += "• 📋 <b>Видеть свои наряды</b>, просматривая графики.\n"
-        text += "• ✅ <b>Вести личный список задач</b>.\n"
-        text += "• 📚 <b>Организовать учебный процесс</b>.\n"
-        text += "• 👤 <b>Управлять профилем</b> и личными данными.\n\n"
-        
-        # 🔧 ЛОКАЛЬНЫЙ URL ДЛЯ ТЕСТИРОВАНИЯ Mini App
-        # ❗️Меняй при каждом запуске через localhost.run
-        MINI_APP_URL = "https://a4220cdc-b701-409a-9723-28a99a5e90f8/app"  # ← АКТУАЛЬНАЯ ССЫЛКА
-        
-        # ⬇️ СТАРЫЙ URL (для сравнения)
+        text = f"Добро пожаловать, {first_name}!\n\n"
+        text += f"Группа: {user.get('group_name', '—')} · Курс: {course_info['current']} · Роль: {role_display}\n\n"
+        text += "Откройте панель управления для нарядов, задач и опросов."
+
+        # 🔧 URL Mini App (менять при необходимости)
+        MINI_APP_URL = "https://a4220cdc-b701-409a-9723-28a99a5e90f8/app"
         # MINI_APP_URL = "https://grakov216500-netizen.github.io/My-Bot/app/"
-        # → Это GitHub Pages — статика, без API
-        # → Мы используем localhost.run для доступа к /api/user и /api/duties
 
         keyboard = [
-            [InlineKeyboardButton("📋 Мои наряды", callback_data="my_duties")],
-            [InlineKeyboardButton("📝 Мои задачи", callback_data="menu_tasks")],
-            [InlineKeyboardButton("👤 Мой профиль", callback_data="my_profile")],
-            [InlineKeyboardButton("❓ Помощь", callback_data="help")],
-            # --- КНОПКА MINI APP ---
             [InlineKeyboardButton("🖥️ Панель управления", web_app=WebAppInfo(url=MINI_APP_URL))]
         ]
-        
-        # 🔐 Админ-панель — только для админа
         if role_key == 'admin':
             keyboard.append([InlineKeyboardButton("⚙️ Админ-панель", callback_data="admin_panel")])
 

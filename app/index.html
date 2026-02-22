@@ -14,6 +14,12 @@
   <script src="./script.js" defer></script>
 </head>
 <body>
+  <!-- Экран для незарегистрированных: скрыт по умолчанию -->
+  <div id="unregistered-screen" class="unregistered-screen" style="display: none;">
+    <p style="color: #94A3B8; font-size: 18px; margin-bottom: 12px;">Вы ещё не зарегистрированы.</p>
+    <p style="color: #64748B; font-size: 14px;">Сначала пройдите регистрацию в боте (кнопка «Начать регистрацию» или команда /start), затем снова откройте панель управления.</p>
+  </div>
+
   <!-- Шапка (только на главной) -->
   <header class="header" id="main-header">
     <div class="user-section" style="display: flex; align-items: center; gap: 12px;">
@@ -164,7 +170,7 @@
           </div>
           <div class="survey-intro-card" data-card="4">
             <h3 style="color: #93C5FD; font-size: 15px; margin-bottom: 10px;">Как участвовать</h3>
-            <p style="color: #CBD5E1; font-size: 14px; line-height: 1.5;">Два блока: 6 пар по основным нарядам (Курс, ГБР, Столовая, ЗУБ) и 14 случайных пар из 11 объектов столовой (Горячий цех, Овощной цех, Мойка-тарелки, Железо, Лента, Стаканы и др.). Правильных ответов нет — только ваше мнение. Чем честнее ответите, тем точнее модель.</p>
+            <p style="color: #CBD5E1; font-size: 14px; line-height: 1.5;">Два блока: 6 пар по основным нарядам (Курс, ГБР, Столовая, ЗУБ) и 13 случайных пар по объектам в столовой (Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки). Сравниваем объекты, не наряды. Правильных ответов нет — только ваше мнение.</p>
           </div>
         </div>
         <div class="survey-intro-nav">

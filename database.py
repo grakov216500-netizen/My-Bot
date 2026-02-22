@@ -282,7 +282,7 @@ def check_and_update_courses():
 def init_survey_objects():
     """Инициализирует объекты для попарного голосования (2/1/0).
     Этап 1: Курс, ГБР, Столовая, ЗУБ (4 объекта, 6 пар).
-    Этап 2: 11 объектов столовой — все попарно без повторений, C(11,2)=55 пар.
+    Этап 2: 6 объектов столовой (Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки) — 13 случайных пар.
     """
     conn = get_db()
     cursor = conn.cursor()
@@ -290,27 +290,6 @@ def init_survey_objects():
     cursor.execute("SELECT COUNT(*) FROM duty_objects")
     total = cursor.fetchone()[0]
     if total > 0:
-        # Миграция: если объектов столовой 6 — добавить ещё 5 до 11
-        cursor.execute("SELECT id FROM duty_objects WHERE name='Столовая' AND parent_id IS NULL")
-        row = cursor.fetchone()
-        if row:
-            canteen_id = row['id']
-            cursor.execute("SELECT COUNT(*) FROM duty_objects WHERE parent_id = ?", (canteen_id,))
-            n_canteen = cursor.fetchone()[0]
-            if n_canteen == 6:
-                extra = ['Раздача', 'Холодный цех', 'Мясной цех', 'Гарниры', 'Мойка']
-                for name in extra:
-                    cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, canteen_id))
-                conn.commit()
-                print("✅ Миграция опроса: добавлено 5 объектов столовой (всего 11)")
-            elif n_canteen < 11:
-                existing = [r[0] for r in cursor.execute("SELECT name FROM duty_objects WHERE parent_id = ?", (canteen_id,)).fetchall()]
-                all_11 = ['Горячий цех', 'Овощной цех', 'Мойка-тарелки', 'Железо', 'Лента', 'Стаканы', 'Раздача', 'Холодный цех', 'Мясной цех', 'Гарниры', 'Мойка']
-                for name in all_11:
-                    if name not in existing:
-                        cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, canteen_id))
-                conn.commit()
-                print("✅ Миграция опроса: объекты столовой дополнены до 11")
         conn.close()
         return
     
@@ -321,22 +300,18 @@ def init_survey_objects():
     
     conn.commit()
     
-    # Этап 2: Объекты столовой (11 шт.) — все сравниваются друг с другом
-    # Горячий цех, овощной цех, мойка-тарелки, железо, лента, стаканы + ещё 5
+    # Этап 2: Объекты столовой (6 шт.) — для опроса 13 случайных пар
     cursor.execute("SELECT id FROM duty_objects WHERE name='Столовая' AND parent_id IS NULL")
     row = cursor.fetchone()
     if row:
         canteen_id = row['id']
-        canteen_objects = [
-            'Горячий цех', 'Овощной цех', 'Мойка-тарелки', 'Железо', 'Лента', 'Стаканы',
-            'Раздача', 'Холодный цех', 'Мясной цех', 'Гарниры', 'Мойка'
-        ]
+        canteen_objects = ['Горячий цех', 'Овощной цех', 'Стаканы', 'Железо', 'Лента', 'Тарелки']
         for name in canteen_objects:
             cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, canteen_id))
     
     conn.commit()
     conn.close()
-    print("✅ Объекты для опроса инициализированы: 4 основных наряда (6 пар), 11 объектов столовой (55 пар)")
+    print("✅ Объекты для опроса инициализированы: 4 основных наряда (6 пар), 6 объектов столовой (13 случайных пар)")
 
 def get_survey_results_by_course(course_year):
     """Получает результаты опроса (веса объектов). course_year пока не фильтрует — веса глобальные."""

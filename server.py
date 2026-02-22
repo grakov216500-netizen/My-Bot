@@ -584,7 +584,10 @@ async def get_survey_pairs(stage: str = "main"):
             rows = conn.execute(
                 "SELECT id, name FROM duty_objects WHERE parent_id IS NULL ORDER BY id"
             ).fetchall()
-        else:  # canteen
+        else:  # canteen — только 6 объектов столовой, 13 случайных пар
+            CANTEEN_OBJECT_NAMES = [
+                "Горячий цех", "Овощной цех", "Стаканы", "Железо", "Лента", "Тарелки"
+            ]
             canteen = conn.execute(
                 "SELECT id FROM duty_objects WHERE name='Столовая' AND parent_id IS NULL"
             ).fetchone()
@@ -595,11 +598,24 @@ async def get_survey_pairs(stage: str = "main"):
                 "SELECT id, name FROM duty_objects WHERE parent_id = ? ORDER BY id",
                 (canteen["id"],)
             ).fetchall()
+            # Ровно 6 объектов: Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки (Мойка-тарелки → Тарелки)
+            by_name = {r["name"]: r for r in rows}
+            objects = []
+            for display_name in CANTEEN_OBJECT_NAMES:
+                r = by_name.get(display_name) or (by_name.get("Мойка-тарелки") if display_name == "Тарелки" else None)
+                if r:
+                    objects.append({"id": r["id"], "name": display_name})
+            # дедупликация по id (если Тарелки и Мойка-тарелки оба есть — один раз)
+            seen = set()
+            objects = [o for o in objects if o["id"] not in seen and not seen.add(o["id"])]
+            pairs = _get_all_pairs(objects)
+            if len(pairs) > 13:
+                pairs = random.sample(pairs, 13)
+            conn.close()
+            return {"pairs": pairs, "stage": stage}
         
         objects = [{"id": r["id"], "name": r["name"]} for r in rows]
         pairs = _get_all_pairs(objects)
-        if stage == "canteen" and len(pairs) > 14:
-            pairs = random.sample(pairs, 14)
         conn.close()
         return {"pairs": pairs, "stage": stage}
     except Exception as e:

@@ -42,9 +42,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupEditDeleteModals();
     setupReminderModal();
 
-    await loadUserProfile(userId);
+    const userOk = await loadUserProfile(userId);
+    if (!userOk) {
+        showUnregisteredState();
+        return;
+    }
     await loadDuties(userId);
-    await loadSurveyResults(); // Загружаем результаты опроса, если пользователь уже прошёл его
+    await loadSurveyResults();
 });
 
 let currentTab = 'home';
@@ -567,11 +571,10 @@ function showError(message) {
 async function loadUserProfile(userId) {
     try {
         const response = await fetch(`${baseUrl}/api/user?telegram_id=${userId}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        if (data.error) {
-            console.warn("⚠️ API вернуло ошибку:", data.error);
-            return;
+        if (!response.ok || data.error) {
+            console.warn("⚠️ Пользователь не найден или ошибка:", data.error);
+            return false;
         }
 
         const avatar = document.querySelector('.avatar');
@@ -588,15 +591,26 @@ async function loadUserProfile(userId) {
         if (userNameEl) userNameEl.textContent = fullName;
         if (userCourseEl) userCourseEl.textContent = `Курс: ${data.course || "—"}`;
         if (userGroupEl) userGroupEl.textContent = `Группа: ${data.group || "—"}`;
-        
-        // Сохраняем ФИО для использования в других функциях
         userFio = fullName;
-
         console.log("✅ Профиль загружен:", fullName);
+        return true;
     } catch (err) {
         console.error("❌ Ошибка загрузки профиля:", err);
-        showError("Не удалось загрузить профиль");
+        return false;
     }
+}
+
+function showUnregisteredState() {
+    document.getElementById('unregistered-screen').style.display = 'flex';
+    const header = document.getElementById('main-header');
+    if (header) header.style.display = 'none';
+    document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
+    const main = document.getElementById('main-content');
+    if (main) main.classList.add('hidden');
+    const fab = document.getElementById('add-task-fab');
+    if (fab) fab.style.display = 'none';
+    const nav = document.getElementById('bottom-nav');
+    if (nav) nav.style.display = 'none';
 }
 
 async function loadDuties(userId) {
@@ -739,7 +753,7 @@ async function loadSurveyObjects() {
 
         surveyCurrentStage = 'main';
         renderSurveyPairs('main');
-        stageIndicator.textContent = 'Этап 1 из 2: Основные наряды (Курс, ГБР, Столовая, ЗУБ) — 6 пар';
+        stageIndicator.textContent = 'Этап 1 из 2: Основные наряды (Курс vs ГБР vs Столовая vs ЗУБ) — 6 пар';
 
         document.getElementById('submit-survey-btn').onclick = handleSurveySubmit;
     } catch (err) {
@@ -772,9 +786,12 @@ function renderSurveyPairs(stage) {
         var selected = choices[name] || '';
         var s = 'padding:14px 12px;border-radius:10px;border:2px solid #334155;background:#1E293B;color:#CBD5E1;font-size:15px;cursor:pointer;flex:1;min-width:100px;';
         var sSel = 'border-color:#3B82F6;background:#2563EB;color:white;';
+        var questionLabel = stage === 'canteen' ? 'Какой объект сложнее?' : 'Какой наряд сложнее?';
+        var vsLabel = a.name + ' vs ' + b.name;
         html += '<div style="background:#1E293B;border-radius:8px;padding:14px;margin-bottom:12px;border-left:4px solid #3B82F6;">';
-        html += '<p style="color:#94A3B8;font-size:13px;margin-bottom:10px;">Пара ' + (idx + 1) + ' из ' + pairs.length + '</p>';
-        html += '<p style="color:#CBD5E1;margin-bottom:12px;">Какой наряд сложнее?</p>';
+        html += '<p style="color:#94A3B8;font-size:13px;margin-bottom:6px;">Пара ' + (idx + 1) + ' из ' + pairs.length + '</p>';
+        html += '<p style="color:#93C5FD;font-size:14px;font-weight:600;margin-bottom:8px;">' + vsLabel + '</p>';
+        html += '<p style="color:#CBD5E1;margin-bottom:12px;">' + questionLabel + '</p>';
         html += '<div style="display:flex;flex-wrap:wrap;gap:10px;">';
         html += '<button type="button" class="survey-pair-btn" data-name="' + name + '" data-choice="a" style="' + s + (selected === 'a' ? sSel : '') + '">' + a.name + ' сложнее</button>';
         html += '<button type="button" class="survey-pair-btn" data-name="' + name + '" data-choice="equal" style="' + s + (selected === 'equal' ? sSel : '') + '">Одинаково</button>';
@@ -865,7 +882,7 @@ async function handleSurveySubmit() {
         surveyCurrentStage = 'canteen';
         renderSurveyPairs('canteen');
         document.getElementById('survey-stage-indicator').textContent =
-            'Этап 2 из 2: Объекты столовой (14 случайных пар из 11 объектов)';
+            'Этап 2 из 2: Объекты в столовой (Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки) — 13 пар';
         return;
     }
 
