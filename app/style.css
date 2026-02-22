@@ -4,12 +4,43 @@
   box-sizing: border-box;
 }
 
+/* === Скрытие экранов (переключение навигации) === */
+.hidden {
+  display: none !important;
+}
+
+/* === Полноэкранные экраны (не прокрутка, а отдельный экран) === */
+.app-screen {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 70px; /* место под нижнюю панель */
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 5;
+  background: #0F172A;
+  padding: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+.app-screen.active {
+  display: block;
+}
+#main-content {
+  min-height: 100vh;
+  padding-bottom: 80px;
+}
+#main-content.hidden {
+  display: none !important;
+}
+
 /* === Тёмная тема === */
 body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   background-color: #0F172A;
   color: #E2E8F0;
-  padding: 16px;
+  padding: 0;
   min-height: 100vh;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -238,21 +269,33 @@ body::-webkit-scrollbar-thumb:hover {
 }
 .task-actions {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   margin-left: 8px;
+  flex-shrink: 0;
 }
 .task-actions button {
-  background: none;
-  border: none;
-  font-size: 20px; /* увеличено для удобства */
-  padding: 6px;    /* область клика больше */
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 2px solid #334155;
+  background: #1E293B;
+  font-size: 18px;
   cursor: pointer;
-  color: #60A5FA;
-  transition: color 0.2s ease, transform 0.2s ease;
+  color: #93C5FD;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .task-actions button:hover {
-  color: #3B82F6;
-  transform: scale(1.1);
+  color: #E2E8F0;
+  background: #3B82F6;
+  border-color: #3B82F6;
+  transform: scale(1.08);
+}
+.task-actions button:active {
+  transform: scale(0.98);
 }
 
 /* === Кнопка "Добавить" (FAB) === */
@@ -337,18 +380,18 @@ body::-webkit-scrollbar-thumb:hover {
   transition: all 0.2s ease;
 }
 
-/* === Отступ для контента, чтобы не перекрывать панель === */
+/* === Отступ для контента === */
 .main {
-  padding-bottom: 80px;
+  padding: 0 0 80px 0;
 }
 #notes-screen {
-  padding-bottom: 150px; /* FAB + nav bar — чтобы + не накладывалась на список */
+  padding-bottom: 150px;
 }
 #notes-screen .search-bar {
-  margin-top: 12px;
+  margin-bottom: 16px;
 }
 
-/* === Заметки: вкладки Активные / Выполненные === */
+/* === Заметки: поиск сверху, затем табы Активные / Выполненные === */
 .notes-tabs {
   display: flex;
   gap: 8px;
