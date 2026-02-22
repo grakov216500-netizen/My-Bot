@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupEventListeners();
     setupEditDeleteModals();
     setupReminderModal();
+    setupProfileAndAdmin();
 
     const userOk = await loadUserProfile(userId);
     if (!userOk) {
@@ -52,8 +53,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 let currentTab = 'home';
-let currentMonth = new Date().getMonth() + 1; // 1-12
+let userRole = 'user'; // admin | assistant | sergeant | user
+let currentMonth = new Date().getMonth() + 1;
 let currentYear = new Date().getFullYear();
+
+const ROLE_LABELS = { admin: 'Администратор', assistant: 'Помощник', sergeant: 'Сержант', user: 'Курсант' };
+function getRoleLabel(r) { return ROLE_LABELS[r] || r; }
 
 function setupNavigation() {
     switchTab('home');
@@ -103,6 +108,161 @@ function setupReminderModal() {
     const cancel = document.getElementById('reminder-cancel');
     if (ok) ok.addEventListener('click', submitReminderFromModal);
     if (cancel) cancel.addEventListener('click', closeReminderModal);
+}
+
+function setupProfileAndAdmin() {
+    const openBtn = document.getElementById('open-profile-btn');
+    if (openBtn) openBtn.addEventListener('click', openProfileScreen);
+    const backBtn = document.getElementById('profile-back');
+    if (backBtn) backBtn.addEventListener('click', closeProfileScreen);
+    const saveBtn = document.getElementById('profile-save');
+    if (saveBtn) saveBtn.addEventListener('click', saveProfile);
+    const adminPanelBtn = document.getElementById('profile-admin-panel');
+    if (adminPanelBtn) adminPanelBtn.addEventListener('click', function() { openAdminPanel('admin'); });
+    const assistantPanelBtn = document.getElementById('profile-assistant-panel');
+    if (assistantPanelBtn) assistantPanelBtn.addEventListener('click', function() { openAdminPanel('assistant'); });
+    const adminBackBtn = document.getElementById('admin-back');
+    if (adminBackBtn) adminBackBtn.addEventListener('click', closeAdminPanel);
+    const adminLoadBtn = document.getElementById('admin-load-users');
+    if (adminLoadBtn) adminLoadBtn.addEventListener('click', loadAdminUsersList);
+    const finalizeBtn = document.getElementById('survey-finalize-btn');
+    if (finalizeBtn) finalizeBtn.addEventListener('click', finalizeSurvey);
+}
+
+async function finalizeSurvey() {
+    if (userRole !== 'admin' && userRole !== 'assistant') return;
+    try {
+        const res = await fetch(baseUrl + '/api/survey/finalize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ admin_id: userId })
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Ошибка');
+        showToast('Опрос завершён, веса подсчитаны');
+        document.getElementById('survey-screen').style.display = 'none';
+        switchTab('home');
+    } catch (e) {
+        showToast(e.message || 'Ошибка завершения опроса');
+    }
+}
+
+function openProfileScreen() {
+    document.getElementById('profile-fio').value = userFio || '';
+    document.getElementById('profile-course').textContent = (document.getElementById('userCourse') && document.getElementById('userCourse').textContent) || '—';
+    document.getElementById('profile-group').value = (document.getElementById('userGroup') && document.getElementById('userGroup').textContent.replace(/^Группа:\s*/, '')) || '';
+    document.getElementById('profile-role').textContent = 'Роль: ' + getRoleLabel(userRole);
+    document.getElementById('profile-admin-panel').style.display = userRole === 'admin' ? 'inline-block' : 'none';
+    document.getElementById('profile-assistant-panel').style.display = userRole === 'assistant' ? 'inline-block' : 'none';
+    document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
+    document.getElementById('main-content').classList.add('hidden');
+    document.getElementById('profile-screen').style.display = 'block';
+}
+
+function closeProfileScreen() {
+    document.getElementById('profile-screen').style.display = 'none';
+    document.getElementById('main-content').classList.remove('hidden');
+    document.getElementById('main-content').style.display = 'block';
+}
+
+async function saveProfile() {
+    const fio = document.getElementById('profile-fio').value.trim();
+    const group = document.getElementById('profile-group').value.trim();
+    try {
+        const res = await fetch(baseUrl + '/api/user', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telegram_id: userId, fio: fio || undefined, group_name: group })
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Ошибка');
+        userFio = fio;
+        const userNameEl = document.getElementById('userName');
+        const userGroupEl = document.getElementById('userGroup');
+        if (userNameEl) userNameEl.textContent = fio || userFio;
+        if (userGroupEl) userGroupEl.textContent = 'Группа: ' + (group || '—');
+        showToast('Профиль сохранён');
+    } catch (e) {
+        showToast('Ошибка сохранения');
+    }
+}
+
+let _adminPanelMode = 'admin'; // 'admin' | 'assistant'
+
+function openAdminPanel(mode) {
+    _adminPanelMode = mode;
+    document.getElementById('admin-panel-title').textContent = mode === 'admin' ? '⚙️ Админ-панель: список пользователей' : '🛠 Панель помощника: список пользователей';
+    document.getElementById('admin-filter-year').style.display = mode === 'admin' ? 'block' : 'none';
+    document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
+    document.getElementById('main-content').classList.add('hidden');
+    document.getElementById('admin-panel-screen').style.display = 'block';
+    loadAdminUsersList();
+}
+
+function closeAdminPanel() {
+    document.getElementById('admin-panel-screen').style.display = 'none';
+    document.getElementById('main-content').classList.remove('hidden');
+    document.getElementById('main-content').style.display = 'block';
+}
+
+async function loadAdminUsersList() {
+    const yearSelect = document.getElementById('admin-filter-year');
+    const search = document.getElementById('admin-search-fio').value.trim();
+    const listEl = document.getElementById('admin-users-list');
+    listEl.innerHTML = '<p style="color:#94A3B8;">Загрузка...</p>';
+    let url = `${baseUrl}/api/users?actor_telegram_id=${userId}`;
+    if (_adminPanelMode === 'admin' && yearSelect && yearSelect.value) url += '&enrollment_year=' + yearSelect.value;
+    if (search) url += '&search=' + encodeURIComponent(search);
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Ошибка загрузки');
+        const data = await res.json();
+        if (!data.users || data.users.length === 0) {
+            listEl.innerHTML = '<p style="color:#94A3B8;">Нет пользователей</p>';
+            return;
+        }
+        let html = '';
+        data.users.forEach(function(u) {
+            const roleLabel = getRoleLabel(u.role);
+            html += '<div class="admin-user-row" style="background:#0f172a;border-radius:8px;padding:10px;margin-bottom:8px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;">';
+            html += '<div style="flex:1;min-width:140px;"><strong style="color:#E2E8F0;">' + (u.fio || '—') + '</strong><br/><span style="color:#94A3B8;font-size:12px;">' + (u.group_name || '') + ', ' + (u.enrollment_year || '') + ' · ' + roleLabel + '</span></div>';
+            html += '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+            if (_adminPanelMode === 'admin' && u.role !== 'assistant') html += '<button type="button" class="admin-set-role" data-tid="' + u.telegram_id + '" data-role="assistant" style="padding:6px 10px;background:#6366F1;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Помощник</button>';
+            if (u.role !== 'sergeant') html += '<button type="button" class="admin-set-role" data-tid="' + u.telegram_id + '" data-role="sergeant" style="padding:6px 10px;background:#8B5CF6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Сержант</button>';
+            if (u.role !== 'user') html += '<button type="button" class="admin-set-role" data-tid="' + u.telegram_id + '" data-role="user" style="padding:6px 10px;background:#64748B;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Снять</button>';
+            html += '</div></div>';
+        });
+        listEl.innerHTML = html;
+        listEl.querySelectorAll('.admin-set-role').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                setUserRole(parseInt(btn.dataset.tid, 10), btn.dataset.role);
+            });
+        });
+        if (_adminPanelMode === 'admin' && yearSelect && yearSelect.options.length <= 1) {
+            const years = [...new Set(data.users.map(function(u) { return u.enrollment_year; }))].sort(function(a,b) { return b - a; });
+            years.forEach(function(y) {
+                const opt = document.createElement('option');
+                opt.value = y;
+                opt.textContent = y + ' г.';
+                yearSelect.appendChild(opt);
+            });
+        }
+    } catch (e) {
+        listEl.innerHTML = '<p style="color:#f87171;">Ошибка загрузки списка</p>';
+    }
+}
+
+async function setUserRole(targetTelegramId, newRole) {
+    try {
+        const res = await fetch(baseUrl + '/api/users/set-role', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ actor_telegram_id: userId, target_telegram_id: targetTelegramId, role: newRole })
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Ошибка');
+        showToast('Роль обновлена');
+        loadAdminUsersList();
+    } catch (e) {
+        showToast(e.message || 'Ошибка назначения');
+    }
 }
 
 // --- Свои модальные окна вместо prompt/alert (без системного диалога и дубля) ---
@@ -193,7 +353,7 @@ function switchTab(tabName) {
         if (studyScreen) studyScreen.style.display = 'block';
     } else if (tabName === 'survey') {
         if (surveyScreen) surveyScreen.style.display = 'block';
-        showSurveyIntro();
+        checkSurveyStateAndShow();
     } else { // home
         if (mainContent) mainContent.classList.remove('hidden');
     }
@@ -588,11 +748,14 @@ async function loadUserProfile(userId) {
         const userGroupEl = document.getElementById('userGroup');
 
         const fullName = data.full_name || "—";
+        userRole = data.role || 'user';
         if (userNameEl) userNameEl.textContent = fullName;
         if (userCourseEl) userCourseEl.textContent = `Курс: ${data.course || "—"}`;
         if (userGroupEl) userGroupEl.textContent = `Группа: ${data.group || "—"}`;
+        const userRoleEl = document.getElementById('userRole');
+        if (userRoleEl) userRoleEl.textContent = 'Роль: ' + getRoleLabel(userRole);
         userFio = fullName;
-        console.log("✅ Профиль загружен:", fullName);
+        console.log("✅ Профиль загружен:", fullName, "роль:", userRole);
         return true;
     } catch (err) {
         console.error("❌ Ошибка загрузки профиля:", err);
@@ -670,9 +833,37 @@ let surveyCurrentStage = 'main';
 const SURVEY_INTRO_CARD_COUNT = 5;
 let surveyIntroIndex = 0;
 
+async function checkSurveyStateAndShow() {
+    const intro = document.getElementById('survey-intro');
+    const content = document.getElementById('survey-content');
+    const alreadyPassed = document.getElementById('survey-already-passed');
+    const finalizeBlock = document.getElementById('survey-finalize-block');
+    if (finalizeBlock) finalizeBlock.style.display = (userRole === 'admin' || userRole === 'assistant') ? 'block' : 'none';
+    if (!intro || !alreadyPassed) return;
+    try {
+        const response = await fetch(`${baseUrl}/api/survey/user-results?telegram_id=${userId}`);
+        if (!response.ok) throw new Error('HTTP');
+        const data = await response.json();
+        if (data.voted) {
+            alreadyPassed.style.display = 'block';
+            intro.style.display = 'none';
+            if (content) content.style.display = 'none';
+            return;
+        }
+    } catch (e) {
+        console.warn('Проверка опроса:', e);
+    }
+    alreadyPassed.style.display = 'none';
+    showSurveyIntro();
+}
+
 function showSurveyIntro() {
     const intro = document.getElementById('survey-intro');
     const content = document.getElementById('survey-content');
+    const alreadyPassed = document.getElementById('survey-already-passed');
+    const finalizeBlock = document.getElementById('survey-finalize-block');
+    if (finalizeBlock) finalizeBlock.style.display = (userRole === 'admin' || userRole === 'assistant') ? 'block' : 'none';
+    if (alreadyPassed) alreadyPassed.style.display = 'none';
     if (intro) intro.style.display = 'block';
     if (content) content.style.display = 'none';
     surveyIntroIndex = 0;

@@ -1,6 +1,6 @@
-# handlers/start.py - ИСПРАВЛЕННАЯ версия с поддержкой новых ролей и защитой от блокировок
+# handlers/start.py — для зарегистрированных то же меню, что в menu.py: только «Панель управления»
 
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.ext import ContextTypes, CommandHandler
 from database import get_db, update_user_last_active
 from utils.welcome_message import get_welcome_message
@@ -9,13 +9,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Отображение ролей для пользователей
 ROLE_DISPLAY = {
     'user': 'Курсант',
     'sergeant': 'Сержант',
     'assistant': 'Помощник',
     'admin': 'Администратор'
 }
+
+# Тот же URL Mini App, что в menu.py (держать в синхронизации)
+MINI_APP_URL = "https://a4220cdc-b701-409a-9723-28a99a5e90f8/app"
 
 async def start_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -66,28 +68,14 @@ async def start_command_handler(update: Update, context: ContextTypes.DEFAULT_TY
         role_display = ROLE_DISPLAY.get(role, "Курсант")
 
         welcome_text = (
-            f"👋 <b>С возвращением, {fio.split()[0]}!</b>\n\n"
-            f"<b>Ваши данные:</b>\n"
-            f"• Факультет: {faculty}\n"
-            f"• Группа: {group_name}\n"
-            f"• Курс: {course_info['current']}\n"
-            f"• Роль: {role_display}\n\n"
-            "Используйте кнопки ниже для навигации:"
+            f"👋 С возвращением, {fio.split()[0]}!\n\n"
+            f"Группа: {group_name} · Курс: {course_info['current']} · Роль: {role_display}\n\n"
+            "Откройте панель управления для нарядов, задач и опросов."
         )
 
-        keyboard = []
-
-        # Основные функции для всех
-        keyboard.append([InlineKeyboardButton("📋 Мои наряды", callback_data="my_duties")])
-        keyboard.append([InlineKeyboardButton("✅ Мои задачи", callback_data="my_tasks")])
-        keyboard.append([InlineKeyboardButton("👤 Мой профиль", callback_data="my_profile")])
-
-        # Доступ для редакторов
-        if role in ['sergeant', 'assistant', 'admin']:
-            keyboard.append([InlineKeyboardButton("📊 Загрузить график", callback_data="help_upload_excel")])
-
-        # Убираем пустые строки
-        keyboard = [row for row in keyboard if row]
+        keyboard = [[InlineKeyboardButton("🖥️ Панель управления", web_app=WebAppInfo(url=MINI_APP_URL))]]
+        if role == 'admin':
+            keyboard.append([InlineKeyboardButton("⚙️ Админ-панель", callback_data="admin_panel")])
 
         # Отправляем сообщение с защитой от блокировки
         try:

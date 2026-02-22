@@ -33,20 +33,21 @@ async def check_task_reminders(context: ContextTypes.DEFAULT_TYPE):
             ''', (lower_str, upper_str))
 
         elif REMINDER_MODE == "exact":
-            # Точно в момент дедлайна ±15 секунд
-            time_lower = now - timedelta(seconds=15)
-            time_upper = now + timedelta(seconds=15)
+            # Окно ±60 сек, чтобы не пропустить из-за интервала 30 сек или сдвига времени
+            time_lower = now - timedelta(seconds=60)
+            time_upper = now + timedelta(seconds=60)
             lower_str = time_lower.strftime('%Y-%m-%d %H:%M:%S')
             upper_str = time_upper.strftime('%Y-%m-%d %H:%M:%S')
 
             cursor.execute('''
                 SELECT id, text, deadline, user_id FROM tasks
                 WHERE done = 0 AND reminded = 0 AND deadline IS NOT NULL
-                  AND datetime(deadline) >= datetime(?) AND datetime(deadline) < datetime(?)
+                  AND deadline >= ? AND deadline <= ?
             ''', (lower_str, upper_str))
 
         tasks = cursor.fetchall()
-        logger.info(f"📊 Найдено задач для напоминания: {len(tasks)}")
+        if tasks:
+            logger.info(f"📊 Найдено задач для напоминания: {len(tasks)} (сейчас: {now.strftime('%Y-%m-%d %H:%M:%S')})")
 
         for task in tasks:
             try:

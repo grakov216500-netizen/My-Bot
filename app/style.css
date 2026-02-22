@@ -643,6 +643,13 @@ body::-webkit-scrollbar-thumb:hover {
   background: #2563EB;
 }
 
+.clickable-profile {
+  cursor: pointer;
+}
+.clickable-profile:hover {
+  opacity: 0.9;
+}
+
 .unregistered-screen {
   padding: 24px;
   text-align: center;

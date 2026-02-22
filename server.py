@@ -97,12 +97,18 @@ async def get_user(telegram_id: int):
         else:
             group_col = None   # необязательное поле
 
-        # --- Формируем запрос динамически ---
         select_parts = [f"{name_col} as full_name", "enrollment_year"]
         if group_col:
             select_parts.append(f"{group_col} as group_name")
         else:
             select_parts.append("'' as group_name")
+        try:
+            cursor = conn.execute("PRAGMA table_info(users)")
+            cols = [r['name'] for r in cursor.fetchall()]
+            if 'role' in cols:
+                select_parts.append("role")
+        except Exception:
+            pass
 
         query = f"SELECT {', '.join(select_parts)} FROM users WHERE telegram_id = ?"
         row = conn.execute(query, (telegram_id,)).fetchone()
@@ -110,7 +116,6 @@ async def get_user(telegram_id: int):
         if not row:
             return {"error": "Пользователь не найден"}
 
-        # КОПИРУЕМ ДАННЫЕ В ОБЫЧНЫЙ СЛОВАРЬ (это важно!)
         user_data = dict(row)
         print(f"[DEBUG] Данные из БД для {telegram_id}: {user_data}")
 
@@ -118,9 +123,8 @@ async def get_user(telegram_id: int):
         print(f"[ERROR] Ошибка запроса пользователя: {e}")
         return {"error": f"Ошибка БД: {str(e)}"}
     finally:
-        conn.close()  # соединение закрыто, но данные уже скопированы
+        conn.close()
 
-    # --- Расчёт курса с помощью course_calculator ---
     try:
         enrollment = int(user_data['enrollment_year'])
         course = get_current_course(enrollment)
@@ -128,11 +132,171 @@ async def get_user(telegram_id: int):
         print(f"[ERROR] Ошибка расчёта курса: {e}")
         course = 1
 
-    return {
+    out = {
         "full_name": user_data['full_name'],
         "course": str(course),
-        "group": user_data.get('group_name', '')
+        "group": user_data.get('group_name', ''),
+        "role": user_data.get('role', 'user')
     }
+    return out
+
+
+@app.patch("/api/user")
+async def update_user(data: dict):
+    """Обновление своего профиля: ФИО, группа. telegram_id — кто редактирует."""
+    telegram_id = data.get("telegram_id")
+    fio = data.get("fio")
+    group_name = data.get("group_name")
+    if not telegram_id:
+        raise HTTPException(status_code=400, detail="telegram_id обязателен")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        cursor = conn.execute("PRAGMA table_info(users)")
+        cols = [r["name"] for r in cursor.fetchall()]
+        updates = []
+        params = []
+        if fio is not None and str(fio).strip():
+            name_col = "fio" if "fio" in cols else "full_name"
+            updates.append(f"{name_col} = ?")
+            params.append(str(fio).strip())
+        if group_name is not None:
+            updates.append("group_name = ?")
+            params.append(str(group_name).strip() if group_name else "")
+        if not updates:
+            conn.close()
+            return {"status": "ok"}
+        params.append(telegram_id)
+        conn.execute(
+            f"UPDATE users SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?",
+            params
+        )
+        conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] update_user: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка обновления профиля")
+    finally:
+        conn.close()
+
+
+def _user_role_from_db(telegram_id: int):
+    """Роль из БД (admin, assistant, sergeant, user)."""
+    conn = get_db()
+    if not conn:
+        return None
+    row = conn.execute("SELECT role FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+    conn.close()
+    return row["role"] if row else None
+
+
+@app.get("/api/users")
+async def list_users(
+    actor_telegram_id: int,
+    enrollment_year: int = None,
+    group_name: str = None,
+    search: str = None
+):
+    """Список пользователей для админа (все) или помощника (свой курс). Сортировка: курс (год набора), группа, ФИО."""
+    role = _user_role_from_db(actor_telegram_id)
+    if role not in ("admin", "assistant"):
+        raise HTTPException(status_code=403, detail="Доступ только для админа или помощника")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        name_col = "fio" if "fio" in [r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()] else "full_name"
+        if role == "assistant":
+            row = conn.execute(
+                "SELECT enrollment_year, group_name FROM users WHERE telegram_id = ?",
+                (actor_telegram_id,)
+            ).fetchone()
+            if not row:
+                conn.close()
+                return {"users": []}
+            ayear, agroup = row["enrollment_year"], row["group_name"]
+            query = f"""
+                SELECT telegram_id, {name_col} as fio, group_name, enrollment_year, role
+                FROM users WHERE enrollment_year = ? AND status = 'активен'
+            """
+            params = [ayear]
+            if search and search.strip():
+                query += f" AND ({name_col} LIKE ?)"
+                params.append(f"%{search.strip()}%")
+            query += " ORDER BY group_name, fio"
+            rows = conn.execute(query, params).fetchall()
+        else:
+            query = f"""
+                SELECT telegram_id, {name_col} as fio, group_name, enrollment_year, role
+                FROM users WHERE status = 'активен'
+            """
+            params = []
+            if enrollment_year is not None:
+                query += " AND enrollment_year = ?"
+                params.append(enrollment_year)
+            if group_name and group_name.strip():
+                query += " AND group_name = ?"
+                params.append(group_name.strip())
+            if search and search.strip():
+                query += f" AND ({name_col} LIKE ?)"
+                params.append(f"%{search.strip()}%")
+            query += " ORDER BY enrollment_year DESC, group_name, fio"
+            rows = conn.execute(query, params).fetchall()
+        users = [
+            {
+                "telegram_id": r["telegram_id"],
+                "fio": r["fio"],
+                "group_name": r["group_name"],
+                "enrollment_year": r["enrollment_year"],
+                "role": r["role"] or "user"
+            }
+            for r in rows
+        ]
+        conn.close()
+        return {"users": users}
+    except Exception as e:
+        print(f"[ERROR] list_users: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка списка пользователей")
+
+
+@app.post("/api/users/set-role")
+async def set_user_role(data: dict):
+    """Назначить/снять роль: admin — помощник или сержант; assistant — только сержант."""
+    actor_id = data.get("actor_telegram_id")
+    target_id = data.get("target_telegram_id")
+    new_role = data.get("role")  # assistant | sergeant | user
+    if not actor_id or not target_id or new_role not in ("assistant", "sergeant", "user"):
+        raise HTTPException(status_code=400, detail="Нужны actor_telegram_id, target_telegram_id и role (assistant|sergeant|user)")
+    actor_role = _user_role_from_db(actor_id)
+    if actor_role == "admin":
+        pass  # может назначать assistant, sergeant, user
+    elif actor_role == "assistant":
+        if new_role == "assistant":
+            raise HTTPException(status_code=403, detail="Помощник не может назначать помощников")
+        # только sergeant или user в пределах своего курса
+        conn = get_db()
+        if not conn:
+            raise HTTPException(status_code=500, detail="База данных не найдена")
+        a_row = conn.execute("SELECT enrollment_year FROM users WHERE telegram_id = ?", (actor_id,)).fetchone()
+        t_row = conn.execute("SELECT enrollment_year FROM users WHERE telegram_id = ?", (target_id,)).fetchone()
+        conn.close()
+        if not a_row or not t_row or a_row["enrollment_year"] != t_row["enrollment_year"]:
+            raise HTTPException(status_code=403, detail="Можно менять только пользователей своего курса")
+    else:
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        conn.execute("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?", (new_role, target_id))
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "role": new_role}
+    except Exception as e:
+        print(f"[ERROR] set_user_role: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка назначения роли")
+
 
 # ============================================
 # 2. НАРЯДЫ ПОЛЬЗОВАТЕЛЯ

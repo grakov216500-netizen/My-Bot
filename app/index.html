@@ -20,15 +20,16 @@
     <p style="color: #64748B; font-size: 14px;">Сначала пройдите регистрацию в боте (кнопка «Начать регистрацию» или команда /start), затем снова откройте панель управления.</p>
   </div>
 
-  <!-- Шапка (только на главной) -->
+  <!-- Шапка (только на главной); клик по аватару/данным → Мои данные -->
   <header class="header" id="main-header">
-    <div class="user-section" style="display: flex; align-items: center; gap: 12px;">
+    <div class="user-section clickable-profile" id="open-profile-btn" style="display: flex; align-items: center; gap: 12px;">
       <img src="https://ui-avatars.com/api/?name=Загрузка...&background=3B82F6&color=fff" 
            alt="Аватар" class="avatar" />
       <div class="profile-info">
         <p id="userName">Загрузка...</p>
         <p id="userCourse">Курс: —</p>
         <p id="userGroup">Группа: —</p>
+        <p id="userRole" style="color: #94A3B8; font-size: 12px;">Роль: —</p>
       </div>
     </div>
     <div class="header-icons">
@@ -36,6 +37,48 @@
       <button class="icon-btn" onclick="openSettings()">⋮</button>
     </div>
   </header>
+
+  <!-- Экран «Мои данные»: редактирование ФИО, группы; переход в админ/помощник панель -->
+  <div id="profile-screen" class="app-screen" style="display: none;">
+    <div class="widget" style="max-width: 480px; margin: 0 auto;">
+      <h3 style="color: #93C5FD;">👤 Мои данные</h3>
+      <div style="margin-bottom: 12px;">
+        <label style="color: #94A3B8; font-size: 12px;">ФИО</label>
+        <input type="text" id="profile-fio" placeholder="ФИО" style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0; box-sizing: border-box;" />
+      </div>
+      <div style="margin-bottom: 12px;">
+        <label style="color: #94A3B8; font-size: 12px;">Курс (год набора)</label>
+        <p id="profile-course" style="color: #CBD5E1; margin: 4px 0 0 0;">—</p>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <label style="color: #94A3B8; font-size: 12px;">Группа</label>
+        <input type="text" id="profile-group" placeholder="Группа" style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0; box-sizing: border-box;" />
+      </div>
+      <p id="profile-role" style="color: #94A3B8; font-size: 13px; margin-bottom: 16px;">Роль: —</p>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button type="button" id="profile-save" style="padding: 10px 20px; background: #3B82F6; color: white; border: none; border-radius: 8px; cursor: pointer;">Сохранить</button>
+        <button type="button" id="profile-back" style="padding: 10px 20px; background: #334155; color: #E2E8F0; border: none; border-radius: 8px; cursor: pointer;">Назад</button>
+        <button type="button" id="profile-admin-panel" style="display: none; padding: 10px 20px; background: #6366F1; color: white; border: none; border-radius: 8px; cursor: pointer;">⚙️ Админ-панель</button>
+        <button type="button" id="profile-assistant-panel" style="display: none; padding: 10px 20px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">🛠 Панель помощника</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Админ / Помощник: список пользователей, назначение и снятие ролей -->
+  <div id="admin-panel-screen" class="app-screen" style="display: none;">
+    <div style="padding: 16px; max-width: 600px; margin: 0 auto;">
+      <h3 id="admin-panel-title" style="color: #93C5FD; margin-bottom: 12px;">Список пользователей</h3>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+        <select id="admin-filter-year" style="padding: 8px 12px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0;">
+          <option value="">Все курсы</option>
+        </select>
+        <input type="text" id="admin-search-fio" placeholder="Поиск по ФИО" style="flex: 1; min-width: 120px; padding: 8px 12px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0;" />
+        <button type="button" id="admin-load-users" style="padding: 8px 16px; background: #3B82F6; color: white; border: none; border-radius: 8px; cursor: pointer;">Обновить</button>
+      </div>
+      <button type="button" id="admin-back" style="margin-bottom: 12px; padding: 8px 16px; background: #334155; color: #E2E8F0; border: none; border-radius: 8px; cursor: pointer;">← Назад</button>
+      <div id="admin-users-list" style="background: #1E293B; border-radius: 12px; padding: 12px; max-height: 60vh; overflow-y: auto;"></div>
+    </div>
+  </div>
 
   <!-- Основной контент (виджеты) для главной -->
   <main class="main app-screen active" id="main-content">
@@ -144,6 +187,21 @@
     "
   >
     <div style="max-width: 600px; margin: 0 auto;">
+      <!-- Для админа/помощника: завершить опрос досрочно -->
+      <div id="survey-finalize-block" style="display: none; margin-bottom: 16px; padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #8B5CF6;">
+        <p style="color: #94A3B8; font-size: 13px; margin-bottom: 8px;">Подсчитать веса и завершить текущий раунд опроса.</p>
+        <button type="button" id="survey-finalize-btn" style="padding: 10px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Завершить опрос</button>
+      </div>
+      <!-- Уже прошли опрос: не показывать форму повторно -->
+      <div id="survey-already-passed" class="survey-intro-block" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h2 style="color: #93C5FD; margin: 0;">📊 Опрос сложности нарядов</h2>
+          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
+        </div>
+        <p style="color: #10B981; font-size: 16px; font-weight: 600; margin-bottom: 12px;">✅ Вы уже прошли опрос.</p>
+        <p style="color: #94A3B8; font-size: 14px;">Результаты (веса объектов) отображаются на главной странице. Повторно проходить не нужно.</p>
+        <button type="button" onclick="switchTab('home')" class="survey-intro-start-btn" style="margin-top: 20px;">На главную</button>
+      </div>
       <!-- Ввод в курс дела: перелистываемые карточки -->
       <div id="survey-intro" class="survey-intro-block">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
