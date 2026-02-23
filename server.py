@@ -3,7 +3,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from datetime import datetime
@@ -747,10 +747,89 @@ async def get_full_schedule():
     return {"info": "Модуль в разработке"}
 
 
+@app.get("/api/schedule/check_month")
+async def check_schedule_month(group: str, enrollment_year: int, month: str):
+    """Проверка: есть ли уже график за указанный месяц для группы. month = YYYY-MM."""
+    if len(month) != 7 or month[4] != "-":
+        raise HTTPException(status_code=400, detail="month должен быть в формате YYYY-MM")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        start = month + "-01"
+        try:
+            dt = datetime.strptime(month, "%Y-%m")
+            if dt.month == 12:
+                end = f"{dt.year + 1}-01-01"
+            else:
+                end = f"{dt.year}-{dt.month + 1:02d}-01"
+        except Exception:
+            end = start
+        row = conn.execute("""
+            SELECT 1 FROM duty_schedule
+            WHERE group_name = ? AND enrollment_year = ?
+            AND date >= ? AND date < ?
+            LIMIT 1
+        """, (group, enrollment_year, start, end)).fetchone()
+        return {"has_data": row is not None, "month": month, "group": group}
+    finally:
+        conn.close()
+
+
+def _generate_schedule_template_bytes():
+    """Генерирует .xlsx шаблон графика нарядов (группа E1, год E3, ФИО F6:H21, месяц I4, дни I5:AM5, ячейки I6:AM21)."""
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, Border, Side
+    except ImportError:
+        return None
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    if ws.title == "Sheet":
+        ws.title = "График"
+    # Группа — E1
+    ws["E1"] = "Группа (напр. ИО61)"
+    ws["E2"] = ""
+    ws["E3"] = "Год (напр. 2025)"
+    # Заголовки месяц/дни — I4:AM5
+    month_names = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+    ws.cell(4, 9, "месяц (напр. январь)")
+    for c in range(1, 32):
+        ws.cell(5, 8 + c, c)
+    # ФИО — колонки F,G,H строки 6-21
+    ws.cell(6, 6, "Фамилия")
+    ws.cell(6, 7, "Имя")
+    ws.cell(6, 8, "Отчество")
+    for r in range(7, 22):
+        for c in range(6, 9):
+            ws.cell(r, c, "")
+    # Подсказка по ролям
+    ws.cell(22, 1, "Роли: к, дк, с, ад, гбр, зуб, столовая и т.д.")
+    import io
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+@app.get("/api/schedule/template")
+async def get_schedule_template():
+    """Скачать шаблон .xlsx для графика нарядов."""
+    data = _generate_schedule_template_bytes()
+    if not data:
+        raise HTTPException(status_code=500, detail="openpyxl не установлен")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=schedule_template.xlsx"}
+    )
+
+
 @app.post("/api/schedule/upload")
 async def upload_schedule(
     file: UploadFile = File(...),
     telegram_id: int = Form(...),
+    overwrite: int = Form(0),
 ):
     """Загрузка графика из .xlsx. Доступно сержанту (своя группа), помощнику/админу."""
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
@@ -812,16 +891,36 @@ async def upload_schedule(
             conn.close()
             return {"status": "ok", "message": "Нет записей", "count": 0}
         month_start = min(dates)
-        month_end = month_start[:8] + "01"
-        from datetime import datetime
+        month_ym = month_start[:7]
+        from datetime import datetime as dt_klass
         try:
-            dt = datetime.strptime(month_start, "%Y-%m-%d")
+            dt = dt_klass.strptime(month_start, "%Y-%m-%d")
             if dt.month == 12:
                 month_end_next = f"{dt.year + 1}-01-01"
             else:
                 month_end_next = f"{dt.year}-{dt.month + 1:02d}-01"
         except Exception:
             month_end_next = month_start
+
+        if overwrite != 1:
+            existing = conn.execute("""
+                SELECT 1 FROM duty_schedule
+                WHERE group_name = ? AND enrollment_year = ?
+                AND date >= ? AND date < ?
+                LIMIT 1
+            """, (group, enrollment_year, month_ym + "-01", month_end_next)).fetchone()
+            if existing:
+                conn.close()
+                month_names_ru = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+                try:
+                    m = int(month_ym.split("-")[1])
+                    month_name = month_names_ru[m - 1]
+                except Exception:
+                    month_name = month_ym
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"График за {month_name} {month_ym[:4]} уже существует. Заменить?"
+                )
 
         conn.execute(
             """DELETE FROM duty_schedule
@@ -837,10 +936,19 @@ async def upload_schedule(
             )
         conn.commit()
         conn.close()
+        month_names_ru = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+        try:
+            m = int(month_ym.split("-")[1])
+            month_name = month_names_ru[m - 1]
+            year_str = month_ym[:4]
+        except Exception:
+            month_name = month_ym
+            year_str = ""
         return {
             "status": "ok",
-            "message": f"График загружен: {group}",
+            "message": f"График за {month_name} {year_str} г. загружен. Добавлено записей: {len(schedule_data)}",
             "count": len(schedule_data),
+            "month_label": f"{month_name} {year_str}",
         }
     except HTTPException:
         raise

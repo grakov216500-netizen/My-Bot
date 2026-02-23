@@ -41,6 +41,10 @@
   <!-- Экран «Мои данные»: по умолчанию свёрнуты, развернуть по клику -->
   <div id="profile-screen" class="app-screen" style="display: none;">
     <div class="widget" style="max-width: 480px; margin: 0 auto;">
+      <div id="profile-unregistered-msg" style="display: none; padding: 16px 0; color: #94A3B8;">
+        <p>Сначала пройдите регистрацию в боте (команда /start или кнопка «Начать регистрацию»), затем снова откройте приложение.</p>
+        <button type="button" id="profile-back-unreg" style="margin-top: 12px; padding: 10px 20px; background: #334155; color: #E2E8F0; border: none; border-radius: 8px; cursor: pointer;">Назад</button>
+      </div>
       <div id="profile-toggle" class="profile-toggle" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 12px 0;">
         <h3 style="color: #93C5FD; margin: 0;">👤 Мои данные</h3>
         <span id="profile-toggle-icon" style="color: #94A3B8;">▶ Развернуть</span>
@@ -160,7 +164,8 @@
       <!-- Загрузка графика (сержант / помощник / админ) -->
       <div id="duty-upload-block" style="display: none; margin-bottom: 16px; padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #8B5CF6;">
         <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">📤 Загрузить график</p>
-        <p style="color: #94A3B8; font-size: 12px; margin: 0 0 8px 0;">Файл .xlsx: ячейки E1–E2 — группа, F6:H21 — ФИО, I4:AM4 — месяц, I5:AM5 — дни, I6:AM21 — роли (к, с, ад, гбр, зуб и т.д.).</p>
+        <p style="color: #94A3B8; font-size: 12px; margin: 0 0 8px 0;">Скачайте шаблон, заполните его (группа, год, ФИО, месяц, дни, роли) и загрузите файл.</p>
+        <a id="duty-template-link" href="#" target="_blank" rel="noopener" style="display: inline-block; margin-bottom: 8px; color: #60A5FA;">📥 Скачать шаблон .xlsx</a>
         <input type="file" id="duty-upload-file" accept=".xlsx" style="display: block; margin-bottom: 8px; color: #CBD5E1;" />
         <button type="button" id="duty-upload-btn" style="padding: 8px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Загрузить</button>
       </div>
@@ -233,7 +238,8 @@
           </div>
         </div>
         <p style="color: #10B981; font-size: 16px; font-weight: 600; margin-bottom: 12px;">✅ Вы уже прошли опрос.</p>
-        <p style="color: #94A3B8; font-size: 14px;">Результаты (веса объектов) отображаются на главной странице. Повторно проходить не нужно.</p>
+        <p style="color: #94A3B8; font-size: 14px;">Веса объектов и результаты — ниже. Повторно проходить не нужно.</p>
+        <div id="survey-results-in-tab" style="display: none; margin-top: 16px;"></div>
         <button type="button" onclick="switchTab('home')" class="survey-intro-start-btn" style="margin-top: 20px;">На главную</button>
       </div>
       <!-- Ввод в курс дела: перелистываемые карточки -->

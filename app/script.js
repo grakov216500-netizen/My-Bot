@@ -44,6 +44,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setupProfileAndAdmin();
 
     const userOk = await loadUserProfile(userId);
+    userRegistered = !!userOk;
     if (!userOk) {
         showUnregisteredState();
         return;
@@ -115,6 +116,8 @@ function setupProfileAndAdmin() {
     if (openBtn) openBtn.addEventListener('click', openProfileScreen);
     const backBtn = document.getElementById('profile-back');
     if (backBtn) backBtn.addEventListener('click', closeProfileScreen);
+    const backUnregBtn = document.getElementById('profile-back-unreg');
+    if (backUnregBtn) backUnregBtn.addEventListener('click', closeProfileScreen);
     const saveBtn = document.getElementById('profile-save');
     if (saveBtn) saveBtn.addEventListener('click', saveProfile);
     const adminPanelBtn = document.getElementById('profile-admin-panel');
@@ -163,15 +166,26 @@ async function finalizeSurvey() {
 }
 
 function openProfileScreen() {
-    document.getElementById('profile-fio').value = userFio || '';
-    document.getElementById('profile-course').textContent = (document.getElementById('userCourse') && document.getElementById('userCourse').textContent) || '—';
-    document.getElementById('profile-group').value = (document.getElementById('userGroup') && document.getElementById('userGroup').textContent.replace(/^Группа:\s*/, '')) || '';
-    document.getElementById('profile-role').textContent = 'Роль: ' + getRoleLabel(userRole);
-    document.getElementById('profile-admin-panel').style.display = userRole === 'admin' ? 'inline-block' : 'none';
-    document.getElementById('profile-assistant-panel').style.display = userRole === 'assistant' ? 'inline-block' : 'none';
-    document.getElementById('profile-body').style.display = 'none';
-    var icon = document.getElementById('profile-toggle-icon');
-    if (icon) icon.textContent = '▶ Развернуть';
+    const unregMsg = document.getElementById('profile-unregistered-msg');
+    const profileToggle = document.getElementById('profile-toggle');
+    const profileBody = document.getElementById('profile-body');
+    if (!userRegistered) {
+        if (unregMsg) unregMsg.style.display = 'block';
+        if (profileToggle) profileToggle.style.display = 'none';
+        if (profileBody) profileBody.style.display = 'none';
+    } else {
+        if (unregMsg) unregMsg.style.display = 'none';
+        if (profileToggle) profileToggle.style.display = 'flex';
+        document.getElementById('profile-fio').value = userFio || '';
+        document.getElementById('profile-course').textContent = (document.getElementById('userCourse') && document.getElementById('userCourse').textContent) || '—';
+        document.getElementById('profile-group').value = (document.getElementById('userGroup') && document.getElementById('userGroup').textContent.replace(/^Группа:\s*/, '')) || '';
+        document.getElementById('profile-role').textContent = 'Роль: ' + getRoleLabel(userRole);
+        document.getElementById('profile-admin-panel').style.display = userRole === 'admin' ? 'inline-block' : 'none';
+        document.getElementById('profile-assistant-panel').style.display = userRole === 'assistant' ? 'inline-block' : 'none';
+        profileBody.style.display = 'none';
+        var icon = document.getElementById('profile-toggle-icon');
+        if (icon) icon.textContent = '▶ Развернуть';
+    }
     document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
     document.getElementById('main-content').classList.add('hidden');
     document.getElementById('profile-screen').style.display = 'block';
@@ -179,8 +193,12 @@ function openProfileScreen() {
 
 function closeProfileScreen() {
     document.getElementById('profile-screen').style.display = 'none';
-    document.getElementById('main-content').classList.remove('hidden');
-    document.getElementById('main-content').style.display = 'block';
+    if (userRegistered) {
+        document.getElementById('main-content').classList.remove('hidden');
+        document.getElementById('main-content').style.display = 'block';
+    } else {
+        document.getElementById('unregistered-screen').style.display = 'flex';
+    }
 }
 
 async function saveProfile() {
@@ -367,6 +385,7 @@ function switchTab(tabName) {
         loadTasks();
     } else if (tabName === 'duties') {
         if (dutiesScreen) dutiesScreen.style.display = 'block';
+        updateDutySurveyBanner();
         const uploadBlock = document.getElementById('duty-upload-block');
         if (uploadBlock) uploadBlock.style.display = (userRole === 'sergeant' || userRole === 'assistant' || userRole === 'admin') ? 'block' : 'none';
         loadDutiesForMonth(); // Загружаем наряды на текущий месяц
@@ -786,10 +805,12 @@ async function loadUserProfile(userId) {
     }
 }
 
+let userRegistered = false;
+
 function showUnregisteredState() {
+    userRegistered = false;
     document.getElementById('unregistered-screen').style.display = 'flex';
-    const header = document.getElementById('main-header');
-    if (header) header.style.display = 'none';
+    // Шапку не скрываем — пользователь может кликнуть по аватарке и открыть профиль
     document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
     const main = document.getElementById('main-content');
     if (main) main.classList.add('hidden');
@@ -1408,6 +1429,7 @@ async function loadSurveyResults() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         
+        window.surveyWeightsCalculated = !!(data.voted && data.results && data.results.length > 0);
         if (!data.voted) {
             // Пользователь ещё не прошёл опрос - ничего не показываем
             return;
@@ -1417,8 +1439,10 @@ async function loadSurveyResults() {
         const votedObjects = data.results.filter(r => r.median_weight != null);
         
         if (votedObjects.length === 0) {
+            window.surveyWeightsCalculated = false;
             return; // Веса ещё не рассчитаны
         }
+        window.surveyWeightsCalculated = true;
         
         // Группируем по родителям (parent_id = null — основные наряды, иначе подобъекты столовой)
         const parentsMap = {};
@@ -1434,18 +1458,9 @@ async function loadSurveyResults() {
         });
         parentNames['main'] = 'Основные наряды';
         
-        // Создаём виджет результатов на главной странице
-        const mainContent = document.getElementById('main-content');
-        if (!mainContent) return;
-        
-        // Проверяем, есть ли уже виджет результатов
+        // Результаты опроса не показываем на главной — только в разделе «Опрос»
         let resultsWidget = document.getElementById('survey-results-widget');
-        if (!resultsWidget) {
-            resultsWidget = document.createElement('div');
-            resultsWidget.id = 'survey-results-widget';
-            resultsWidget.className = 'widget';
-            mainContent.insertBefore(resultsWidget, mainContent.firstChild);
-        }
+        if (resultsWidget) resultsWidget.style.display = 'none';
         
         let html = '<h3>📊 Результаты опроса</h3>';
         html += '<p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Веса объектов (рассчитаны по формуле k = S/avg):</p>';
@@ -1482,7 +1497,10 @@ async function loadSurveyResults() {
         
         const stageForPairs = data.survey_stage || 'main';
         html += '<p style="margin-top: 12px;"><button type="button" onclick="openPairStatsModal(\'' + stageForPairs + '\')" style="padding: 8px 16px; background: #334155; color: #93C5FD; border: 1px solid #64748B; border-radius: 8px; cursor: pointer;">Подробнее по парам (A/B/равно)</button></p>';
-        resultsWidget.innerHTML = html;
+        window._surveyResultsHtml = html;
+        // Показываем результаты в разделе Опрос (survey-already-passed)
+        var alreadyBlock = document.getElementById('survey-results-in-tab');
+        if (alreadyBlock) { alreadyBlock.innerHTML = html; alreadyBlock.style.display = 'block'; }
         console.log('✅ Результаты опроса загружены');
     } catch (err) {
         console.error('❌ Ошибка загрузки результатов опроса:', err);
@@ -1584,10 +1602,26 @@ function openSettings() {
 
 // === ФУНКЦИИ ДЛЯ РАБОТЫ С НАРЯДАМИ ===
 
+function updateDutySurveyBanner() {
+    var banner = document.getElementById('duty-survey-banner');
+    if (!banner) return;
+    if (window.surveyWeightsCalculated) {
+        banner.innerHTML = '<p style="color: #10B981; margin: 0; font-size: 14px;">Опрос завершён, веса рассчитаны.</p><a href="#" onclick="switchTab(\'survey\'); return false;" style="color: #60A5FA; font-size: 13px;">Посмотреть результаты</a>';
+        banner.style.background = '#0f172a';
+        banner.style.borderColor = '#10B981';
+    } else {
+        banner.innerHTML = '<p style="color: #93C5FD; margin: 0 0 8px 0; font-weight: 600;">Для работы с нарядами сначала пройдите опрос</p><p style="color: #94A3B8; font-size: 14px; margin: 0 0 12px 0;">Оцените сложность объектов, чтобы система могла рассчитать веса.</p><a href="#" onclick="switchTab(\'survey\'); return false;" style="display: inline-block; background: #3B82F6; color: white; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-size: 14px;">Пройти опрос</a>';
+        banner.style.background = '#1E293B';
+        banner.style.borderColor = '#3B82F6';
+    }
+}
+
 function bindDutyUploadOnce() {
     if (window._dutyUploadBound) return;
     const btn = document.getElementById('duty-upload-btn');
     const fileInput = document.getElementById('duty-upload-file');
+    const templateLink = document.getElementById('duty-template-link');
+    if (templateLink) templateLink.href = baseUrl + '/api/schedule/template';
     if (!btn || !fileInput) return;
     window._dutyUploadBound = true;
     btn.addEventListener('click', async function() {
@@ -1596,14 +1630,25 @@ function bindDutyUploadOnce() {
             showToast('Выберите файл .xlsx');
             return;
         }
-        const form = new FormData();
+        var form = new FormData();
         form.append('file', file);
         form.append('telegram_id', userId);
+        form.append('overwrite', '0');
         try {
-            const res = await fetch(baseUrl + '/api/schedule/upload', { method: 'POST', body: form });
-            const data = res.ok ? await res.json() : { detail: (await res.json()).detail || 'Ошибка' };
+            var res = await fetch(baseUrl + '/api/schedule/upload', { method: 'POST', body: form });
+            var data = res.ok ? await res.json() : { detail: (await res.json()).detail || 'Ошибка' };
+            if (res.status === 409 && data.detail && data.detail.indexOf('уже существует') !== -1) {
+                if (!confirm(data.detail + '\n\nНажмите ОК для перезаписи.')) return;
+                form = new FormData();
+                form.append('file', file);
+                form.append('telegram_id', userId);
+                form.append('overwrite', '1');
+                res = await fetch(baseUrl + '/api/schedule/upload', { method: 'POST', body: form });
+                data = res.ok ? await res.json() : { detail: (await res.json()).detail || 'Ошибка' };
+            }
             if (res.ok) {
-                showToast('График загружен: ' + (data.count || 0) + ' записей');
+                var msg = (data.message || ('График загружен: ' + (data.count || 0) + ' записей'));
+                showToast(msg);
                 fileInput.value = '';
                 loadDutiesForMonth();
                 loadDuties(userId);
@@ -1633,11 +1678,18 @@ async function loadDutiesForMonth() {
             if (statsEl) statsEl.style.display = 'none';
             const friendly = data.error.includes('График нарядов') || data.error.includes('не загружен');
             container.innerHTML = friendly
-                ? `<p style="color: #94A3B8; text-align: center;">${data.error}</p>`
+                ? `<p style="color: #94A3B8; text-align: center; padding: 20px;">${data.error}<br/><small>Обратитесь к сержанту</small></p>`
                 : `<p style="color: #f87171;">Ошибка: ${data.error}</p>`;
+            var monthNav = document.querySelector('#duties-screen div[style*="justify-content: space-between"]');
+            if (monthNav) monthNav.style.display = 'none';
+            var dateSearch = document.getElementById('duty-date-search');
+            if (dateSearch && dateSearch.closest('div')) dateSearch.closest('div').style.display = 'none';
             return;
         }
-        
+        var monthNav = document.querySelector('#duties-screen div[style*="justify-content: space-between"]');
+        if (monthNav) monthNav.style.display = 'flex';
+        var dateSearchWrap = document.getElementById('duty-date-search') && document.getElementById('duty-date-search').closest('div');
+        if (dateSearchWrap) dateSearchWrap.style.display = 'block';
         // Обновляем заголовок месяца
         const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
                            'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];

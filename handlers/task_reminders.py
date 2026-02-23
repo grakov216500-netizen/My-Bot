@@ -42,12 +42,12 @@ async def check_task_reminders(context: ContextTypes.DEFAULT_TYPE):
             cursor.execute('''
                 SELECT id, text, deadline, user_id FROM tasks
                 WHERE done = 0 AND reminded = 0 AND deadline IS NOT NULL
-                  AND deadline >= ? AND deadline <= ?
+                  AND datetime(deadline) >= datetime(?) AND datetime(deadline) <= datetime(?)
             ''', (lower_str, upper_str))
 
         tasks = cursor.fetchall()
         if tasks:
-            logger.info(f"📊 Найдено задач для напоминания: {len(tasks)} (сейчас: {now.strftime('%Y-%m-%d %H:%M:%S')})")
+            logger.info("📊 Найдено задач для напоминания: %s (сейчас: %s)", len(tasks), now.strftime('%Y-%m-%d %H:%M:%S'))
 
         for task in tasks:
             try:
@@ -103,7 +103,10 @@ async def restore_task_reminders(context: ContextTypes.DEFAULT_TYPE):
 
         for task in pending_tasks:
             try:
-                deadline = datetime.fromisoformat(task['deadline'])
+                dl = (task['deadline'] or '').strip()
+                if not dl:
+                    continue
+                deadline = datetime.fromisoformat(dl.replace('Z', '+00:00')[:19])
 
                 # 🔒 Если дедлайн уже прошёл — не ставим job, просто отмечаем
                 if deadline < now:

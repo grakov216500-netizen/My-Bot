@@ -64,6 +64,10 @@ os.makedirs("utils", exist_ok=True)
 os.makedirs("handlers", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
+# Чтобы напоминания о задачах из Mini App работали, бот должен использовать ТУ ЖЕ БД, что и API (server.py)
+import database as _db
+_db.DB_NAME = DATABASE
+
 # === Отложенные импорты ===
 def import_modules():
     global check_and_update_courses, init_db, get_db

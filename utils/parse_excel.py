@@ -36,6 +36,15 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
                 if str(val).strip().lower() not in ['nan', '']:
                     group = str(val).strip()
                     break
+        # 1.1 Год — E3 (сержанты указывают год в ячейке E3, чтобы не путаться)
+        year = None
+        if len(df) > 2 and 4 < len(df.iloc[2]) and pd.notna(df.iloc[2, 4]):
+            try:
+                y = int(float(df.iloc[2, 4]))
+                if 2020 <= y <= 2030:
+                    year = y
+            except Exception:
+                pass
 
         # 2. ФИО — F6:H21
         fio_cells = df.iloc[5:21, 5:8]
@@ -80,7 +89,8 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
             'ноябрь': 11, 'ноя': 11
         }
         month_num = month_map.get(month_str, 12)
-        year = 2026 if month_num == 1 else 2025
+        if year is None:
+            year = 2026 if month_num == 1 else 2025
 
         conn = get_db()
         cursor = conn.cursor()
