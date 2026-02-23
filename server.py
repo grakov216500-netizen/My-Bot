@@ -4,6 +4,8 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from datetime import datetime
 import os
 import random
@@ -25,6 +27,23 @@ CORS_ORIGINS = [
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
 ]
+
+
+class ForceCORSHeadersMiddleware(BaseHTTPMiddleware):
+    """Добавляет CORS-заголовки ко всем ответам (в т.ч. при 4xx/5xx), чтобы браузер не блокировал из-за CORS."""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        origin = request.headers.get("origin")
+        if origin and origin in CORS_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+        response.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+        response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return response
+
+
+# Сначала добавляем наш middleware (он выполнится последним при отправке ответа и допишет CORS)
+app.add_middleware(ForceCORSHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
