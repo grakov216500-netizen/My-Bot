@@ -267,6 +267,14 @@ body::-webkit-scrollbar-thumb:hover {
   text-decoration: line-through;
   color: #64748B;
 }
+.task-card.task-completing {
+  border-left: 4px solid #10B981;
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.3);
+}
+.task-card.task-completing .task-checkbox.checked {
+  background: #10B981;
+  border-color: #10B981;
+}
 .task-actions {
   display: flex;
   gap: 12px;

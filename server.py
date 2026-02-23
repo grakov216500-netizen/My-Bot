@@ -70,8 +70,8 @@ async def startup_init_db():
 
 # === Словарь ролей ===
 ROLE_NAMES = {
-    'к': 'Комендантский',
-    'дк': 'Дежурный по каморке',
+    'к': 'Курс',
+    'дк': 'Дежурный по курсу',
     'с': 'Столовая',
     'дс': 'Дежурный по столовой',
     'ад': 'Административный',
@@ -80,7 +80,10 @@ ROLE_NAMES = {
     'т': 'Тарелки',
     'кпп': 'КПП',
     'гбр': 'ГБР (Группа быстрого реагирования)',
-    'зуб': 'Зуб'
+    'зуб': 'ЗУБ',
+    'ото': 'ОТО',
+    'м': 'Медчасть',
+    'путсо': 'ПУТСО',
 }
 
 def get_full_role(role_code: str) -> str:
@@ -356,7 +359,7 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
         return {"error": "Пользователь не найден"}
 
     user_id = user['id']
-    user_fio = user['fio']
+    user_fio = user['fio']  # ФИО из users — в Excel (duty_schedule) должно быть то же написание
 
     try:
         # Проверяем, какая таблица используется
@@ -1293,7 +1296,7 @@ async def get_survey_list(telegram_id: int):
         role = user["role"] or "user"
 
         system = [
-            {"id": "male", "title": "Опрос для юношей (сложность нарядов)", "for_gender": "male"},
+            {"id": "male", "title": "Опрос для парней (сложность нарядов)", "for_gender": "male"},
             {"id": "female", "title": "Опрос для девушек (ПУТСО, Столовая, Медчасть)", "for_gender": "female"},
         ]
 
@@ -1470,9 +1473,9 @@ async def get_survey_status():
         conn.close()
 
 
-def _clamp_coef(k: float) -> float:
-    """Нижнее значение 0.8, верхний коэф не больше 2.0."""
-    return max(0.8, min(2.0, k))
+def _clamp_coef(k: float, max_k: float = 2.0) -> float:
+    """Нижнее значение 0.8, верхний — max_k (основные наряды 2.0, столовые 1.5)."""
+    return max(0.8, min(max_k, k))
 
 
 def _calc_weights_from_pair_votes(conn):
@@ -1553,7 +1556,7 @@ def _calc_weights_from_pair_votes(conn):
             for oid in sub_ids:
                 s = sub_scores.get(oid, 0)
                 k_sub = (s / sub_avg) if (sub_avg > 0 and s > 0) else 0.8
-                k_sub = _clamp_coef(k_sub)
+                k_sub = _clamp_coef(k_sub, max_k=1.5)
                 w_sub = canteen_weight * k_sub
                 conn.execute("""
                     INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
@@ -1589,7 +1592,7 @@ def _calc_weights_from_pair_votes(conn):
             for oid in female_ids:
                 s = f_scores.get(oid, 0)
                 k = (s / f_avg) if (f_avg > 0 and s > 0) else 0.8
-                k = _clamp_coef(k)
+                k = _clamp_coef(k, max_k=1.5)
                 w = 10 * k
                 conn.execute("""
                     INSERT INTO object_weights (object_id, weight) VALUES (?, ?)

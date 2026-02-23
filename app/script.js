@@ -223,6 +223,15 @@ async function saveProfile() {
         if (userNameEl) userNameEl.textContent = fio || userFio;
         if (userGroupEl) userGroupEl.textContent = 'Группа: ' + (group || '—');
         showToast('Профиль сохранён');
+        if (!userRegistered) {
+            userRegistered = true;
+            var h = document.getElementById('main-header');
+            if (h) h.style.display = '';
+            var main = document.getElementById('main-content');
+            if (main) { main.classList.remove('hidden'); main.style.display = 'block'; }
+            document.getElementById('profile-screen').style.display = 'none';
+            switchTab('home');
+        }
     } catch (e) {
         showToast('Ошибка сохранения');
     }
@@ -525,6 +534,15 @@ async function toggleTaskDone(taskId) {
 
     const newStatus = !task.done;
 
+    if (newStatus) {
+        var card = document.querySelector('.task-card[data-id="' + taskId + '"]');
+        if (card) {
+            card.classList.add('task-completing');
+            var checkEl = card.querySelector('.task-checkbox');
+            if (checkEl) checkEl.classList.add('checked');
+        }
+    }
+
     try {
         await fetch(`${baseUrl}/api/done_task`, {
             method: 'POST',
@@ -533,10 +551,21 @@ async function toggleTaskDone(taskId) {
         });
 
         task.done = newStatus;
-        const q = document.getElementById('search-input');
-        renderTaskList(q ? q.value : '');
+        if (newStatus && card) {
+            card.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+            card.style.opacity = '0.6';
+            card.style.transform = 'scale(0.98)';
+            setTimeout(function() {
+                var q = document.getElementById('search-input');
+                renderTaskList(q ? q.value : '');
+            }, 500);
+        } else {
+            const q = document.getElementById('search-input');
+            renderTaskList(q ? q.value : '');
+        }
         console.log(`✅ Задача ${taskId} отмечена как ${newStatus ? 'выполнена' : 'активна'}`);
     } catch (err) {
+        if (card) card.classList.remove('task-completing');
         console.error("❌ Ошибка обновления статуса:", err);
     }
 }
@@ -812,6 +841,8 @@ async function loadUserProfile(userId) {
         if (userRoleEl) userRoleEl.textContent = 'Роль: ' + getRoleLabel(userRole);
         userFio = fullName;
         console.log("✅ Профиль загружен:", fullName, "роль:", userRole);
+        var header = document.getElementById('main-header');
+        if (header) header.style.display = '';
         return true;
     } catch (err) {
         console.error("❌ Ошибка загрузки профиля:", err);
@@ -823,14 +854,22 @@ let userRegistered = false;
 
 function showUnregisteredState() {
     userRegistered = false;
-    document.getElementById('unregistered-screen').style.display = 'flex';
-    // Шапку не скрываем — пользователь может кликнуть по аватарке и открыть профиль
+    var unreg = document.getElementById('unregistered-screen');
+    if (unreg) {
+        unreg.style.display = 'flex';
+        unreg.style.minHeight = '60vh';
+        unreg.style.flexDirection = 'column';
+        unreg.style.justifyContent = 'center';
+    }
+    // Скрываем шапку и весь контент — только сообщение о регистрации
+    var header = document.getElementById('main-header');
+    if (header) header.style.display = 'none';
     document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
-    const main = document.getElementById('main-content');
-    if (main) main.classList.add('hidden');
-    const fab = document.getElementById('add-task-fab');
+    var main = document.getElementById('main-content');
+    if (main) { main.classList.add('hidden'); main.style.display = 'none'; }
+    var fab = document.getElementById('add-task-fab');
     if (fab) fab.style.display = 'none';
-    const nav = document.getElementById('bottom-nav');
+    var nav = document.getElementById('bottom-nav');
     if (nav) nav.style.display = 'none';
 }
 
@@ -932,9 +971,10 @@ async function loadSurveyList() {
         const res = await fetch(`${baseUrl}/api/survey/list?telegram_id=${userId}`);
         const data = res.ok ? await res.json() : { system: [], custom: [], user_gender: 'male' };
         const gender = data.user_gender || 'male';
+        window.userSurveyGender = gender;
         systemEl.innerHTML = '';
         data.system.forEach(function(item) {
-            if (userRole !== 'admin' && userRole !== 'assistant' && item.for_gender !== gender) return;
+            if (userRole !== 'admin' && userRole !== 'assistant' && item.for_gender !== gender && !(item.id === 'female' && gender === 'male')) return;
             const card = document.createElement('div');
             card.className = 'survey-list-card';
             card.style.cssText = 'background:#1E293B;border-radius:12px;padding:14px;border-left:4px solid #3B82F6;cursor:pointer;';
@@ -979,6 +1019,19 @@ async function loadSurveyList() {
 function showCreateSurveyModal() {
     document.getElementById('create-survey-title').value = '';
     document.getElementById('create-survey-options').value = '';
+    var scopeEl = document.getElementById('create-survey-scope');
+    if (scopeEl) {
+        if (userRole === 'sergeant') {
+            scopeEl.innerHTML = '<option value="group">Группа</option>';
+            scopeEl.disabled = true;
+        } else if (userRole === 'assistant') {
+            scopeEl.innerHTML = '<option value="course">Курс</option>';
+            scopeEl.disabled = true;
+        } else {
+            scopeEl.innerHTML = '<option value="course">Курс</option><option value="group">Группа</option>';
+            scopeEl.disabled = false;
+        }
+    }
     document.getElementById('create-survey-modal').style.display = 'flex';
 }
 
@@ -990,7 +1043,8 @@ async function submitCreateSurvey() {
         showToast('Укажите название и минимум 2 варианта ответа');
         return;
     }
-    const scopeType = (userRole === 'assistant' || userRole === 'admin') ? 'course' : 'group';
+    var scopeSelect = document.getElementById('create-survey-scope');
+    const scopeType = (scopeSelect && scopeSelect.value) ? scopeSelect.value : (userRole === 'sergeant' ? 'group' : 'course');
     try {
         const res = await fetch(baseUrl + '/api/survey/custom', {
             method: 'POST',
@@ -1101,6 +1155,33 @@ async function checkSurveyStateAndShowFemale() {
     const alreadyPassed = document.getElementById('survey-already-passed');
     const finalizeBlock = document.getElementById('survey-finalize-block');
     if (finalizeBlock) finalizeBlock.style.display = 'none';
+    if (!intro || !alreadyPassed) return;
+    var userGender = window.userSurveyGender || 'male';
+    if (userGender !== 'female') {
+        intro.style.display = 'none';
+        if (content) content.style.display = 'none';
+        alreadyPassed.style.display = 'block';
+        alreadyPassed.querySelector('h2').textContent = '📊 Опрос для девушек';
+        var passedBody = alreadyPassed.querySelector('p');
+        if (passedBody) passedBody.textContent = 'Этот опрос только для девушек. Вы можете посмотреть результаты.';
+        var resultsWrap = document.getElementById('survey-results-in-tab');
+        if (resultsWrap) { resultsWrap.style.display = 'none'; resultsWrap.innerHTML = ''; }
+        try {
+            const st = await fetch(baseUrl + '/api/survey/status');
+            const statusData = st.ok ? await st.json() : {};
+            if (statusData.weights_calculated && resultsWrap) {
+                window._surveyResultsHtml = null;
+                await loadSurveyResults();
+                if (window._surveyResultsHtml) {
+                    resultsWrap.innerHTML = window._surveyResultsHtml;
+                    resultsWrap.style.display = 'block';
+                }
+            }
+        } catch (e) { console.warn(e); }
+        var btnToHome = alreadyPassed.querySelector('.survey-intro-start-btn');
+        if (btnToHome) btnToHome.textContent = 'На главную';
+        return;
+    }
     try {
         const response = await fetch(`${baseUrl}/api/survey/user-results?telegram_id=${userId}`);
         if (!response.ok) throw new Error('HTTP');
@@ -1108,6 +1189,7 @@ async function checkSurveyStateAndShowFemale() {
         if (data.voted && data.survey_stage === 'female') {
             alreadyPassed.style.display = 'block';
             alreadyPassed.querySelector('h2').textContent = '📊 Опрос для девушек';
+            if (alreadyPassed.querySelector('p')) alreadyPassed.querySelector('p').textContent = '✅ Вы уже прошли опрос. Веса объектов и результаты — ниже.';
             intro.style.display = 'none';
             content.style.display = 'none';
             return;
@@ -1516,8 +1598,8 @@ async function loadSurveyResults() {
             html += `</div>`;
         });
         
-        const stageForPairs = data.survey_stage || 'main';
-        html += '<p style="margin-top: 12px;"><button type="button" onclick="openPairStatsModal(\'' + stageForPairs + '\')" style="padding: 8px 16px; background: #334155; color: #93C5FD; border: 1px solid #64748B; border-radius: 8px; cursor: pointer;">Подробнее по парам</button></p>';
+        html += '<p style="margin-top: 12px;"><button type="button" onclick="togglePairStatsInline()" style="padding: 8px 16px; background: #334155; color: #93C5FD; border: 1px solid #64748B; border-radius: 8px; cursor: pointer;">Подробнее по парам</button></p>';
+        html += '<div id="survey-pair-stats-inline" style="display: none; margin-top: 12px;"></div>';
         window._surveyResultsHtml = html;
         // Показываем результаты в разделе Опрос (survey-already-passed)
         var alreadyBlock = document.getElementById('survey-results-in-tab');
@@ -1530,6 +1612,40 @@ async function loadSurveyResults() {
 
 let pairStatsPairs = [];
 let pairStatsIndex = 0;
+
+async function togglePairStatsInline() {
+    var el = document.getElementById('survey-pair-stats-inline');
+    if (!el) return;
+    var visible = el.style.display !== 'none';
+    el.style.display = visible ? 'none' : 'block';
+    if (el.style.display === 'block' && !el._loaded) {
+        el.innerHTML = '<p style="color:#94A3B8;">Загрузка...</p>';
+        el._loaded = true;
+        try {
+            var stages = [{ stage: 'main', title: 'Основные наряды (6 пар)' }, { stage: 'canteen', title: 'Объекты столовой (15 пар)' }, { stage: 'female', title: 'Опрос для девушек' }];
+            var html = '';
+            for (var s = 0; s < stages.length; s++) {
+                var res = await fetch(baseUrl + '/api/survey/pair-stats?stage=' + encodeURIComponent(stages[s].stage));
+                if (!res.ok) continue;
+                var data = await res.json();
+                var pairs = data.pairs || [];
+                if (pairs.length === 0) continue;
+                html += '<div style="margin-bottom: 16px;"><h4 style="color: #93C5FD; margin: 0 0 8px 0; font-size: 14px;">' + stages[s].title + '</h4>';
+                pairs.forEach(function(p) {
+                    html += '<div style="background:#1E293B;border-radius:8px;padding:12px;margin-bottom:8px;border-left:4px solid #3B82F6;">';
+                    html += '<h5 style="color:#E2E8F0;margin:0 0 8px 0;font-size:13px;">' + p.object_a_name + ' vs ' + p.object_b_name + '</h5>';
+                    html += '<p style="color:#94A3B8;margin:4px 0;font-size:12px;">' + p.object_a_name + ' сложнее: ' + p.pct_a + '% (' + p.count_a + ')</p>';
+                    html += '<p style="color:#94A3B8;margin:4px 0;font-size:12px;">Одинаково: ' + p.pct_equal + '% (' + p.count_equal + ')</p>';
+                    html += '<p style="color:#94A3B8;margin:4px 0;font-size:12px;">' + p.object_b_name + ' сложнее: ' + p.pct_b + '% (' + p.count_b + ')</p></div>';
+                });
+                html += '</div>';
+            }
+            el.innerHTML = html || '<p style="color:#94A3B8;">Нет данных по парам</p>';
+        } catch (e) {
+            el.innerHTML = '<p style="color:#f87171;">Ошибка загрузки</p>';
+        }
+    }
+}
 
 async function openPairStatsModal(stage) {
     try {
@@ -1876,6 +1992,13 @@ function updateDutySurveyBanner() {
     var banner = document.getElementById('duty-survey-banner');
     if (!banner) return;
     if (window.surveyWeightsCalculated) {
+        var count = parseInt(localStorage.getItem('dutySurveyBannerCount') || '0', 10);
+        if (count >= 10) {
+            banner.style.display = 'none';
+            return;
+        }
+        localStorage.setItem('dutySurveyBannerCount', String(count + 1));
+        banner.style.display = '';
         banner.innerHTML = '<p style="color: #10B981; margin: 0; font-size: 14px;">Опрос завершён, веса рассчитаны.</p><a href="#" onclick="openSurveyResultsView(); return false;" style="color: #60A5FA; font-size: 13px;">Посмотреть результаты</a>';
         banner.style.background = '#0f172a';
         banner.style.borderColor = '#10B981';
@@ -2106,8 +2229,8 @@ function clearDateSearch() {
 // Вспомогательная функция для получения полного названия роли (если её нет в глобальной области)
 function get_full_role(roleCode) {
     const roles = {
-        'к': 'Комендантский',
-        'дк': 'Дежурный по каморке',
+        'к': 'Курс',
+        'дк': 'Дежурный по курсу',
         'с': 'Столовая',
         'дс': 'Дежурный по столовой',
         'ад': 'Административный',
@@ -2116,7 +2239,10 @@ function get_full_role(roleCode) {
         'т': 'Тарелки',
         'кпп': 'КПП',
         'гбр': 'ГБР (Группа быстрого реагирования)',
-        'зуб': 'Зуб'
+        'зуб': 'ЗУБ',
+        'ото': 'ОТО',
+        'м': 'Медчасть',
+        'путсо': 'ПУТСО'
     };
     return roles[roleCode.toLowerCase()] || roleCode.toUpperCase();
 }

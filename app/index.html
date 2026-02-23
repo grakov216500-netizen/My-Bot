@@ -144,7 +144,7 @@
       <div id="duty-toolbar" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 12px; scrollbar-width: thin;">
         <button type="button" class="duty-tool-btn duty-tool-active" data-view="my" onclick="dutySetView('my')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #3B82F6; color: white; font-size: 13px; cursor: pointer;">Мои наряды</button>
         <button type="button" class="duty-tool-btn" data-view="calendar" onclick="dutySetView('calendar')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">Календарь</button>
-        <button type="button" class="duty-tool-btn" data-view="search" onclick="dutySetView('search')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">Поиск по дате</button>
+        <button type="button" class="duty-tool-btn" data-view="search" onclick="dutySetView('search')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">Архив</button>
         <button type="button" class="duty-tool-btn" data-view="upload" onclick="dutySetView('upload')" id="duty-tool-upload" style="display: none; white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">📤 Загрузить</button>
         <button type="button" class="duty-tool-btn" data-view="stats" onclick="dutySetView('stats')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">Статистика</button>
       </div>
@@ -180,8 +180,9 @@
         <div id="duty-day-detail" style="display: none;"></div>
       </div>
 
-      <!-- ===== ВИД 3: ПОИСК ===== -->
+      <!-- ===== ВИД 3: АРХИВ ===== -->
       <div id="duty-view-search" style="display: none;">
+        <p style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0;">Выберите дату для просмотра нарядов</p>
         <input type="date" id="duty-date-search" style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #CBD5E1; font-size: 14px; margin-bottom: 12px; box-sizing: border-box;" onchange="searchDutyByDate(this.value)" />
         <div id="date-search-results" style="display: none;">
           <div id="date-search-content"></div>
@@ -191,11 +192,11 @@
       <!-- ===== ВИД 4: ЗАГРУЗКА ===== -->
       <div id="duty-view-upload" style="display: none;">
         <div style="padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #8B5CF6;">
-          <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">📤 Загрузить график</p>
-          <p style="color: #94A3B8; font-size: 12px; margin: 0 0 8px 0;">Скачайте шаблон, заполните (группа, год в AO4, ФИО, месяц, дни, роли) и загрузите.</p>
-          <a id="duty-template-link" href="#" target="_blank" rel="noopener" style="display: inline-block; margin-bottom: 8px; color: #60A5FA;">📥 Скачать шаблон .xlsx</a>
+          <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">1. Сначала скачайте шаблон</p>
+          <a id="duty-template-link" href="#" target="_blank" rel="noopener" style="display: inline-block; margin-bottom: 12px; color: #60A5FA;">📥 Скачать шаблон .xlsx</a>
+          <p style="color: #94A3B8; font-size: 12px; margin: 0 0 12px 0;">2. Заполните и загрузите файл</p>
           <input type="file" id="duty-upload-file" accept=".xlsx" style="display: block; margin-bottom: 8px; color: #CBD5E1;" />
-          <button type="button" id="duty-upload-btn" style="padding: 8px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Загрузить</button>
+          <button type="button" id="duty-upload-btn" style="padding: 8px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Загрузить график</button>
         </div>
       </div>
 
@@ -365,10 +366,15 @@
     </div>
   </div>
 
-  <!-- Модальное окно: создание опроса (сержант/помощник) -->
+  <!-- Модальное окно: создание опроса (сержант/помощник/админ) -->
   <div id="create-survey-modal" class="modal modal-center" style="display: none;">
     <div class="modal-content" style="max-width: 400px; padding: 20px; border-radius: 12px;">
       <p style="color: #E2E8F0; margin-bottom: 12px; font-weight: 600;">Создать опрос</p>
+      <label style="color: #94A3B8; font-size: 12px;">Уровень</label>
+      <select id="create-survey-scope" style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0; margin-bottom: 12px; box-sizing: border-box;">
+        <option value="group">Группа</option>
+        <option value="course">Курс</option>
+      </select>
       <label style="color: #94A3B8; font-size: 12px;">Название</label>
       <input type="text" id="create-survey-title" placeholder="Тема опроса" style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0; margin-bottom: 12px; box-sizing: border-box;" />
       <label style="color: #94A3B8; font-size: 12px;">Варианты ответа (каждый с новой строки)</label>
