@@ -269,6 +269,33 @@ def init_db():
         )
     ''')
 
+    # === 8.1 ЗАМЕНЫ В НАРЯДАХ (статистика: кто болел, кого заменял) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS duty_replacements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL CHECK(date LIKE '____-__-__'),
+            role TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            enrollment_year INTEGER NOT NULL,
+            fio_removed TEXT NOT NULL,
+            fio_replacement TEXT NOT NULL,
+            reason TEXT NOT NULL CHECK(reason IN ('заболел', 'командировка', 'рапорт', 'другое')),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by_telegram_id INTEGER
+        )
+    ''')
+
+    # === 8.2 САМООТЧЁТ КУРСАНТА О БОЛЬНИЧНОМ ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sick_leave_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            report_date TEXT NOT NULL CHECK(report_date LIKE '____-__-__'),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (telegram_id) REFERENCES users (telegram_id)
+        )
+    ''')
+
     # === 9. ИНДЕКСЫ (оптимизация) ===
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_tg_id ON users (telegram_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_group_year ON users (group_name, enrollment_year)')
@@ -289,6 +316,10 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_shift_assign_date ON duty_shift_assignments (date, role)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_canteen_assign_date ON duty_canteen_assignments (date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_assign_history_fio ON duty_assignment_history (fio, role)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_duty_replacements_date ON duty_replacements (date, enrollment_year)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_duty_replacements_fio_removed ON duty_replacements (fio_removed)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_duty_replacements_fio_repl ON duty_replacements (fio_replacement)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_sick_leave_telegram ON sick_leave_reports (telegram_id)')
 
     conn.commit()
     conn.close()

@@ -33,9 +33,9 @@ async def check_task_reminders(context: ContextTypes.DEFAULT_TYPE):
             ''', (lower_str, upper_str))
 
         elif REMINDER_MODE == "exact":
-            # Окно ±60 сек, чтобы не пропустить из-за интервала 30 сек или сдвига времени
-            time_lower = now - timedelta(seconds=60)
-            time_upper = now + timedelta(seconds=60)
+            # Окно ±90 сек: интервал проверки 30 сек, сдвиг времени сервера, задержки
+            time_lower = now - timedelta(seconds=90)
+            time_upper = now + timedelta(seconds=90)
             lower_str = time_lower.strftime('%Y-%m-%d %H:%M:%S')
             upper_str = time_upper.strftime('%Y-%m-%d %H:%M:%S')
 

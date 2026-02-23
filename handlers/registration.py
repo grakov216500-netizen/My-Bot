@@ -458,10 +458,9 @@ async def confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         success_text += "Используйте меню ниже для продолжения."
 
-        # 🔧 ДОБАВЛЕНА КНОПКА ДЛЯ MINI APP
+        # 🔧 Кнопка для перехода в Mini App (без дублирования «В главное меню»)
         keyboard = [
-            [InlineKeyboardButton("🖥️ Перейти в панель управления", web_app={"url": "https://grakov216500-netizen.github.io/My-Bot/app/"})],
-            [InlineKeyboardButton("🏠 В главное меню", callback_data="back_to_main")]
+            [InlineKeyboardButton("🖥️ Перейти в панель управления", web_app={"url": "https://grakov216500-netizen.github.io/My-Bot/app/"})]
         ]
 
         await query.edit_message_text(

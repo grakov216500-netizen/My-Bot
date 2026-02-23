@@ -132,6 +132,8 @@ function setupProfileAndAdmin() {
     if (adminPanelBtn) adminPanelBtn.addEventListener('click', function() { openAdminPanel('admin'); });
     const assistantPanelBtn = document.getElementById('profile-assistant-panel');
     if (assistantPanelBtn) assistantPanelBtn.addEventListener('click', function() { openAdminPanel('assistant'); });
+    const sergeantPanelBtn = document.getElementById('profile-sergeant-panel');
+    if (sergeantPanelBtn) sergeantPanelBtn.addEventListener('click', function() { openAdminPanel('sergeant'); });
     const profileToggle = document.getElementById('profile-toggle');
     if (profileToggle) profileToggle.addEventListener('click', function() {
         const body = document.getElementById('profile-body');
@@ -188,9 +190,12 @@ function openProfileScreen() {
         document.getElementById('profile-role').textContent = 'Роль: ' + getRoleLabel(userRole);
         document.getElementById('profile-admin-panel').style.display = userRole === 'admin' ? 'inline-block' : 'none';
         document.getElementById('profile-assistant-panel').style.display = userRole === 'assistant' ? 'inline-block' : 'none';
-        profileBody.style.display = 'none';
+        var sergeantBtn = document.getElementById('profile-sergeant-panel');
+        if (sergeantBtn) sergeantBtn.style.display = userRole === 'sergeant' ? 'inline-block' : 'none';
+        profileBody.style.display = 'block';
+        loadProfileDutyStats();
         var icon = document.getElementById('profile-toggle-icon');
-        if (icon) icon.textContent = '▶ Развернуть';
+        if (icon) icon.textContent = '▼ Свернуть';
     }
     document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
     document.getElementById('main-content').classList.add('hidden');
@@ -241,8 +246,11 @@ let _adminPanelMode = 'admin'; // 'admin' | 'assistant'
 
 function openAdminPanel(mode) {
     _adminPanelMode = mode;
-    document.getElementById('admin-panel-title').textContent = mode === 'admin' ? '⚙️ Админ-панель: список пользователей' : '🛠 Панель помощника: список пользователей';
-    document.getElementById('admin-filter-year').style.display = mode === 'admin' ? 'block' : 'none';
+    var titles = { admin: '⚙️ Админ-панель: список пользователей', assistant: '🛠 Панель помощника: список пользователей', sergeant: '📋 Панель сержанта: список пользователей' };
+    document.getElementById('admin-panel-title').textContent = titles[mode] || titles.admin;
+    document.getElementById('admin-filter-year').style.display = (mode === 'admin') ? 'block' : 'none';
+    var groupFilter = document.getElementById('admin-filter-group');
+    if (groupFilter) groupFilter.style.display = (mode === 'admin') ? 'block' : 'none';
     document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
     document.getElementById('main-content').classList.add('hidden');
     document.getElementById('admin-panel-screen').style.display = 'block';
@@ -257,11 +265,13 @@ function closeAdminPanel() {
 
 async function loadAdminUsersList() {
     const yearSelect = document.getElementById('admin-filter-year');
+    const groupSelect = document.getElementById('admin-filter-group');
     const search = document.getElementById('admin-search-fio').value.trim();
     const listEl = document.getElementById('admin-users-list');
     listEl.innerHTML = '<p style="color:#94A3B8;">Загрузка...</p>';
     let url = `${baseUrl}/api/users?actor_telegram_id=${userId}`;
     if (_adminPanelMode === 'admin' && yearSelect && yearSelect.value) url += '&enrollment_year=' + yearSelect.value;
+    if (_adminPanelMode === 'admin' && groupSelect && groupSelect.value) url += '&group_name=' + encodeURIComponent(groupSelect.value);
     if (search) url += '&search=' + encodeURIComponent(search);
     try {
         const res = await fetch(url);
@@ -295,6 +305,18 @@ async function loadAdminUsersList() {
                 opt.value = y;
                 opt.textContent = y + ' г.';
                 yearSelect.appendChild(opt);
+            });
+        }
+        if (_adminPanelMode === 'admin' && groupSelect) {
+            var currentVal = groupSelect.value;
+            var groups = [...new Set(data.users.map(function(u) { return u.group_name || ''; }))].filter(Boolean).sort();
+            groupSelect.innerHTML = '<option value="">Все группы</option>';
+            groups.forEach(function(g) {
+                var opt = document.createElement('option');
+                opt.value = g;
+                opt.textContent = g;
+                if (g === currentVal) opt.selected = true;
+                groupSelect.appendChild(opt);
             });
         }
     } catch (e) {
@@ -1009,6 +1031,7 @@ async function loadSurveyList() {
             document.getElementById('survey-create-btn')?.addEventListener('click', showCreateSurveyModal);
             document.getElementById('create-survey-cancel')?.addEventListener('click', function() { document.getElementById('create-survey-modal').style.display = 'none'; });
             document.getElementById('create-survey-ok')?.addEventListener('click', submitCreateSurvey);
+            bindCreateSurveyAddOption();
         }
     } catch (e) {
         console.warn('Ошибка загрузки списка опросов:', e);
@@ -1018,7 +1041,12 @@ async function loadSurveyList() {
 
 function showCreateSurveyModal() {
     document.getElementById('create-survey-title').value = '';
-    document.getElementById('create-survey-options').value = '';
+    var list = document.getElementById('create-survey-options-list');
+    if (list) {
+        list.innerHTML = '';
+        addCreateSurveyOptionInput(list, '');
+        addCreateSurveyOptionInput(list, '');
+    }
     var scopeEl = document.getElementById('create-survey-scope');
     if (scopeEl) {
         if (userRole === 'sergeant') {
@@ -1028,23 +1056,51 @@ function showCreateSurveyModal() {
             scopeEl.innerHTML = '<option value="course">Курс</option>';
             scopeEl.disabled = true;
         } else {
-            scopeEl.innerHTML = '<option value="course">Курс</option><option value="group">Группа</option>';
+            scopeEl.innerHTML = '<option value="course">Курс</option><option value="group">Группа</option><option value="system">Системный</option>';
             scopeEl.disabled = false;
         }
     }
     document.getElementById('create-survey-modal').style.display = 'flex';
 }
 
+function addCreateSurveyOptionInput(container, value) {
+    if (!container) return;
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;align-items:center';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Вариант ответа';
+    input.value = value;
+    input.style.cssText = 'flex:1;padding:10px;background:#1E293B;border:1px solid #334155;border-radius:8px;color:#E2E8F0;box-sizing:border-box';
+    var delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.textContent = '✕';
+    delBtn.style.cssText = 'padding:8px 12px;background:#7F1D1D;color:#FCA5A5;border:none;border-radius:8px;cursor:pointer';
+    delBtn.onclick = function() {
+        if (container.querySelectorAll("input[type='text']").length > 1) wrap.remove();
+    };
+    wrap.appendChild(input);
+    wrap.appendChild(delBtn);
+    container.appendChild(wrap);
+}
+
+function bindCreateSurveyAddOption() {
+    var btn = document.getElementById('create-survey-add-option');
+    var list = document.getElementById('create-survey-options-list');
+    if (btn && list) btn.addEventListener('click', function() { addCreateSurveyOptionInput(list, ''); });
+}
+
 async function submitCreateSurvey() {
     const title = (document.getElementById('create-survey-title').value || '').trim();
-    const optsText = document.getElementById('create-survey-options').value || '';
-    const options = optsText.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+    var optsList = document.getElementById('create-survey-options-list');
+    var options = optsList ? [].map.call(optsList.querySelectorAll("input[type='text']"), function(inp) { return (inp.value || '').trim(); }).filter(Boolean) : [];
     if (!title || options.length < 2) {
         showToast('Укажите название и минимум 2 варианта ответа');
         return;
     }
     var scopeSelect = document.getElementById('create-survey-scope');
-    const scopeType = (scopeSelect && scopeSelect.value) ? scopeSelect.value : (userRole === 'sergeant' ? 'group' : 'course');
+    var scopeType = (scopeSelect && scopeSelect.value) ? scopeSelect.value : (userRole === 'sergeant' ? 'group' : 'course');
+    if (scopeType === 'system' && userRole !== 'admin') scopeType = 'course';
     try {
         const res = await fetch(baseUrl + '/api/survey/custom', {
             method: 'POST',
@@ -1186,10 +1242,11 @@ async function checkSurveyStateAndShowFemale() {
         const response = await fetch(`${baseUrl}/api/survey/user-results?telegram_id=${userId}`);
         if (!response.ok) throw new Error('HTTP');
         const data = await response.json();
-        if (data.voted && data.survey_stage === 'female') {
+        if (data.voted && data.survey_stage === 'female' && data.results && data.results.length > 0) {
             alreadyPassed.style.display = 'block';
             alreadyPassed.querySelector('h2').textContent = '📊 Опрос для девушек';
-            if (alreadyPassed.querySelector('p')) alreadyPassed.querySelector('p').textContent = '✅ Вы уже прошли опрос. Веса объектов и результаты — ниже.';
+            var p1 = alreadyPassed.querySelectorAll('p')[1];
+            if (p1) p1.textContent = 'Результаты ниже.';
             intro.style.display = 'none';
             content.style.display = 'none';
             return;
@@ -1274,9 +1331,11 @@ async function checkSurveyStateAndShow() {
         const response = await fetch(`${baseUrl}/api/survey/user-results?telegram_id=${userId}`);
         if (!response.ok) throw new Error('HTTP');
         const data = await response.json();
-        if (data.voted) {
+        if (data.voted && data.results && data.results.length > 0) {
             alreadyPassed.style.display = 'block';
-            if (alreadyPassed.querySelector('h2')) alreadyPassed.querySelector('h2').textContent = '📊 Опрос сложности нарядов';
+            if (alreadyPassed.querySelector('h2')) alreadyPassed.querySelector('h2').textContent = (data.survey_stage === 'female' ? '📊 Опрос для девушек' : '📊 Опрос для парней (сложность нарядов)');
+            var p2 = alreadyPassed.querySelectorAll('p')[1];
+            if (p2) p2.textContent = 'Результаты ниже.';
             intro.style.display = 'none';
             if (content) content.style.display = 'none';
             return;
@@ -1566,7 +1625,7 @@ async function loadSurveyResults() {
         if (resultsWidget) resultsWidget.style.display = 'none';
         
         let html = '<h3>📊 Результаты опроса</h3>';
-        html += '<p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Веса объектов (рассчитаны по формуле k = S/avg):</p>';
+        html += '<p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Веса объектов:</p>';
         
         // Выводим результаты по категориям с объяснением
         Object.keys(parentsMap).forEach(parentId => {
@@ -1726,7 +1785,13 @@ function getDaysLeft(dateStr) {
 
 function formatDate(dateStr) {
     const options = { day: '2-digit', month: '2-digit', year: 'numeric' };
-    return new Date(dateStr).toLocaleDateString('ru-RU', options);
+    return new Date(dateStr + 'T12:00:00').toLocaleDateString('ru-RU', options);
+}
+
+function getDayOfWeek(dateStr) {
+    var days = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    var d = new Date(dateStr + 'T12:00:00');
+    return days[d.getDay()];
 }
 
 function openNotifications() {
@@ -1747,7 +1812,7 @@ let calY = new Date().getFullYear();
 
 function dutySetView(view) {
     dutyCurrentView = view;
-    ['my', 'calendar', 'search', 'upload', 'stats'].forEach(function(v) {
+    ['my', 'search', 'upload', 'stats'].forEach(function(v) {
         var el = document.getElementById('duty-view-' + v);
         if (el) el.style.display = v === view ? 'block' : 'none';
     });
@@ -1757,7 +1822,6 @@ function dutySetView(view) {
         b.style.color = active ? 'white' : '#CBD5E1';
     });
     if (view === 'my') loadDutiesForMonth();
-    if (view === 'calendar') renderDutyCalendar();
     if (view === 'stats') loadDutyStats();
 }
 
@@ -1903,13 +1967,22 @@ async function openDutyDetail(dateStr, role) {
             html += '<p style="color:#F59E0B;font-size:13px;margin:8px 0;">⏳ Объекты будут распределены автоматически за 3 часа до наряда (в 15:30)</p>';
         }
 
-        html += '<h5 style="color:#93C5FD;margin:12px 0 8px;">Все участники</h5>';
+        html += '<h5 style="color:#93C5FD;margin:12px 0 8px;">Бригада</h5>';
         data.participants.forEach(function(p) {
             var isMe = userFio && p.fio === userFio;
-            html += '<div style="display:flex;justify-content:space-between;padding:10px;background:#1E293B;border-radius:8px;margin-bottom:6px;' + (isMe ? 'border-left:3px solid #3B82F6;' : '') + '">';
-            html += '<span style="color:' + (isMe ? '#3B82F6' : '#CBD5E1') + ';font-size:14px;">' + p.fio + (isMe ? ' (вы)' : '') + '</span>';
-            html += '<span style="color:#94A3B8;font-size:13px;">' + p.group + '</span>';
-            html += '</div>';
+            var tid = p.telegram_id;
+            var fioEsc = (p.fio || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            if (tid) {
+                html += '<a href="tg://user?id=' + tid + '" target="_blank" rel="noopener" style="display:flex;justify-content:space-between;padding:10px;background:#1E293B;border-radius:8px;margin-bottom:6px;text-decoration:none;' + (isMe ? 'border-left:3px solid #3B82F6;' : '') + '">';
+                html += '<span style="color:' + (isMe ? '#3B82F6' : '#60A5FA') + ';font-size:14px;">' + fioEsc + (isMe ? ' (вы)' : '') + ' ↗</span>';
+                html += '<span style="color:#94A3B8;font-size:13px;">' + (p.group || '') + '</span>';
+                html += '</a>';
+            } else {
+                html += '<div style="display:flex;justify-content:space-between;padding:10px;background:#1E293B;border-radius:8px;margin-bottom:6px;' + (isMe ? 'border-left:3px solid #3B82F6;' : '') + '">';
+                html += '<span style="color:' + (isMe ? '#3B82F6' : '#CBD5E1') + ';font-size:14px;">' + fioEsc + (isMe ? ' (вы)' : '') + '</span>';
+                html += '<span style="color:#94A3B8;font-size:13px;">' + (p.group || '') + '</span>';
+                html += '</div>';
+            }
         });
 
         if (isPriv && (isShiftRole || isCanteen)) {
@@ -2014,7 +2087,21 @@ function bindDutyUploadOnce() {
     const btn = document.getElementById('duty-upload-btn');
     const fileInput = document.getElementById('duty-upload-file');
     const templateLink = document.getElementById('duty-template-link');
+    const quickTemplate = document.getElementById('duty-graph-btn-template');
     if (templateLink) templateLink.href = baseUrl + '/api/schedule/template';
+    if (quickTemplate) quickTemplate.href = baseUrl + '/api/schedule/template';
+    var uploadBlock = document.getElementById('duty-graph-upload-block');
+    var deleteBlock = document.getElementById('duty-graph-delete-block');
+    var quickUploadBtn = document.getElementById('duty-graph-btn-upload');
+    var quickDeleteBtn = document.getElementById('duty-graph-btn-delete');
+    if (quickUploadBtn && uploadBlock) quickUploadBtn.addEventListener('click', function() { uploadBlock.scrollIntoView({ behavior: 'smooth' }); });
+    if (quickDeleteBtn && deleteBlock) {
+        quickDeleteBtn.addEventListener('click', function() {
+            deleteBlock.style.display = 'block';
+            loadDutyAvailableMonths().then(function() { renderDutyGraphCards(); });
+            deleteBlock.scrollIntoView({ behavior: 'smooth' });
+        });
+    }
     if (!btn || !fileInput) return;
     window._dutyUploadBound = true;
     btn.addEventListener('click', async function() {
@@ -2054,6 +2141,221 @@ function bindDutyUploadOnce() {
         }
     });
 }
+
+var monthNamesRu = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+function renderDutyGraphCards() {
+    var container = document.getElementById('duty-graph-cards');
+    if (!container) return;
+    if (!dutyAvailableMonths || dutyAvailableMonths.length === 0) {
+        container.innerHTML = '<p style="color:#94A3B8;">Нет загруженных графиков</p>';
+        return;
+    }
+    var html = '';
+    dutyAvailableMonths.forEach(function(ym) {
+        var parts = ym.split('-');
+        var y = parts[0];
+        var m = parseInt(parts[1], 10);
+        var label = (monthNamesRu[m - 1] || ym) + ' ' + y;
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:#0f172a;border-radius:8px;margin-bottom:8px;">';
+        html += '<span style="color:#CBD5E1;">' + label + '</span>';
+        html += '<span style="display:flex;gap:8px;">';
+        html += '<button type="button" onclick="openEditScheduleModal(\'' + ym + '\')" style="padding:6px 12px;background:#1E3A5F;color:#93C5FD;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Правка</button>';
+        html += '<button type="button" onclick="deleteScheduleMonth(\'' + ym + '\')" style="padding:6px 12px;background:#7F1D1D;color:#FCA5A5;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Удалить</button>';
+        html += '</span></div>';
+    });
+    container.innerHTML = html;
+}
+
+async function deleteScheduleMonth(ym) {
+    if (!confirm('Удалить график за этот месяц? Данные будут удалены безвозвратно.')) return;
+    try {
+        var res = await fetch(baseUrl + '/api/schedule/month?ym=' + encodeURIComponent(ym) + '&telegram_id=' + userId, { method: 'DELETE' });
+        var data = res.ok ? await res.json() : { detail: (await res.json()).detail || 'Ошибка' };
+        if (res.ok) {
+            showToast(data.message || 'График удалён');
+            await loadDutyAvailableMonths();
+            renderDutyGraphCards();
+            loadDutiesForMonth();
+            loadDuties(userId);
+        } else {
+            showToast(data.detail || 'Ошибка удаления');
+        }
+    } catch (e) {
+        showToast('Ошибка сети');
+    }
+}
+
+var dutyEditContext = null;
+var dutyEditCurrentYm = null;
+var DUTY_ROLE_CODES = ['к', 'дк', 'с', 'дс', 'ад', 'п', 'ж', 'т', 'кпп', 'гбр', 'зуб', 'ото', 'м', 'путсо'];
+
+async function openEditScheduleModal(ym) {
+    dutyEditCurrentYm = ym;
+    var modal = document.getElementById('duty-edit-modal');
+    var ymSpan = document.getElementById('duty-edit-modal-ym');
+    if (ymSpan) ymSpan.textContent = ym;
+    document.getElementById('duty-edit-form-remove').style.display = 'none';
+    document.getElementById('duty-edit-form-add').style.display = 'none';
+    modal.style.display = 'flex';
+    try {
+        var res = await fetch(baseUrl + '/api/duties/edit-context?ym=' + encodeURIComponent(ym) + '&telegram_id=' + userId);
+        if (!res.ok) { showToast('Нет прав или ошибка загрузки'); return; }
+        dutyEditContext = await res.json();
+        fillDutyEditDropdowns();
+    } catch (e) {
+        showToast('Ошибка сети');
+    }
+}
+
+function fillDutyEditDropdowns() {
+    if (!dutyEditContext) return;
+    var removeFio = document.getElementById('duty-edit-remove-fio');
+    var removeReplacement = document.getElementById('duty-edit-remove-replacement');
+    var addFio = document.getElementById('duty-edit-add-fio');
+    var removeReason = document.getElementById('duty-edit-remove-reason');
+    var removeRole = document.getElementById('duty-edit-remove-role');
+    var addRole = document.getElementById('duty-edit-add-role');
+    removeFio.innerHTML = '<option value="">— выбрать —</option>';
+    dutyEditContext.cadets_in_schedule.forEach(function(c) {
+        removeFio.innerHTML += '<option value="' + (c.fio || '').replace(/"/g, '&quot;') + '">' + (c.fio || '') + '</option>';
+    });
+    removeReplacement.innerHTML = '<option value="">— выбрать —</option>';
+    addFio.innerHTML = '<option value="">— выбрать —</option>';
+    dutyEditContext.group_users.forEach(function(u) {
+        var fio = (u.fio || '').replace(/"/g, '&quot;');
+        removeReplacement.innerHTML += '<option value="' + fio + '">' + (u.fio || '') + '</option>';
+        addFio.innerHTML += '<option value="' + fio + '" data-group="' + (u.group_name || '').replace(/"/g, '&quot;') + '">' + (u.fio || '') + '</option>';
+    });
+    var reasons = dutyEditContext.reasons || ['заболел', 'командировка', 'рапорт', 'другое'];
+    removeReason.innerHTML = reasons.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
+    var roleOpts = DUTY_ROLE_CODES.map(function(r) { return '<option value="' + r + '">' + get_full_role(r) + '</option>'; }).join('');
+    removeRole.innerHTML = '<option value="">— выбрать —</option>' + roleOpts;
+    addRole.innerHTML = '<option value="">— выбрать —</option>' + roleOpts;
+}
+
+(function initDutyEditModal() {
+    var modal = document.getElementById('duty-edit-modal');
+    if (!modal) return;
+    document.getElementById('duty-edit-btn-remove').addEventListener('click', function() {
+        document.getElementById('duty-edit-form-remove').style.display = 'block';
+        document.getElementById('duty-edit-form-add').style.display = 'none';
+    });
+    document.getElementById('duty-edit-btn-add').addEventListener('click', function() {
+        document.getElementById('duty-edit-form-add').style.display = 'block';
+        document.getElementById('duty-edit-form-remove').style.display = 'none';
+    });
+    document.getElementById('duty-edit-close').addEventListener('click', function() {
+        modal.style.display = 'none';
+    });
+    document.getElementById('duty-edit-submit-remove').addEventListener('click', async function() {
+        var fioRemoved = document.getElementById('duty-edit-remove-fio').value.trim();
+        var date = document.getElementById('duty-edit-remove-date').value.trim();
+        var role = document.getElementById('duty-edit-remove-role').value.trim();
+        var reason = document.getElementById('duty-edit-remove-reason').value.trim();
+        var fioReplacement = document.getElementById('duty-edit-remove-replacement').value.trim();
+        if (!fioRemoved || !date || !role || !fioReplacement) { showToast('Заполните все поля'); return; }
+        try {
+            var res = await fetch(baseUrl + '/api/duties/remove-and-replace', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegram_id: userId, date: date, role: role, fio_removed: fioRemoved, fio_replacement: fioReplacement, reason: reason || 'заболел' })
+            });
+            var data = res.ok ? await res.json() : await res.json().then(function(j) { return j; }).catch(function() { return {}; });
+            if (res.ok) {
+                showToast(data.message || 'Замена выполнена');
+                modal.style.display = 'none';
+                loadDutyAvailableMonths().then(function() { renderDutyGraphCards(); });
+                loadDutiesForMonth();
+                loadDuties(userId);
+            } else {
+                showToast(data.detail || 'Ошибка');
+            }
+        } catch (e) {
+            showToast('Ошибка сети');
+        }
+    });
+    document.getElementById('duty-edit-submit-add').addEventListener('click', async function() {
+        var sel = document.getElementById('duty-edit-add-fio');
+        var fio = sel.value.trim();
+        var groupName = sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].getAttribute('data-group');
+        var date = document.getElementById('duty-edit-add-date').value.trim();
+        var role = document.getElementById('duty-edit-add-role').value.trim();
+        var fioReplaced = document.getElementById('duty-edit-add-fio-replaced').value.trim();
+        if (!fio || !date || !role) { showToast('Заполните курсант, дату и роль'); return; }
+        if (!groupName) groupName = (dutyEditContext && dutyEditContext.group_users && dutyEditContext.group_users[0]) ? dutyEditContext.group_users[0].group_name : '';
+        try {
+            var body = { telegram_id: userId, date: date, role: role, fio: fio, group_name: groupName };
+            if (fioReplaced) body.reason_replacing_sick = 'заболел';
+            if (fioReplaced) body.fio_replaced = fioReplaced;
+            var res = await fetch(baseUrl + '/api/duties/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            var data = res.ok ? await res.json() : await res.json().then(function(j) { return j; }).catch(function() { return {}; });
+            if (res.ok) {
+                showToast(data.message || 'Наряд добавлен');
+                modal.style.display = 'none';
+                loadDutyAvailableMonths().then(function() { renderDutyGraphCards(); });
+                loadDutiesForMonth();
+                loadDuties(userId);
+            } else {
+                showToast(data.detail || 'Ошибка');
+            }
+        } catch (e) {
+            showToast('Ошибка сети');
+        }
+    });
+})();
+
+async function loadProfileDutyStats() {
+    var sickEl = document.getElementById('profile-stats-sick');
+    var replacedEl = document.getElementById('profile-stats-replaced');
+    if (!sickEl || !replacedEl) return;
+    try {
+        var res = await fetch(baseUrl + '/api/profile/duty-stats?telegram_id=' + userId);
+        if (!res.ok) return;
+        var data = await res.json();
+        sickEl.textContent = 'Болел: ' + (data.times_sick || 0) + ' раз';
+        replacedEl.textContent = 'Заменял других: ' + (data.times_replaced || 0) + ' раз';
+    } catch (e) {}
+}
+
+(function initSickLeaveModal() {
+    var modal = document.getElementById('sick-leave-modal');
+    if (!modal) return;
+    document.getElementById('profile-sick-leave-btn').addEventListener('click', function() {
+        document.getElementById('sick-leave-date').value = '';
+        modal.style.display = 'flex';
+    });
+    document.getElementById('sick-leave-cancel').addEventListener('click', function() {
+        modal.style.display = 'none';
+    });
+    document.getElementById('sick-leave-submit').addEventListener('click', async function() {
+        var reportDate = document.getElementById('sick-leave-date').value.trim();
+        if (!reportDate || reportDate.length !== 10) {
+            showToast('Введите дату в формате ГГГГ-ММ-ДД');
+            return;
+        }
+        try {
+            var res = await fetch(baseUrl + '/api/sick-leave/report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegram_id: userId, report_date: reportDate })
+            });
+            var data = res.ok ? await res.json() : await res.json().then(function(j) { return j; }).catch(function() { return {}; });
+            if (res.ok) {
+                showToast(data.message || 'Больничный учтён');
+                modal.style.display = 'none';
+                loadProfileDutyStats();
+            } else {
+                showToast(data.detail || 'Ошибка');
+            }
+        } catch (e) {
+            showToast('Ошибка сети');
+        }
+    });
+})();
 
 async function loadDutiesForMonth() {
     var container = document.getElementById('duties-list-container');
@@ -2101,37 +2403,29 @@ async function loadDutiesForMonth() {
         if (statsEl) {
             var upcoming = duties.filter(function(d) { return d.date >= today; }).length;
             var past = duties.length - upcoming;
-            statsEl.textContent = 'Всего: ' + duties.length + ' | Предстоящие: ' + upcoming + ' | Прошедшие: ' + past;
+            statsEl.textContent = 'Всего: ' + duties.length + ' | Ожидается: ' + upcoming + ' | Завершённые: ' + past;
             statsEl.style.display = 'block';
         }
 
         if (filtered.length === 0) {
-            container.innerHTML = '<p style="color: #64748B; text-align: center;padding:16px;">' + (dutyCurrentTab === 'upcoming' ? 'Нет предстоящих нарядов' : 'Нет прошедших нарядов') + '</p>';
+            container.innerHTML = '<p style="color: #64748B; text-align: center;padding:16px;">' + (dutyCurrentTab === 'upcoming' ? 'Нет нарядов в ожидании' : 'Нет завершённых нарядов') + '</p>';
             return;
         }
 
-        var byDate = {};
-        filtered.forEach(function(duty) {
-            if (!byDate[duty.date]) byDate[duty.date] = [];
-            byDate[duty.date].push(duty);
-        });
-
+        var sorted = filtered.slice().sort(function(a, b) { return dutyCurrentTab === 'past' ? (b.date.localeCompare(a.date)) : (a.date.localeCompare(b.date)); });
         var html = '';
-        var sortedDates = Object.keys(byDate).sort();
-        if (dutyCurrentTab === 'past') sortedDates.reverse();
-        sortedDates.forEach(function(date) {
-            var dutiesOnDate = byDate[date];
+        sorted.forEach(function(duty) {
+            var date = duty.date;
             var isPast = date < today;
-            html += '<div style="background:' + (isPast ? '#1a2332' : '#1E293B') + ';border-radius:8px;padding:12px;margin-bottom:10px;' + (isPast ? 'opacity:0.7;' : '') + '">';
-            html += '<h4 style="color:' + (isPast ? '#64748B' : '#93C5FD') + ';margin:0 0 8px 0;font-size:15px;">' + formatDate(date) + '</h4>';
-            dutiesOnDate.forEach(function(duty) {
-                html += '<div onclick="openDutyDetail(\'' + date + '\',\'' + duty.role + '\')" style="background:#0f172a;border-radius:6px;padding:10px;margin-bottom:6px;cursor:pointer;border-left:3px solid #3B82F6;">';
-                html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-                html += '<span style="color:#CBD5E1;font-weight:500;">' + (duty.role_full || duty.role) + '</span>';
-                var pCount = duty.partners ? duty.partners.length : 0;
-                html += '<span style="color:#94A3B8;font-size:12px;">' + pCount + ' чел.</span>';
-                html += '</div></div>';
-            });
+            var role = (duty.role || '').replace(/"/g, '&quot;');
+            html += '<div onclick="openDutyDetail(this.getAttribute(\'data-date\'), this.getAttribute(\'data-role\'))" data-date="' + date + '" data-role="' + role + '" style="background:' + (isPast ? '#1a2332' : '#1E293B') + ';border-radius:10px;padding:14px;margin-bottom:10px;cursor:pointer;border:1px solid #334155;border-left:4px solid #3B82F6;' + (isPast ? 'opacity:0.85;' : '') + '">';
+            html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">';
+            html += '<div><span style="color:#93C5FD;font-size:15px;font-weight:600;">' + formatDate(date) + '</span>';
+            html += ' <span style="color:#94A3B8;font-size:13px;">' + getDayOfWeek(date) + '</span></div>';
+            html += '<span style="color:#CBD5E1;font-weight:500;">' + (duty.role_full || duty.role) + '</span>';
+            html += '</div>';
+            var pCount = duty.partners ? duty.partners.length : 0;
+            if (pCount > 0) html += '<p style="color:#64748B;font-size:12px;margin:6px 0 0 0;">' + pCount + ' чел. в бригаде</p>';
             html += '</div>';
         });
         container.innerHTML = html;

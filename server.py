@@ -213,6 +213,62 @@ async def update_user(data: dict):
         conn.close()
 
 
+@app.get("/api/profile/duty-stats")
+async def get_profile_duty_stats(telegram_id: int):
+    """Статистика курсанта: сколько раз болел (замены по болезни + самоотчёты), сколько раз заменял других."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute("SELECT fio FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if not user:
+            conn.close()
+            return {"times_sick": 0, "times_replaced": 0}
+        fio = (user["fio"] or "").strip()
+        times_sick_replace = conn.execute(
+            "SELECT COUNT(*) FROM duty_replacements WHERE fio_removed = ? AND reason = 'заболел'",
+            (fio,)
+        ).fetchone()[0]
+        times_sick_self = conn.execute(
+            "SELECT COUNT(*) FROM sick_leave_reports WHERE telegram_id = ?",
+            (telegram_id,)
+        ).fetchone()[0]
+        times_replaced = conn.execute(
+            "SELECT COUNT(*) FROM duty_replacements WHERE fio_replacement = ?",
+            (fio,)
+        ).fetchone()[0]
+        conn.close()
+        return {"times_sick": times_sick_replace + times_sick_self, "times_replaced": times_replaced}
+    except Exception as e:
+        print(f"[ERROR] duty-stats: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка загрузки статистики")
+
+
+@app.post("/api/sick-leave/report")
+async def report_sick_leave(data: dict):
+    """Курсант указывает свой больничный (дата)."""
+    telegram_id = data.get("telegram_id")
+    report_date = data.get("report_date")
+    if not telegram_id or not report_date:
+        raise HTTPException(status_code=400, detail="Нужны telegram_id и report_date (YYYY-MM-DD)")
+    if len(report_date) != 10 or report_date[4] != "-" or report_date[7] != "-":
+        raise HTTPException(status_code=400, detail="Формат даты: YYYY-MM-DD")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        conn.execute(
+            "INSERT INTO sick_leave_reports (telegram_id, report_date) VALUES (?, ?)",
+            (telegram_id, report_date)
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": "Больничный учтён"}
+    except Exception as e:
+        print(f"[ERROR] sick-leave report: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка сохранения")
+
+
 def _user_role_from_db(telegram_id: int):
     """Роль из БД (admin, assistant, sergeant, user)."""
     conn = get_db()
@@ -301,25 +357,37 @@ async def set_user_role(data: dict):
     if not actor_id or not target_id or new_role not in ("assistant", "sergeant", "user"):
         raise HTTPException(status_code=400, detail="Нужны actor_telegram_id, target_telegram_id и role (assistant|sergeant|user)")
     actor_role = _user_role_from_db(actor_id)
-    if actor_role == "admin":
-        pass  # может назначать assistant, sergeant, user
-    elif actor_role == "assistant":
-        if new_role == "assistant":
-            raise HTTPException(status_code=403, detail="Помощник не может назначать помощников")
-        # только sergeant или user в пределах своего курса
-        conn = get_db()
-        if not conn:
-            raise HTTPException(status_code=500, detail="База данных не найдена")
-        a_row = conn.execute("SELECT enrollment_year FROM users WHERE telegram_id = ?", (actor_id,)).fetchone()
-        t_row = conn.execute("SELECT enrollment_year FROM users WHERE telegram_id = ?", (target_id,)).fetchone()
-        conn.close()
-        if not a_row or not t_row or a_row["enrollment_year"] != t_row["enrollment_year"]:
-            raise HTTPException(status_code=403, detail="Можно менять только пользователей своего курса")
-    else:
-        raise HTTPException(status_code=403, detail="Недостаточно прав")
     conn = get_db()
     if not conn:
         raise HTTPException(status_code=500, detail="База данных не найдена")
+    if actor_role == "admin":
+        pass  # может назначать без ограничений
+    elif actor_role == "assistant":
+        a_row = conn.execute("SELECT enrollment_year FROM users WHERE telegram_id = ?", (actor_id,)).fetchone()
+        t_row = conn.execute("SELECT enrollment_year, group_name FROM users WHERE telegram_id = ?", (target_id,)).fetchone()
+        if not a_row or not t_row or a_row["enrollment_year"] != t_row["enrollment_year"]:
+            conn.close()
+            raise HTTPException(status_code=403, detail="Можно менять только пользователей своего курса")
+        if new_role == "assistant":
+            cnt = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE enrollment_year = ? AND role = 'assistant'",
+                (t_row["enrollment_year"],)
+            ).fetchone()[0]
+            if cnt >= 6:
+                conn.close()
+                raise HTTPException(status_code=403, detail="На курсе уже 6 помощников (лимит)")
+        elif new_role == "sergeant":
+            grp = t_row["group_name"] or ""
+            cnt = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE group_name = ? AND role = 'sergeant'",
+                (grp,)
+            ).fetchone()[0]
+            if cnt >= 4:
+                conn.close()
+                raise HTTPException(status_code=403, detail="В группе уже 4 сержанта (лимит)")
+    else:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
     try:
         conn.execute("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?", (new_role, target_id))
         conn.commit()
@@ -369,21 +437,35 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
             schedule_columns = [row['name'] for row in cursor.fetchall()]
             if schedule_columns:
                 # Используем duty_schedule
-                if month and year:
-                    # Фильтр по месяцу
-                    month_start = f"{year}-{month:02d}-01"
-                    if month == 12:
-                        month_end = f"{year + 1}-01-01"
+                if month is not None and year is not None:
+                    # Фильтр по месяцу (month/year могут прийти строками из query)
+                    try:
+                        m = int(month)
+                        y = int(year)
+                    except (TypeError, ValueError):
+                        m, y = None, None
+                    if m is not None and y is not None and 1 <= m <= 12:
+                        month_start = f"{y}-{m:02d}-01"
+                        if m == 12:
+                            month_end = f"{y + 1}-01-01"
+                        else:
+                            month_end = f"{y}-{m + 1:02d}-01"
                     else:
-                        month_end = f"{year}-{int(month) + 1:02d}-01"
+                        month_start = month_end = None
+                    if month_start and month_end:
                     
-                    query = """
-                        SELECT date, role, group_name, enrollment_year
-                        FROM duty_schedule
-                        WHERE fio = ? AND date >= ? AND date < ?
-                        ORDER BY date
-                    """
-                    rows = conn.execute(query, (user_fio, month_start, month_end)).fetchall()
+                        query = """
+                            SELECT date, role, group_name, enrollment_year
+                            FROM duty_schedule
+                            WHERE fio = ? AND date >= ? AND date < ?
+                            ORDER BY date
+                        """
+                        rows = conn.execute(query, (user_fio, month_start, month_end)).fetchall()
+                    else:
+                        rows = conn.execute(
+                            "SELECT date, role, group_name, enrollment_year FROM duty_schedule WHERE fio = ? ORDER BY date",
+                            (user_fio,)
+                        ).fetchall()
                 else:
                     query = """
                         SELECT date, role, group_name, enrollment_year
@@ -606,12 +688,16 @@ async def get_duty_day_detail(date: str, role: str, telegram_id: int):
             return {"error": "Пользователь не найден"}
         ey = user["enrollment_year"]
         rows = conn.execute("""
-            SELECT fio, group_name, gender
-            FROM duty_schedule
-            WHERE date = ? AND role = ? AND enrollment_year = ?
-            ORDER BY group_name, fio
+            SELECT ds.fio, ds.group_name, ds.gender, u.telegram_id
+            FROM duty_schedule ds
+            LEFT JOIN users u ON u.fio = ds.fio AND u.status = 'активен'
+            WHERE ds.date = ? AND ds.role = ? AND ds.enrollment_year = ?
+            ORDER BY ds.group_name, ds.fio
         """, (date, role, ey)).fetchall()
-        participants = [{"fio": r["fio"], "group": r["group_name"], "gender": r["gender"]} for r in rows]
+        participants = [
+            {"fio": r["fio"], "group": r["group_name"], "gender": r["gender"], "telegram_id": r["telegram_id"]}
+            for r in rows
+        ]
         
         shift_data = []
         canteen_data = []
@@ -1260,6 +1346,224 @@ async def upload_schedule(
         raise HTTPException(status_code=500, detail="Ошибка сохранения графика")
 
 
+@app.delete("/api/schedule/month")
+async def delete_schedule_month(ym: str, telegram_id: int):
+    """Удалить график за месяц YYYY-MM. Сержант — только свою группу, помощник/админ — весь курс."""
+    if not ym or len(ym) != 7 or ym[4] != "-":
+        raise HTTPException(status_code=400, detail="Формат: YYYY-MM")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT role, group_name, enrollment_year FROM users WHERE telegram_id = ?",
+            (telegram_id,)
+        ).fetchone()
+        if not user or user["role"] not in ("sergeant", "assistant", "admin"):
+            raise HTTPException(status_code=403, detail="Нет прав")
+        month_start = ym + "-01"
+        try:
+            y, m = int(ym[:4]), int(ym[5:7])
+            if m == 12:
+                month_end = f"{y + 1}-01-01"
+            else:
+                month_end = f"{y}-{m + 1:02d}-01"
+        except Exception:
+            raise HTTPException(status_code=400, detail="Неверный месяц")
+        if user["role"] == "sergeant":
+            conn.execute("""
+                DELETE FROM duty_schedule
+                WHERE enrollment_year = ? AND group_name = ? AND date >= ? AND date < ?
+            """, (user["enrollment_year"], user["group_name"] or "", month_start, month_end))
+        else:
+            conn.execute("""
+                DELETE FROM duty_schedule
+                WHERE enrollment_year = ? AND date >= ? AND date < ?
+            """, (user["enrollment_year"], month_start, month_end))
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": f"График за {ym} удалён"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] delete schedule month: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка удаления")
+
+
+# ============================================
+# 2.6. ПРАВКА ГРАФИКА: заменить/добавить наряд, контекст для форм
+# ============================================
+
+DUTY_REMOVAL_REASONS = ["заболел", "командировка", "рапорт", "другое"]
+
+
+@app.get("/api/duties/edit-context")
+async def get_duty_edit_context(ym: str, telegram_id: int):
+    """Для правки графика за месяц: курсанты в графике и пользователи по группам (для выбора «кто заменяет»)."""
+    if not ym or len(ym) != 7:
+        raise HTTPException(status_code=400, detail="Формат: YYYY-MM")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT role, group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not user or user["role"] not in ("sergeant", "assistant", "admin"):
+            conn.close()
+            raise HTTPException(status_code=403, detail="Нет прав на правку графика")
+        month_start = ym + "-01"
+        try:
+            y, m = int(ym[:4]), int(ym[5:7])
+            month_end = f"{y + 1}-01-01" if m == 12 else f"{y}-{m + 1:02d}-01"
+        except Exception:
+            conn.close()
+            raise HTTPException(status_code=400, detail="Неверный месяц")
+        ey = user["enrollment_year"]
+        grp = user["group_name"] or ""
+        if user["role"] == "sergeant":
+            schedule_rows = conn.execute("""
+                SELECT DISTINCT fio, group_name FROM duty_schedule
+                WHERE enrollment_year = ? AND group_name = ? AND date >= ? AND date < ?
+                ORDER BY group_name, fio
+            """, (ey, grp, month_start, month_end)).fetchall()
+            users_rows = conn.execute("""
+                SELECT fio, group_name, telegram_id FROM users
+                WHERE enrollment_year = ? AND group_name = ? AND status = 'активен'
+                ORDER BY fio
+            """, (ey, grp)).fetchall()
+        else:
+            schedule_rows = conn.execute("""
+                SELECT DISTINCT fio, group_name FROM duty_schedule
+                WHERE enrollment_year = ? AND date >= ? AND date < ?
+                ORDER BY group_name, fio
+            """, (ey, month_start, month_end)).fetchall()
+            users_rows = conn.execute("""
+                SELECT fio, group_name, telegram_id FROM users
+                WHERE enrollment_year = ? AND status = 'активен'
+                ORDER BY group_name, fio
+            """, (ey,)).fetchall()
+        cadets_in_schedule = [{"fio": r["fio"], "group_name": r["group_name"]} for r in schedule_rows]
+        group_users = [{"fio": r["fio"], "group_name": r["group_name"], "telegram_id": r["telegram_id"]} for r in users_rows]
+        conn.close()
+        return {"ym": ym, "cadets_in_schedule": cadets_in_schedule, "group_users": group_users, "reasons": DUTY_REMOVAL_REASONS}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] edit-context: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка загрузки контекста")
+
+
+@app.post("/api/duties/remove-and-replace")
+async def duty_remove_and_replace(data: dict):
+    """Удалить курсанта из наряда на дату и поставить вместо него другого. Запись в duty_replacements."""
+    telegram_id = data.get("telegram_id")
+    date = data.get("date")
+    role = data.get("role")
+    fio_removed = (data.get("fio_removed") or "").strip()
+    fio_replacement = (data.get("fio_replacement") or "").strip()
+    reason = (data.get("reason") or "заболел").strip().lower()
+    if not telegram_id or not date or not role or not fio_removed or not fio_replacement:
+        raise HTTPException(status_code=400, detail="Нужны: telegram_id, date, role, fio_removed, fio_replacement")
+    if reason not in DUTY_REMOVAL_REASONS:
+        reason = "другое"
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT role, group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not user or user["role"] not in ("sergeant", "assistant", "admin"):
+            conn.close()
+            raise HTTPException(status_code=403, detail="Нет прав")
+        ey = user["enrollment_year"]
+        row = conn.execute("""
+            SELECT id, group_name FROM duty_schedule
+            WHERE date = ? AND role = ? AND enrollment_year = ? AND fio = ?
+        """, (date, role, ey, fio_removed)).fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Запись не найдена в графике на эту дату")
+        grp = row["group_name"]
+        if user["role"] == "sergeant" and grp != (user["group_name"] or ""):
+            conn.close()
+            raise HTTPException(status_code=403, detail="Можно править только свою группу")
+        conn.execute("""
+            UPDATE duty_schedule SET fio = ? WHERE date = ? AND role = ? AND enrollment_year = ? AND fio = ?
+        """, (fio_replacement, date, role, ey, fio_removed))
+        conn.execute("""
+            INSERT INTO duty_replacements (date, role, group_name, enrollment_year, fio_removed, fio_replacement, reason, created_by_telegram_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (date, role, grp, ey, fio_removed, fio_replacement, reason, telegram_id))
+        try:
+            conn.execute(
+                "UPDATE duty_shift_assignments SET fio = ? WHERE date = ? AND role = ? AND enrollment_year = ? AND fio = ?",
+                (fio_replacement, date, role, ey, fio_removed)
+            )
+            conn.execute(
+                "UPDATE duty_canteen_assignments SET fio = ? WHERE date = ? AND enrollment_year = ? AND fio = ?",
+                (fio_replacement, date, ey, fio_removed)
+            )
+        except Exception:
+            pass
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": "Замена выполнена"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] remove-and-replace: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка замены")
+
+
+@app.post("/api/duties/add")
+async def duty_add(data: dict):
+    """Добавить наряд: курсант, дата, роль. Опционально — замена больному (логируем в duty_replacements)."""
+    telegram_id = data.get("telegram_id")
+    date = data.get("date")
+    role = data.get("role")
+    fio = (data.get("fio") or "").strip()
+    group_name = (data.get("group_name") or "").strip()
+    reason_replacing = (data.get("reason_replacing_sick") or "").strip()
+    fio_replaced = (data.get("fio_replaced") or "").strip()
+    if not telegram_id or not date or not role or not fio or not group_name:
+        raise HTTPException(status_code=400, detail="Нужны: telegram_id, date, role, fio, group_name")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT role, group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not user or user["role"] not in ("sergeant", "assistant", "admin"):
+            conn.close()
+            raise HTTPException(status_code=403, detail="Нет прав")
+        ey = user["enrollment_year"]
+        if user["role"] == "sergeant" and group_name != (user["group_name"] or ""):
+            conn.close()
+            raise HTTPException(status_code=403, detail="Можно добавлять только в свою группу")
+        gender_row = conn.execute("SELECT gender FROM users WHERE fio = ? LIMIT 1", (fio,)).fetchone()
+        gender = gender_row["gender"] if gender_row else "male"
+        conn.execute("""
+            INSERT OR REPLACE INTO duty_schedule (fio, date, role, group_name, enrollment_year, gender)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (fio, date, role, group_name, ey, gender))
+        if reason_replacing and fio_replaced and reason_replacing.lower() in ("заболел", "1", "да", "true"):
+            conn.execute("""
+                INSERT INTO duty_replacements (date, role, group_name, enrollment_year, fio_removed, fio_replacement, reason, created_by_telegram_id)
+                VALUES (?, ?, ?, ?, ?, ?, 'заболел', ?)
+            """, (date, role, group_name, ey, fio_replaced, fio, telegram_id))
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": "Наряд добавлен"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] duty add: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка добавления")
+
+
 # ============================================
 # 5. ОПРОСНИК (SURVEY) API — попарное сравнение 2/1/0
 # ============================================
@@ -1307,6 +1611,7 @@ async def get_survey_list(telegram_id: int):
             AND (
                 (s.scope_type = 'group' AND s.scope_value = ?)
                 OR (s.scope_type = 'course' AND s.scope_value = ?)
+                OR (s.scope_type = 'system')
             )
             ORDER BY s.created_at DESC
         """, (group_name, str(enrollment_year))).fetchall()
@@ -1381,11 +1686,13 @@ async def get_survey_pairs(stage: str = "main"):
             seen = set()
             objects = [o for o in objects if o["id"] not in seen and not seen.add(o["id"])]
             pairs = _get_all_pairs(objects)
+            random.shuffle(pairs)
             conn.close()
             return {"pairs": pairs, "stage": stage}
         
         objects = [{"id": r["id"], "name": r["name"]} for r in rows]
         pairs = _get_all_pairs(objects)
+        random.shuffle(pairs)
         conn.close()
         return {"pairs": pairs, "stage": stage}
     except Exception as e:
@@ -1556,7 +1863,7 @@ def _calc_weights_from_pair_votes(conn):
             for oid in sub_ids:
                 s = sub_scores.get(oid, 0)
                 k_sub = (s / sub_avg) if (sub_avg > 0 and s > 0) else 0.8
-                k_sub = _clamp_coef(k_sub, max_k=1.5)
+                k_sub = _clamp_coef(k_sub, max_k=1.6)
                 w_sub = canteen_weight * k_sub
                 conn.execute("""
                     INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
@@ -1592,7 +1899,7 @@ def _calc_weights_from_pair_votes(conn):
             for oid in female_ids:
                 s = f_scores.get(oid, 0)
                 k = (s / f_avg) if (f_avg > 0 and s > 0) else 0.8
-                k = _clamp_coef(k, max_k=1.5)
+                k = _clamp_coef(k, max_k=1.6)
                 w = 10 * k
                 conn.execute("""
                     INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
@@ -1800,14 +2107,14 @@ async def get_user_survey_results(telegram_id: int):
 # ============================================
 @app.post("/api/survey/custom")
 async def create_custom_survey(data: dict):
-    """Создать опрос: сержант — для группы, помощник — для курса."""
+    """Создать опрос: сержант — группа, помощник — курс, админ — группа/курс/системный."""
     telegram_id = data.get("telegram_id")
     title = (data.get("title") or "").strip()
-    scope_type = data.get("scope_type")  # 'group' | 'course'
+    scope_type = data.get("scope_type")  # 'group' | 'course' | 'system'
     options = data.get("options") or []  # ["Вариант 1", "Вариант 2", ...]
     ends_at = data.get("ends_at")  # optional ISO date/datetime
-    if not telegram_id or not title or scope_type not in ("group", "course") or len(options) < 2:
-        raise HTTPException(status_code=400, detail="Нужны: telegram_id, title, scope_type (group|course), options (минимум 2)")
+    if not telegram_id or not title or scope_type not in ("group", "course", "system") or len(options) < 2:
+        raise HTTPException(status_code=400, detail="Нужны: telegram_id, title, scope_type (group|course|system), options (минимум 2)")
     conn = get_db()
     if not conn:
         raise HTTPException(status_code=500, detail="База данных не найдена")
@@ -1818,9 +2125,11 @@ async def create_custom_survey(data: dict):
         ).fetchone()
         if not user or user["role"] not in ("sergeant", "assistant", "admin"):
             raise HTTPException(status_code=403, detail="Только сержант/помощник/админ могут создавать опросы")
+        if scope_type == "system" and user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Системный опрос может создать только админ")
         if scope_type == "group" and user["role"] not in ("sergeant", "admin"):
             raise HTTPException(status_code=403, detail="Опрос по группе может создать только сержант или админ")
-        scope_value = user["group_name"] if scope_type == "group" else str(user["enrollment_year"])
+        scope_value = "system" if scope_type == "system" else (user["group_name"] if scope_type == "group" else str(user["enrollment_year"]))
         cursor = conn.execute(
             "INSERT INTO custom_surveys (title, scope_type, scope_value, created_by_telegram_id, ends_at) VALUES (?, ?, ?, ?, ?)",
             (title, scope_type, scope_value, telegram_id, ends_at or None)
