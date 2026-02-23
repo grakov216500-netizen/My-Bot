@@ -16,13 +16,22 @@ from utils.course_calculator import get_current_course
 
 app = FastAPI()
 
-# === CORS (временно разрешено всё) ===
+# === CORS: Mini App на GitHub Pages и локальная разработка ===
+# При allow_credentials=True нельзя использовать "*" — указываем явные origins
+CORS_ORIGINS = [
+    "https://grakov216500-netizen.github.io",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # === Путь к БД ===
