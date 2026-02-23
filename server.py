@@ -1,6 +1,6 @@
 # server.py — FastAPI сервер для Mini App (финальная версия, с исправлением группы и опросником)
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -9,6 +9,7 @@ import os
 import random
 import sqlite3
 import statistics  # для расчёта медианы
+import tempfile
 
 # Импортируем функцию расчёта курса
 from utils.course_calculator import get_current_course
@@ -718,6 +719,107 @@ async def get_full_schedule():
     return {"info": "Модуль в разработке"}
 
 
+@app.post("/api/schedule/upload")
+async def upload_schedule(
+    file: UploadFile = File(...),
+    telegram_id: int = Form(...),
+):
+    """Загрузка графика из .xlsx. Доступно сержанту (своя группа), помощнику/админу."""
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Нужен файл .xlsx")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT role, group_name, enrollment_year FROM users WHERE telegram_id = ?",
+            (telegram_id,)
+        ).fetchone()
+        if not user or user["role"] not in ("sergeant", "assistant", "admin"):
+            raise HTTPException(status_code=403, detail="Нет прав на загрузку графика")
+    finally:
+        conn.close()
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Файл пустой")
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+        from utils.parse_excel import parse_excel_schedule_with_validation
+        result = parse_excel_schedule_with_validation(tmp)
+    finally:
+        if tmp and os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+
+    if not result["success"]:
+        errors = result.get("errors", [])[:5]
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+
+    schedule_data = result["data"]
+    group = result["group"]
+    conn = get_db()
+    try:
+        enrollment_year = user["enrollment_year"]
+        if user["role"] == "assistant" or user["role"] == "admin":
+            row = conn.execute(
+                "SELECT enrollment_year FROM users WHERE group_name = ? LIMIT 1",
+                (group,)
+            ).fetchone()
+            enrollment_year = row["enrollment_year"] if row else user["enrollment_year"]
+        elif user["role"] == "sergeant" and group != user["group_name"]:
+            conn.close()
+            raise HTTPException(
+                status_code=403,
+                detail=f"Сержант может загружать график только своей группы. Ваша группа: {user['group_name']}"
+            )
+
+        dates = {d["date"] for d in schedule_data}
+        if not dates:
+            conn.close()
+            return {"status": "ok", "message": "Нет записей", "count": 0}
+        month_start = min(dates)
+        month_end = month_start[:8] + "01"
+        from datetime import datetime
+        try:
+            dt = datetime.strptime(month_start, "%Y-%m-%d")
+            if dt.month == 12:
+                month_end_next = f"{dt.year + 1}-01-01"
+            else:
+                month_end_next = f"{dt.year}-{dt.month + 1:02d}-01"
+        except Exception:
+            month_end_next = month_start
+
+        conn.execute(
+            """DELETE FROM duty_schedule
+               WHERE group_name = ? AND enrollment_year = ?
+               AND date >= ? AND date < ?""",
+            (group, enrollment_year, month_start[:8] + "-01", month_end_next)
+        )
+        for d in schedule_data:
+            conn.execute(
+                """INSERT OR REPLACE INTO duty_schedule (fio, date, role, group_name, enrollment_year, gender)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (d["fio"], d["date"], d["role"], d["group"], enrollment_year, d.get("gender", "male"))
+        conn.commit()
+        conn.close()
+        return {
+            "status": "ok",
+            "message": f"График загружен: {group}",
+            "count": len(schedule_data),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Сохранение графика: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка сохранения графика")
+
+
 # ============================================
 # 5. ОПРОСНИК (SURVEY) API — попарное сравнение 2/1/0
 # ============================================
@@ -734,6 +836,59 @@ def _get_all_pairs(objects):
     return pairs
 
 
+@app.get("/api/survey/list")
+async def get_survey_list(telegram_id: int):
+    """Список опросов: системные (юноши/девушки) и пользовательские для группы/курса."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT gender, group_name, enrollment_year, role FROM users WHERE telegram_id = ?",
+            (telegram_id,)
+        ).fetchone()
+        if not user:
+            conn.close()
+            return {"system": [], "custom": []}
+        gender = user["gender"] or "male"
+        group_name = user["group_name"] or ""
+        enrollment_year = user["enrollment_year"]
+        role = user["role"] or "user"
+
+        system = [
+            {"id": "male", "title": "Опрос для юношей (сложность нарядов)", "for_gender": "male"},
+            {"id": "female", "title": "Опрос для девушек (ПУТСО, Столовая, Медчасть)", "for_gender": "female"},
+        ]
+
+        custom_rows = conn.execute("""
+            SELECT s.id, s.title, s.scope_type, s.scope_value, s.created_by_telegram_id, s.ends_at, s.completed_at
+            FROM custom_surveys s
+            WHERE s.completed_at IS NULL
+            AND (
+                (s.scope_type = 'group' AND s.scope_value = ?)
+                OR (s.scope_type = 'course' AND s.scope_value = ?)
+            )
+            ORDER BY s.created_at DESC
+        """, (group_name, str(enrollment_year))).fetchall()
+        custom = []
+        for r in custom_rows:
+            custom.append({
+                "id": r["id"],
+                "title": r["title"],
+                "scope_type": r["scope_type"],
+                "scope_value": r["scope_value"],
+                "created_by_telegram_id": r["created_by_telegram_id"],
+                "ends_at": r["ends_at"],
+                "completed_at": r["completed_at"],
+                "can_complete": r["created_by_telegram_id"] == telegram_id or role in ("admin", "assistant"),
+            })
+        conn.close()
+        return {"system": system, "custom": custom, "user_gender": gender}
+    except Exception as e:
+        print(f"[ERROR] Ошибка списка опросов: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
+
+
 @app.get("/api/survey/pairs")
 async def get_survey_pairs(stage: str = "main"):
     """
@@ -746,8 +901,23 @@ async def get_survey_pairs(stage: str = "main"):
     try:
         if stage == "main":
             rows = conn.execute(
-                "SELECT id, name FROM duty_objects WHERE parent_id IS NULL ORDER BY id"
+                "SELECT id, name FROM duty_objects WHERE parent_id IS NULL AND name != 'Опрос девушек' ORDER BY id"
             ).fetchall()
+        elif stage == "female":
+            female_parent = conn.execute(
+                "SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL"
+            ).fetchone()
+            if not female_parent:
+                conn.close()
+                return {"pairs": [], "stage": stage}
+            rows = conn.execute(
+                "SELECT id, name FROM duty_objects WHERE parent_id = ? ORDER BY id",
+                (female_parent["id"],)
+            ).fetchall()
+            objects = [{"id": r["id"], "name": r["name"]} for r in rows]
+            pairs = _get_all_pairs(objects)
+            conn.close()
+            return {"pairs": pairs, "stage": stage}
         else:  # canteen — только 6 объектов столовой, 13 случайных пар
             CANTEEN_OBJECT_NAMES = [
                 "Горячий цех", "Овощной цех", "Стаканы", "Железо", "Лента", "Тарелки"
@@ -798,6 +968,8 @@ async def submit_pair_vote(data: dict):
     object_b_id = data.get('object_b_id')
     choice = data.get('choice')
     stage = data.get('stage', 'main')
+    if stage not in ('main', 'canteen', 'female'):
+        stage = 'main'
 
     if not all([user_id, object_a_id, object_b_id, choice]) or choice not in ('a', 'b', 'equal'):
         raise HTTPException(status_code=400, detail="Неверные данные")
@@ -897,7 +1069,7 @@ def _calc_weights_from_pair_votes(conn):
         avg = total / len(main_ids) if total > 0 else 1
         for oid in main_ids:
             s = scores.get(oid, 0)
-            k = s / avg if avg > 0 else 1
+            k = (s / avg) if (avg > 0 and s > 0) else 0.8
             w = 10 * k
             conn.execute("""
                 INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
@@ -940,12 +1112,47 @@ def _calc_weights_from_pair_votes(conn):
             sub_avg = sub_total / len(sub_ids) if sub_total > 0 else 1
             for oid in sub_ids:
                 s = sub_scores.get(oid, 0)
-                k_sub = s / sub_avg if sub_avg > 0 else 1
+                k_sub = (s / sub_avg) if (sub_avg > 0 and s > 0) else 0.8
                 w_sub = canteen_weight * k_sub
                 conn.execute("""
                     INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
                     ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
                 """, (oid, w_sub))
+
+    # Этап 3: опрос для девушек (ПУТСО, Столовая, Медчасть)
+    female_parent = conn.execute(
+        "SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL"
+    ).fetchone()
+    if female_parent:
+        female_ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM duty_objects WHERE parent_id = ? ORDER BY id", (female_parent["id"],)
+        ).fetchall()]
+        if female_ids:
+            f_scores = {oid: 0.0 for oid in female_ids}
+            f_votes = conn.execute(
+                "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage = 'female'"
+            ).fetchall()
+            for v in f_votes:
+                a, b = v["object_a_id"], v["object_b_id"]
+                if v["choice"] == "a":
+                    f_scores[a] = f_scores.get(a, 0) + 2
+                    f_scores[b] = f_scores.get(b, 0) + 0
+                elif v["choice"] == "b":
+                    f_scores[a] = f_scores.get(a, 0) + 0
+                    f_scores[b] = f_scores.get(b, 0) + 2
+                else:
+                    f_scores[a] = f_scores.get(a, 0) + 1
+                    f_scores[b] = f_scores.get(b, 0) + 1
+            f_total = sum(f_scores.get(i, 0) for i in female_ids)
+            f_avg = f_total / len(female_ids) if f_total > 0 else 1
+            for oid in female_ids:
+                s = f_scores.get(oid, 0)
+                k = (s / f_avg) if (f_avg > 0 and s > 0) else 0.8
+                w = 10 * k
+                conn.execute("""
+                    INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
+                    ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
+                """, (oid, w))
 
 
 @app.post("/api/survey/finalize")
@@ -968,14 +1175,84 @@ async def finalize_survey(data: dict):
 
     conn = get_db()
     try:
+        voted = conn.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM survey_pair_votes").fetchone()["cnt"]
         _calc_weights_from_pair_votes(conn)
         conn.commit()
-        return {"status": "ok", "message": "Веса вычислены и сохранены"}
+        return {"status": "ok", "message": "Веса вычислены и сохранены", "total_voted": voted}
     except Exception as e:
         print(f"[ERROR] Ошибка финализации опроса: {e}")
         raise HTTPException(status_code=500, detail="Ошибка вычисления")
     finally:
         conn.close()
+
+
+@app.get("/api/survey/pair-stats")
+async def get_survey_pair_stats(stage: str = "main"):
+    """Для визуализации: по каждой паре — число ответов A сложнее / равно / B сложнее и доли в %."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        if stage == "female":
+            female_parent = conn.execute(
+                "SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL"
+            ).fetchone()
+            if not female_parent:
+                conn.close()
+                return {"pairs": []}
+            rows = conn.execute(
+                "SELECT id, name FROM duty_objects WHERE parent_id = ? ORDER BY id",
+                (female_parent["id"],)
+            ).fetchall()
+        elif stage == "canteen":
+            canteen = conn.execute(
+                "SELECT id FROM duty_objects WHERE name = 'Столовая' AND parent_id IS NULL"
+            ).fetchone()
+            if not canteen:
+                conn.close()
+                return {"pairs": []}
+            rows = conn.execute(
+                "SELECT id, name FROM duty_objects WHERE parent_id = ? ORDER BY id",
+                (canteen["id"],)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, name FROM duty_objects WHERE parent_id IS NULL AND name != 'Опрос девушек' ORDER BY id"
+            ).fetchall()
+        id2name = {r["id"]: r["name"] for r in rows}
+        votes = conn.execute(
+            "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage = ?",
+            (stage,)
+        ).fetchall()
+        from collections import defaultdict
+        pair_counts = defaultdict(lambda: {"a": 0, "b": 0, "equal": 0})
+        for v in votes:
+            a, b = v["object_a_id"], v["object_b_id"]
+            key = (min(a, b), max(a, b))
+            pair_counts[key][v["choice"]] += 1
+        pairs = []
+        for (oa, ob), counts in pair_counts.items():
+            total = counts["a"] + counts["b"] + counts["equal"]
+            if total == 0:
+                continue
+            name_a = id2name.get(oa, "?")
+            name_b = id2name.get(ob, "?")
+            pairs.append({
+                "object_a_name": name_a,
+                "object_b_name": name_b,
+                "count_a": counts["a"],
+                "count_b": counts["b"],
+                "count_equal": counts["equal"],
+                "total": total,
+                "pct_a": round(100 * counts["a"] / total, 1),
+                "pct_b": round(100 * counts["b"] / total, 1),
+                "pct_equal": round(100 * counts["equal"] / total, 1),
+            })
+        conn.close()
+        return {"pairs": pairs, "stage": stage}
+    except Exception as e:
+        print(f"[ERROR] pair-stats: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
 
 
 @app.get("/api/survey/results")
@@ -1010,34 +1287,59 @@ async def get_user_survey_results(telegram_id: int):
         raise HTTPException(status_code=500, detail="База данных не найдена")
     try:
         # Проверяем, проходил ли пользователь опрос
-        user = conn.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        user = conn.execute(
+            "SELECT id, gender FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
-        db_user_id = user['id']
-        
-        # Проверяем попарное голосование
-        try:
+        db_user_id = user["id"]
+        user_gender = (user["gender"] or "male").strip().lower()
+
+        # Для девушек — считаем пройденным опрос stage=female; для юношей — main/canteen
+        if user_gender == "female":
             voted = conn.execute(
-                "SELECT 1 FROM survey_pair_votes WHERE user_id = ? LIMIT 1",
+                "SELECT 1 FROM survey_pair_votes WHERE user_id = ? AND stage = 'female' LIMIT 1",
                 (db_user_id,)
             ).fetchone() is not None
-        except Exception:
-            voted = False
-
+            female_parent = conn.execute(
+                "SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL"
+            ).fetchone()
+            if voted and female_parent:
+                results = conn.execute("""
+                    SELECT o.id, o.name, o.parent_id, w.weight as median_weight
+                    FROM duty_objects o
+                    LEFT JOIN object_weights w ON o.id = w.object_id
+                    WHERE o.parent_id = ?
+                    ORDER BY o.name
+                """, (female_parent["id"],)).fetchall()
+                conn.close()
+                return {"voted": True, "results": [dict(r) for r in results], "survey_stage": "female"}
+        else:
+            voted = conn.execute(
+                "SELECT 1 FROM survey_pair_votes WHERE user_id = ? AND stage IN ('main', 'canteen') LIMIT 1",
+                (db_user_id,)
+            ).fetchone() is not None
         if not voted:
+            conn.close()
             return {"voted": False, "message": "Вы ещё не прошли опрос"}
 
-        # Веса объектов (рассчитанные по формуле k = S/avg)
+        # Юноши: веса основных нарядов и столовой (исключаем блок «Опрос девушек»)
+        female_parent = conn.execute(
+            "SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL"
+        ).fetchone()
+        female_id = female_parent["id"] if female_parent else -1
         results = conn.execute("""
             SELECT o.id, o.name, o.parent_id, w.weight as median_weight
             FROM duty_objects o
             LEFT JOIN object_weights w ON o.id = w.object_id
+            WHERE o.id != ? AND (o.parent_id IS NULL OR o.parent_id != ?)
             ORDER BY (o.parent_id IS NULL) DESC, o.parent_id, o.name
-        """).fetchall()
+        """, (female_id, female_id)).fetchall()
 
         return {
             "voted": True,
-            "results": [dict(r) for r in results]
+            "results": [dict(r) for r in results],
+            "survey_stage": "main"
         }
     except HTTPException:
         raise
@@ -1046,6 +1348,173 @@ async def get_user_survey_results(telegram_id: int):
         raise HTTPException(status_code=500, detail="Ошибка базы данных")
     finally:
         conn.close()
+
+
+# ============================================
+# 5b. ПОЛЬЗОВАТЕЛЬСКИЕ ОПРОСЫ (custom)
+# ============================================
+@app.post("/api/survey/custom")
+async def create_custom_survey(data: dict):
+    """Создать опрос: сержант — для группы, помощник — для курса."""
+    telegram_id = data.get("telegram_id")
+    title = (data.get("title") or "").strip()
+    scope_type = data.get("scope_type")  # 'group' | 'course'
+    options = data.get("options") or []  # ["Вариант 1", "Вариант 2", ...]
+    ends_at = data.get("ends_at")  # optional ISO date/datetime
+    if not telegram_id or not title or scope_type not in ("group", "course") or len(options) < 2:
+        raise HTTPException(status_code=400, detail="Нужны: telegram_id, title, scope_type (group|course), options (минимум 2)")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT role, group_name, enrollment_year FROM users WHERE telegram_id = ?",
+            (telegram_id,)
+        ).fetchone()
+        if not user or user["role"] not in ("sergeant", "assistant", "admin"):
+            raise HTTPException(status_code=403, detail="Только сержант/помощник/админ могут создавать опросы")
+        if scope_type == "group" and user["role"] not in ("sergeant", "admin"):
+            raise HTTPException(status_code=403, detail="Опрос по группе может создать только сержант или админ")
+        scope_value = user["group_name"] if scope_type == "group" else str(user["enrollment_year"])
+        cursor = conn.execute(
+            "INSERT INTO custom_surveys (title, scope_type, scope_value, created_by_telegram_id, ends_at) VALUES (?, ?, ?, ?, ?)",
+            (title, scope_type, scope_value, telegram_id, ends_at or None)
+        )
+        survey_id = cursor.lastrowid
+        for i, text in enumerate(options):
+            if (str(text) or "").strip():
+                conn.execute(
+                    "INSERT INTO custom_survey_options (survey_id, option_text, sort_order) VALUES (?, ?, ?)",
+                    (survey_id, str(text).strip(), i)
+                )
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "survey_id": survey_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Создание опроса: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
+
+
+@app.get("/api/survey/custom/{survey_id}")
+async def get_custom_survey(survey_id: int, telegram_id: int):
+    """Опции опроса, статус завершения, свой голос (если есть)."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        s = conn.execute(
+            "SELECT id, title, scope_type, scope_value, created_by_telegram_id, ends_at, completed_at FROM custom_surveys WHERE id = ?",
+            (survey_id,)
+        ).fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail="Опрос не найден")
+        options = conn.execute(
+            "SELECT id, option_text, sort_order FROM custom_survey_options WHERE survey_id = ? ORDER BY sort_order",
+            (survey_id,)
+        ).fetchall()
+        my_vote = conn.execute(
+            "SELECT option_id FROM custom_survey_votes WHERE survey_id = ? AND user_telegram_id = ?",
+            (survey_id, telegram_id)
+        ).fetchone()
+        counts = {}
+        for opt in options:
+            c = conn.execute(
+                "SELECT COUNT(*) FROM custom_survey_votes WHERE survey_id = ? AND option_id = ?",
+                (survey_id, opt["id"])
+            ).fetchone()
+            counts[opt["id"]] = c[0]
+        user_row = conn.execute("SELECT role FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        role = user_row["role"] if user_row else "user"
+        can_complete = s["completed_at"] is None and (
+            s["created_by_telegram_id"] == telegram_id or role in ("admin", "assistant")
+        )
+        conn.close()
+        return {
+            "id": s["id"],
+            "title": s["title"],
+            "completed_at": s["completed_at"],
+            "ends_at": s["ends_at"],
+            "created_by_telegram_id": s["created_by_telegram_id"],
+            "options": [{"id": o["id"], "text": o["option_text"], "votes": counts.get(o["id"], 0)} for o in options],
+            "my_option_id": my_vote["option_id"] if my_vote else None,
+            "can_complete": can_complete,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Опрос: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
+
+
+@app.post("/api/survey/custom/{survey_id}/vote")
+async def vote_custom_survey(survey_id: int, data: dict):
+    """Проголосовать за один вариант (заменяет предыдущий голос)."""
+    telegram_id = data.get("telegram_id")
+    option_id = data.get("option_id")
+    if not telegram_id or not option_id:
+        raise HTTPException(status_code=400, detail="Нужны telegram_id и option_id")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        s = conn.execute("SELECT id, completed_at FROM custom_surveys WHERE id = ?", (survey_id,)).fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail="Опрос не найден")
+        if s["completed_at"]:
+            raise HTTPException(status_code=400, detail="Опрос уже завершён")
+        opt = conn.execute("SELECT id FROM custom_survey_options WHERE survey_id = ? AND id = ?", (survey_id, option_id)).fetchone()
+        if not opt:
+            raise HTTPException(status_code=400, detail="Вариант не найден")
+        conn.execute(
+            "INSERT OR REPLACE INTO custom_survey_votes (survey_id, user_telegram_id, option_id) VALUES (?, ?, ?)",
+            (survey_id, telegram_id, option_id)
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "ok"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Голос: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
+
+
+@app.post("/api/survey/custom/{survey_id}/complete")
+async def complete_custom_survey(survey_id: int, data: dict):
+    """Завершить опрос досрочно (только создатель или админ/помощник)."""
+    telegram_id = data.get("telegram_id")
+    if not telegram_id:
+        raise HTTPException(status_code=401, detail="Не авторизован")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        s = conn.execute(
+            "SELECT created_by_telegram_id, completed_at FROM custom_surveys WHERE id = ?", (survey_id,)
+        ).fetchone()
+        if not s:
+            raise HTTPException(status_code=404, detail="Опрос не найден")
+        if s["completed_at"]:
+            conn.close()
+            return {"status": "ok", "message": "Уже завершён"}
+        user = conn.execute("SELECT role FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if not user or (user["role"] not in ("admin", "assistant") and s["created_by_telegram_id"] != telegram_id):
+            raise HTTPException(status_code=403, detail="Завершить может только создатель или админ/помощник")
+        from datetime import datetime
+        conn.execute(
+            "UPDATE custom_surveys SET completed_at = ? WHERE id = ?",
+            (datetime.utcnow().isoformat(), survey_id)
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "ok"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Завершение опроса: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка базы данных")
 
 
 # ============================================

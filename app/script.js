@@ -121,6 +121,18 @@ function setupProfileAndAdmin() {
     if (adminPanelBtn) adminPanelBtn.addEventListener('click', function() { openAdminPanel('admin'); });
     const assistantPanelBtn = document.getElementById('profile-assistant-panel');
     if (assistantPanelBtn) assistantPanelBtn.addEventListener('click', function() { openAdminPanel('assistant'); });
+    const profileToggle = document.getElementById('profile-toggle');
+    if (profileToggle) profileToggle.addEventListener('click', function() {
+        const body = document.getElementById('profile-body');
+        const icon = document.getElementById('profile-toggle-icon');
+        if (body.style.display === 'none') {
+            body.style.display = 'block';
+            if (icon) icon.textContent = '▼ Свернуть';
+        } else {
+            body.style.display = 'none';
+            if (icon) icon.textContent = '▶ Развернуть';
+        }
+    });
     const adminBackBtn = document.getElementById('admin-back');
     if (adminBackBtn) adminBackBtn.addEventListener('click', closeAdminPanel);
     const adminLoadBtn = document.getElementById('admin-load-users');
@@ -137,10 +149,14 @@ async function finalizeSurvey() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ admin_id: userId })
         });
-        if (!res.ok) throw new Error((await res.json()).detail || 'Ошибка');
-        showToast('Опрос завершён, веса подсчитаны');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        const voted = data.total_voted != null ? data.total_voted : 0;
         document.getElementById('survey-screen').style.display = 'none';
         switchTab('home');
+        await loadSurveyResults();
+        await loadDuties(userId);
+        showToast('Опрос завершён. Проголосовало: ' + voted + ' чел.');
     } catch (e) {
         showToast(e.message || 'Ошибка завершения опроса');
     }
@@ -153,6 +169,9 @@ function openProfileScreen() {
     document.getElementById('profile-role').textContent = 'Роль: ' + getRoleLabel(userRole);
     document.getElementById('profile-admin-panel').style.display = userRole === 'admin' ? 'inline-block' : 'none';
     document.getElementById('profile-assistant-panel').style.display = userRole === 'assistant' ? 'inline-block' : 'none';
+    document.getElementById('profile-body').style.display = 'none';
+    var icon = document.getElementById('profile-toggle-icon');
+    if (icon) icon.textContent = '▶ Развернуть';
     document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
     document.getElementById('main-content').classList.add('hidden');
     document.getElementById('profile-screen').style.display = 'block';
@@ -348,12 +367,16 @@ function switchTab(tabName) {
         loadTasks();
     } else if (tabName === 'duties') {
         if (dutiesScreen) dutiesScreen.style.display = 'block';
+        const uploadBlock = document.getElementById('duty-upload-block');
+        if (uploadBlock) uploadBlock.style.display = (userRole === 'sergeant' || userRole === 'assistant' || userRole === 'admin') ? 'block' : 'none';
         loadDutiesForMonth(); // Загружаем наряды на текущий месяц
+        bindDutyUploadOnce();
     } else if (tabName === 'study') {
         if (studyScreen) studyScreen.style.display = 'block';
     } else if (tabName === 'survey') {
         if (surveyScreen) surveyScreen.style.display = 'block';
-        checkSurveyStateAndShow();
+        showSurveyList();
+        loadSurveyList();
     } else { // home
         if (mainContent) mainContent.classList.remove('hidden');
     }
@@ -787,9 +810,20 @@ async function loadDuties(userId) {
 
         if (data.error) {
             const friendly = data.error.includes('График нарядов') || data.error.includes('не загружен');
-            widget.innerHTML = friendly
-                ? `<h3>🎖️ Ближайший наряд</h3><p style="color: #94A3B8;">${data.error}</p><p style="color: #64748B; font-size: 13px;">Пройти <a href="#" onclick="switchTab('survey'); return false;" style="color: #3B82F6;">опрос</a> о сложности нарядов.</p>`
-                : `<h3>🎖️ Ближайший наряд</h3><p style="color: #f87171;">${data.error}</p>`;
+            if (friendly) {
+                try {
+                    const st = await fetch(baseUrl + '/api/survey/status');
+                    const surveyStatus = st.ok ? await st.json() : {};
+                    const voted = surveyStatus.voted != null ? surveyStatus.voted : 0;
+                    if (voted > 0) {
+                        widget.innerHTML = '<h3>🎖️ Ближайший наряд</h3><p style="color: #10B981;">Опрос завершён. Результаты на главной.</p><p style="color: #94A3B8; font-size: 13px;">Проголосовало: ' + voted + ' чел.</p>';
+                        return;
+                    }
+                } catch (_) {}
+                widget.innerHTML = '<h3>🎖️ Ближайший наряд</h3><p style="color: #94A3B8;">' + data.error + '</p><p style="color: #64748B; font-size: 13px;">Пройти <a href="#" onclick="switchTab(\'survey\'); return false;" style="color: #3B82F6;">опрос</a> о сложности нарядов.</p>';
+            } else {
+                widget.innerHTML = '<h3>🎖️ Ближайший наряд</h3><p style="color: #f87171;">' + data.error + '</p>';
+            }
             return;
         }
 
@@ -829,9 +863,281 @@ async function loadDuties(userId) {
 
 let surveyPairsMain = [];
 let surveyPairsCanteen = [];
+let surveyPairsFemale = [];
 let surveyCurrentStage = 'main';
 const SURVEY_INTRO_CARD_COUNT = 5;
 let surveyIntroIndex = 0;
+let currentSurveyType = null; // 'male' | 'female' | null
+let currentCustomSurveyId = null;
+
+function showSurveyList() {
+    const listBlock = document.getElementById('survey-list-block');
+    const intro = document.getElementById('survey-intro');
+    const content = document.getElementById('survey-content');
+    const alreadyPassed = document.getElementById('survey-already-passed');
+    const customBlock = document.getElementById('survey-custom-block');
+    const finalizeBlock = document.getElementById('survey-finalize-block');
+    if (listBlock) listBlock.style.display = 'block';
+    if (intro) intro.style.display = 'none';
+    if (content) content.style.display = 'none';
+    if (alreadyPassed) alreadyPassed.style.display = 'none';
+    if (customBlock) customBlock.style.display = 'none';
+    if (finalizeBlock) finalizeBlock.style.display = (userRole === 'admin' || userRole === 'assistant') ? 'block' : 'none';
+    currentSurveyType = null;
+    currentCustomSurveyId = null;
+}
+
+async function loadSurveyList() {
+    const systemEl = document.getElementById('survey-system-cards');
+    const customSection = document.getElementById('survey-custom-section');
+    const customCards = document.getElementById('survey-custom-cards');
+    const createWrap = document.getElementById('survey-create-wrap');
+    if (!systemEl) return;
+    try {
+        const res = await fetch(`${baseUrl}/api/survey/list?telegram_id=${userId}`);
+        const data = res.ok ? await res.json() : { system: [], custom: [], user_gender: 'male' };
+        const gender = data.user_gender || 'male';
+        systemEl.innerHTML = '';
+        data.system.forEach(function(item) {
+            if (item.for_gender !== gender) return;
+            const card = document.createElement('div');
+            card.className = 'survey-list-card';
+            card.style.cssText = 'background:#1E293B;border-radius:12px;padding:14px;border-left:4px solid #3B82F6;cursor:pointer;';
+            card.innerHTML = '<div style="color:#93C5FD;font-weight:600;">' + (item.id === 'female' ? '👩 ' : '👨 ') + item.title + '</div>';
+            card.onclick = function() { openSystemSurvey(item.id); };
+            systemEl.appendChild(card);
+        });
+        if (data.custom && data.custom.length > 0) {
+            customSection.style.display = 'block';
+            customCards.innerHTML = '';
+            data.custom.forEach(function(s) {
+                const card = document.createElement('div');
+                card.className = 'survey-list-card';
+                card.style.cssText = 'background:#1E293B;border-radius:12px;padding:14px;border-left:4px solid #8B5CF6;cursor:pointer;';
+                card.innerHTML = '<div style="color:#E2E8F0;">' + s.title + '</div><div style="color:#94A3B8;font-size:12px;">' + (s.scope_type === 'group' ? 'Группа' : 'Курс') + '</div>';
+                card.onclick = function() { openCustomSurvey(s.id); };
+                customCards.appendChild(card);
+            });
+        } else {
+            customSection.style.display = 'none';
+        }
+        if (createWrap) createWrap.style.display = (userRole === 'sergeant' || userRole === 'assistant' || userRole === 'admin') ? 'block' : 'none';
+        if (!window._createSurveyBound) {
+            window._createSurveyBound = true;
+            document.getElementById('survey-create-btn')?.addEventListener('click', showCreateSurveyModal);
+            document.getElementById('create-survey-cancel')?.addEventListener('click', function() { document.getElementById('create-survey-modal').style.display = 'none'; });
+            document.getElementById('create-survey-ok')?.addEventListener('click', submitCreateSurvey);
+        }
+    } catch (e) {
+        console.warn('Ошибка загрузки списка опросов:', e);
+        systemEl.innerHTML = '<p style="color:#94A3B8;">Не удалось загрузить список</p>';
+    }
+}
+
+function showCreateSurveyModal() {
+    document.getElementById('create-survey-title').value = '';
+    document.getElementById('create-survey-options').value = '';
+    document.getElementById('create-survey-modal').style.display = 'flex';
+}
+
+async function submitCreateSurvey() {
+    const title = (document.getElementById('create-survey-title').value || '').trim();
+    const optsText = document.getElementById('create-survey-options').value || '';
+    const options = optsText.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+    if (!title || options.length < 2) {
+        showToast('Укажите название и минимум 2 варианта ответа');
+        return;
+    }
+    const scopeType = (userRole === 'assistant' || userRole === 'admin') ? 'course' : 'group';
+    try {
+        const res = await fetch(baseUrl + '/api/survey/custom', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telegram_id: userId, title: title, scope_type: scopeType, options: options })
+        });
+        if (!res.ok) { const err = await res.json(); showToast(err.detail || 'Ошибка'); return; }
+        document.getElementById('create-survey-modal').style.display = 'none';
+        showToast('Опрос создан');
+        loadSurveyList();
+    } catch (e) {
+        showToast('Ошибка сети');
+    }
+}
+
+function openSystemSurvey(systemId) {
+    currentSurveyType = systemId;
+    currentCustomSurveyId = null;
+    document.getElementById('survey-list-block').style.display = 'none';
+    if (systemId === 'female') {
+        checkSurveyStateAndShowFemale();
+    } else {
+        checkSurveyStateAndShow();
+    }
+}
+
+async function openCustomSurvey(sid) {
+    currentCustomSurveyId = sid;
+    currentSurveyType = null;
+    document.getElementById('survey-list-block').style.display = 'none';
+    document.getElementById('survey-intro').style.display = 'none';
+    document.getElementById('survey-content').style.display = 'none';
+    document.getElementById('survey-already-passed').style.display = 'none';
+    const block = document.getElementById('survey-custom-block');
+    const optsEl = document.getElementById('survey-custom-options');
+    const completeWrap = document.getElementById('survey-custom-complete-wrap');
+    const completeBtn = document.getElementById('survey-custom-complete-btn');
+    block.style.display = 'block';
+    optsEl.innerHTML = '<p style="color:#94A3B8;">Загрузка...</p>';
+    try {
+        const res = await fetch(`${baseUrl}/api/survey/custom/${sid}?telegram_id=${userId}`);
+        if (!res.ok) throw new Error('HTTP');
+        const data = await res.json();
+        document.getElementById('survey-custom-title').textContent = data.title;
+        optsEl.innerHTML = '';
+        if (data.completed_at) {
+            data.options.forEach(function(o) {
+                const div = document.createElement('div');
+                div.style.cssText = 'background:#1E293B;padding:12px;border-radius:8px;color:#CBD5E1;';
+                div.textContent = o.text + ' — ' + o.votes + ' гол.(ов)';
+                optsEl.appendChild(div);
+            });
+            completeWrap.style.display = 'none';
+        } else {
+            data.options.forEach(function(o) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.dataset.optionId = o.id;
+                btn.style.cssText = 'padding:12px;background:#1E293B;border:2px solid #334155;border-radius:8px;color:#CBD5E1;cursor:pointer;text-align:left;';
+                btn.textContent = o.text + (o.votes ? ' (' + o.votes + ')' : '');
+                if (data.my_option_id === o.id) btn.style.borderColor = '#3B82F6';
+                btn.onclick = function() { voteCustomOption(sid, o.id, btn); };
+                optsEl.appendChild(btn);
+            });
+            completeWrap.style.display = data.can_complete ? 'block' : 'none';
+            if (completeBtn) completeBtn.onclick = function() { completeCustomSurvey(sid); };
+        }
+    } catch (e) {
+        optsEl.innerHTML = '<p style="color:#f87171;">Ошибка загрузки опроса</p>';
+    }
+}
+
+async function voteCustomOption(surveyId, optionId, btnEl) {
+    try {
+        const res = await fetch(`${baseUrl}/api/survey/custom/${surveyId}/vote`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telegram_id: userId, option_id: optionId })
+        });
+        if (!res.ok) throw new Error();
+        btnEl.parentElement.querySelectorAll('button').forEach(function(b) { b.style.borderColor = '#334155'; });
+        btnEl.style.borderColor = '#3B82F6';
+        showToast('Голос учтён');
+        openCustomSurvey(surveyId);
+    } catch (e) {
+        showToast('Ошибка');
+    }
+}
+
+async function completeCustomSurvey(surveyId) {
+    try {
+        const res = await fetch(`${baseUrl}/api/survey/custom/${surveyId}/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ telegram_id: userId })
+        });
+        if (!res.ok) throw new Error();
+        showToast('Опрос завершён');
+        openCustomSurvey(surveyId);
+    } catch (e) {
+        showToast('Ошибка');
+    }
+}
+
+async function checkSurveyStateAndShowFemale() {
+    const intro = document.getElementById('survey-intro');
+    const content = document.getElementById('survey-content');
+    const alreadyPassed = document.getElementById('survey-already-passed');
+    const finalizeBlock = document.getElementById('survey-finalize-block');
+    if (finalizeBlock) finalizeBlock.style.display = 'none';
+    try {
+        const response = await fetch(`${baseUrl}/api/survey/user-results?telegram_id=${userId}`);
+        if (!response.ok) throw new Error('HTTP');
+        const data = await response.json();
+        if (data.voted && data.survey_stage === 'female') {
+            alreadyPassed.style.display = 'block';
+            alreadyPassed.querySelector('h2').textContent = '📊 Опрос для девушек';
+            intro.style.display = 'none';
+            content.style.display = 'none';
+            return;
+        }
+    } catch (e) { console.warn(e); }
+    alreadyPassed.style.display = 'none';
+    showSurveyIntroFemale();
+}
+
+function showSurveyIntroFemale() {
+    const intro = document.getElementById('survey-intro');
+    const content = document.getElementById('survey-content');
+    if (intro) intro.style.display = 'block';
+    if (content) content.style.display = 'none';
+    intro.querySelector('h2').textContent = '📊 Опрос для девушек (ПУТСО, Столовая, Медчасть)';
+    surveyIntroIndex = 0;
+    setSurveyIntroCard(0);
+    renderSurveyIntroDots();
+}
+
+async function loadSurveyObjectsFemale() {
+    const container = document.getElementById('survey-objects-container');
+    const stageIndicator = document.getElementById('survey-stage-indicator');
+    if (!container) return;
+    try {
+        const res = await fetch(`${baseUrl}/api/survey/pairs?stage=female`);
+        const data = res.ok ? await res.json() : {};
+        surveyPairsFemale = data.pairs || [];
+        surveyPairsMain = [];
+        surveyPairsCanteen = [];
+        surveyCurrentStage = 'female';
+        stageIndicator.textContent = 'Сравнение нарядов: ПУТСО, Столовая, Медчасть — 3 пары';
+        renderSurveyPairs('female');
+        document.getElementById('submit-survey-btn').onclick = handleSurveySubmitFemale;
+    } catch (err) {
+        container.innerHTML = '<p style="color: #f87171;">Ошибка загрузки опроса</p>';
+    }
+}
+
+function renderSurveyPairsFemale() {
+    renderSurveyPairs('female');
+}
+
+async function handleSurveySubmitFemale() {
+    const pairs = surveyPairsFemale;
+    const choices = window._surveyChoices || {};
+    const votes = [];
+    for (let i = 0; i < pairs.length; i++) {
+        const pair = pairs[i];
+        const a = pair.object_a, b = pair.object_b;
+        const name = 'pair_' + a.id + '_' + b.id;
+        const choice = choices[name];
+        if (choice) votes.push({ object_a_id: a.id, object_b_id: b.id, choice: choice, stage: 'female' });
+    }
+    if (votes.length < pairs.length) {
+        showToast('Ответьте на все ' + pairs.length + ' пар(ы)');
+        return;
+    }
+    for (const v of votes) {
+        const res = await fetch(`${baseUrl}/api/survey/pair-vote`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, object_a_id: v.object_a_id, object_b_id: v.object_b_id, choice: v.choice, stage: v.stage })
+        });
+        if (!res.ok) { showToast('Ошибка отправки'); return; }
+    }
+    document.getElementById('survey-screen').style.display = 'none';
+    switchTab('home');
+    showSurveyList();
+    loadSurveyList();
+    showToast('Спасибо! Ваши голоса учтены.');
+}
 
 async function checkSurveyStateAndShow() {
     const intro = document.getElementById('survey-intro');
@@ -846,6 +1152,7 @@ async function checkSurveyStateAndShow() {
         const data = await response.json();
         if (data.voted) {
             alreadyPassed.style.display = 'block';
+            if (alreadyPassed.querySelector('h2')) alreadyPassed.querySelector('h2').textContent = '📊 Опрос сложности нарядов';
             intro.style.display = 'none';
             if (content) content.style.display = 'none';
             return;
@@ -864,7 +1171,10 @@ function showSurveyIntro() {
     const finalizeBlock = document.getElementById('survey-finalize-block');
     if (finalizeBlock) finalizeBlock.style.display = (userRole === 'admin' || userRole === 'assistant') ? 'block' : 'none';
     if (alreadyPassed) alreadyPassed.style.display = 'none';
-    if (intro) intro.style.display = 'block';
+    if (intro) {
+        intro.style.display = 'block';
+        intro.querySelector('h2').textContent = '📊 Опрос сложности нарядов';
+    }
     if (content) content.style.display = 'none';
     surveyIntroIndex = 0;
     setSurveyIntroCard(0);
@@ -888,7 +1198,8 @@ function showSurveyIntro() {
         document.getElementById('survey-intro-start').addEventListener('click', function() {
             if (intro) intro.style.display = 'none';
             if (content) content.style.display = 'block';
-            loadSurveyObjects();
+            if (currentSurveyType === 'female') loadSurveyObjectsFemale();
+            else loadSurveyObjects();
         });
     }
 }
@@ -958,7 +1269,7 @@ function renderSurveyPairs(stage) {
     const stageIndicator = document.getElementById('survey-stage-indicator');
     if (!container) return;
 
-    const pairs = stage === 'main' ? surveyPairsMain : surveyPairsCanteen;
+    const pairs = stage === 'female' ? surveyPairsFemale : (stage === 'main' ? surveyPairsMain : surveyPairsCanteen);
 
     if (pairs.length === 0) {
         container.innerHTML = '<p style="color: #64748B;">Нет пар для голосования</p>';
@@ -1158,22 +1469,79 @@ async function loadSurveyResults() {
             html += `</h4>`;
             
             children.forEach(child => {
-                const w = child.median_weight ? child.median_weight.toFixed(1) : '—';
-                html += `
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #0f172a; border-radius: 6px; margin-bottom: 6px;">
-                        <span style="color: #CBD5E1; font-weight: 500;">${child.name}</span>
-                        <span style="color: #3B82F6; font-size: 14px;">Вес: ${w}</span>
-                    </div>
-                `;
+                const w = child.median_weight != null ? child.median_weight.toFixed(1) : '—';
+                const isDefault = child.median_weight === 8 || (child.median_weight != null && Math.abs(child.median_weight - 8) < 0.01);
+                const hint = isDefault ? ' (коэфф. 0.8, 8 баллов)' : '';
+                html += '<div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #0f172a; border-radius: 6px; margin-bottom: 6px;">';
+                html += '<span style="color: #CBD5E1; font-weight: 500;">' + child.name + '</span>';
+                html += '<span style="color: #3B82F6; font-size: 14px;">Вес: ' + w + hint + '</span>';
+                html += '</div>';
             });
             html += `</div>`;
         });
         
+        const stageForPairs = data.survey_stage || 'main';
+        html += '<p style="margin-top: 12px;"><button type="button" onclick="openPairStatsModal(\'' + stageForPairs + '\')" style="padding: 8px 16px; background: #334155; color: #93C5FD; border: 1px solid #64748B; border-radius: 8px; cursor: pointer;">Подробнее по парам (A/B/равно)</button></p>';
         resultsWidget.innerHTML = html;
         console.log('✅ Результаты опроса загружены');
     } catch (err) {
         console.error('❌ Ошибка загрузки результатов опроса:', err);
     }
+}
+
+let pairStatsPairs = [];
+let pairStatsIndex = 0;
+
+async function openPairStatsModal(stage) {
+    try {
+        const res = await fetch(`${baseUrl}/api/survey/pair-stats?stage=${encodeURIComponent(stage)}`);
+        if (!res.ok) throw new Error('HTTP');
+        const data = await res.json();
+        pairStatsPairs = data.pairs || [];
+        pairStatsIndex = 0;
+        const modal = document.getElementById('pair-stats-modal');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        renderPairStatsCard();
+        if (!window._pairStatsNavBound) {
+            window._pairStatsNavBound = true;
+            document.getElementById('pair-stats-prev')?.addEventListener('click', function() {
+                if (pairStatsIndex > 0) { pairStatsIndex--; renderPairStatsCard(); }
+            });
+            document.getElementById('pair-stats-next')?.addEventListener('click', function() {
+                if (pairStatsIndex < pairStatsPairs.length - 1) { pairStatsIndex++; renderPairStatsCard(); }
+            });
+            document.getElementById('pair-stats-close')?.addEventListener('click', function() {
+                modal.style.display = 'none';
+            });
+        }
+    } catch (e) {
+        showToast('Не удалось загрузить данные по парам');
+    }
+}
+
+function renderPairStatsCard() {
+    const content = document.getElementById('pair-stats-content');
+    const prevBtn = document.getElementById('pair-stats-prev');
+    const nextBtn = document.getElementById('pair-stats-next');
+    const counter = document.getElementById('pair-stats-counter');
+    if (!content) return;
+    if (pairStatsPairs.length === 0) {
+        content.innerHTML = '<p style="color: #94A3B8;">Нет данных по парам</p>';
+        if (prevBtn) prevBtn.style.display = 'none';
+        if (nextBtn) nextBtn.style.display = 'none';
+        return;
+    }
+    const p = pairStatsPairs[pairStatsIndex];
+    if (counter) counter.textContent = (pairStatsIndex + 1) + ' / ' + pairStatsPairs.length;
+    if (prevBtn) { prevBtn.style.display = 'block'; prevBtn.disabled = pairStatsIndex === 0; }
+    if (nextBtn) { nextBtn.style.display = 'block'; nextBtn.disabled = pairStatsIndex === pairStatsPairs.length - 1; }
+    content.innerHTML = '<div style="background:#1E293B;border-radius:12px;padding:20px;border-left:4px solid #3B82F6;">' +
+        '<h4 style="color:#93C5FD;margin:0 0 16px 0;">' + p.object_a_name + ' vs ' + p.object_b_name + '</h4>' +
+        '<p style="color:#CBD5E1;margin:8px 0;"><span style="color:#60A5FA;">' + p.object_a_name + ' сложнее:</span> ' + p.pct_a + '% (' + p.count_a + ')</p>' +
+        '<p style="color:#CBD5E1;margin:8px 0;"><span style="color:#94A3B8;">Одинаково:</span> ' + p.pct_equal + '% (' + p.count_equal + ')</p>' +
+        '<p style="color:#CBD5E1;margin:8px 0;"><span style="color:#A78BFA;">' + p.object_b_name + ' сложнее:</span> ' + p.pct_b + '% (' + p.count_b + ')</p>' +
+        '<p style="color:#64748B;font-size:12px;margin-top:12px;">Всего ответов: ' + p.total + '</p></div>';
 }
 
 /**
@@ -1216,6 +1584,38 @@ function openSettings() {
 
 // === ФУНКЦИИ ДЛЯ РАБОТЫ С НАРЯДАМИ ===
 
+function bindDutyUploadOnce() {
+    if (window._dutyUploadBound) return;
+    const btn = document.getElementById('duty-upload-btn');
+    const fileInput = document.getElementById('duty-upload-file');
+    if (!btn || !fileInput) return;
+    window._dutyUploadBound = true;
+    btn.addEventListener('click', async function() {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) {
+            showToast('Выберите файл .xlsx');
+            return;
+        }
+        const form = new FormData();
+        form.append('file', file);
+        form.append('telegram_id', userId);
+        try {
+            const res = await fetch(baseUrl + '/api/schedule/upload', { method: 'POST', body: form });
+            const data = res.ok ? await res.json() : { detail: (await res.json()).detail || 'Ошибка' };
+            if (res.ok) {
+                showToast('График загружен: ' + (data.count || 0) + ' записей');
+                fileInput.value = '';
+                loadDutiesForMonth();
+                loadDuties(userId);
+            } else {
+                showToast(data.detail || 'Ошибка загрузки');
+            }
+        } catch (e) {
+            showToast('Ошибка сети');
+        }
+    });
+}
+
 /**
  * Загружает наряды пользователя на текущий месяц
  */
@@ -1229,6 +1629,8 @@ async function loadDutiesForMonth() {
         const data = await response.json();
         
         if (data.error) {
+            const statsEl = document.getElementById('duties-month-stats');
+            if (statsEl) statsEl.style.display = 'none';
             const friendly = data.error.includes('График нарядов') || data.error.includes('не загружен');
             container.innerHTML = friendly
                 ? `<p style="color: #94A3B8; text-align: center;">${data.error}</p>`
@@ -1237,9 +1639,17 @@ async function loadDutiesForMonth() {
         }
         
         // Обновляем заголовок месяца
-        const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
+        const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
                            'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
         document.getElementById('current-month').textContent = `${monthNames[currentMonth - 1]} ${currentYear}`;
+
+        // Статистика по месяцу
+        const totalInMonth = data.total != null ? data.total : data.duties.length;
+        const statsEl = document.getElementById('duties-month-stats');
+        if (statsEl) {
+            statsEl.textContent = 'В этом месяце: ' + totalInMonth + ' наряд(ов)';
+            statsEl.style.display = 'block';
+        }
         
         if (data.duties.length === 0) {
             container.innerHTML = '<p style="color: #64748B; text-align: center;">Нарядов на этот месяц нет</p>';

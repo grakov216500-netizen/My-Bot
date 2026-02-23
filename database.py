@@ -91,7 +91,7 @@ def init_db():
         )
     ''')
 
-    # === 3.2 ТАБЛИЦА ГОЛОСОВ — попарное сравнение (2/1/0) ===
+    # === 3.2 ТАБЛИЦА ГОЛОСОВ — попарное сравнение (2/1/0), stage: main, canteen, female ===
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS survey_pair_votes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,7 +99,7 @@ def init_db():
             object_a_id INTEGER NOT NULL,
             object_b_id INTEGER NOT NULL,
             choice TEXT NOT NULL CHECK(choice IN ('a', 'b', 'equal')),
-            stage TEXT NOT NULL CHECK(stage IN ('main', 'canteen')),
+            stage TEXT NOT NULL CHECK(stage IN ('main', 'canteen', 'female')),
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id),
             FOREIGN KEY (object_a_id) REFERENCES duty_objects (id),
@@ -118,7 +118,7 @@ def init_db():
                 object_a_id INTEGER NOT NULL,
                 object_b_id INTEGER NOT NULL,
                 choice TEXT NOT NULL CHECK(choice IN ('a', 'b', 'equal')),
-                stage TEXT NOT NULL CHECK(stage IN ('main', 'canteen')),
+                stage TEXT NOT NULL CHECK(stage IN ('main', 'canteen', 'female')),
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users (id),
                 FOREIGN KEY (object_a_id) REFERENCES duty_objects (id),
@@ -128,6 +128,64 @@ def init_db():
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_pair_votes_user ON survey_pair_votes (user_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_pair_votes_stage ON survey_pair_votes (stage)')
+    else:
+        # Миграция: добавить stage 'female' в существующую таблицу (recreate)
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='survey_pair_votes'")
+        row = cursor.fetchone()
+        if row and "female" not in (row[0] or ""):
+            cursor.execute('''
+                CREATE TABLE survey_pair_votes_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    object_a_id INTEGER NOT NULL,
+                    object_b_id INTEGER NOT NULL,
+                    choice TEXT NOT NULL CHECK(choice IN ('a', 'b', 'equal')),
+                    stage TEXT NOT NULL CHECK(stage IN ('main', 'canteen', 'female')),
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id),
+                    FOREIGN KEY (object_a_id) REFERENCES duty_objects (id),
+                    FOREIGN KEY (object_b_id) REFERENCES duty_objects (id),
+                    UNIQUE(user_id, object_a_id, object_b_id) ON CONFLICT REPLACE
+                )
+            ''')
+            cursor.execute('INSERT INTO survey_pair_votes_new SELECT * FROM survey_pair_votes')
+            cursor.execute('DROP TABLE survey_pair_votes')
+            cursor.execute('ALTER TABLE survey_pair_votes_new RENAME TO survey_pair_votes')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_pair_votes_user ON survey_pair_votes (user_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_pair_votes_stage ON survey_pair_votes (stage)')
+
+    # === 3.2b Пользовательские опросы (сержант — группа, помощник — курс) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS custom_surveys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            scope_type TEXT NOT NULL CHECK(scope_type IN ('group', 'course')),
+            scope_value TEXT NOT NULL,
+            created_by_telegram_id INTEGER NOT NULL,
+            ends_at TEXT,
+            completed_at TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS custom_survey_options (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            survey_id INTEGER NOT NULL,
+            option_text TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            FOREIGN KEY (survey_id) REFERENCES custom_surveys (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS custom_survey_votes (
+            survey_id INTEGER NOT NULL,
+            user_telegram_id INTEGER NOT NULL,
+            option_id INTEGER NOT NULL,
+            PRIMARY KEY (survey_id, user_telegram_id),
+            FOREIGN KEY (survey_id) REFERENCES custom_surveys (id) ON DELETE CASCADE,
+            FOREIGN KEY (option_id) REFERENCES custom_survey_options (id) ON DELETE CASCADE
+        )
+    ''')
 
     # === 3.3 ТАБЛИЦА ВЕСОВ (k = S/avg, итог = 10 × k) ===
     cursor.execute('''
@@ -309,9 +367,22 @@ def init_survey_objects():
         for name in canteen_objects:
             cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, canteen_id))
     
+    # Опрос для девушек: ПУТСО, Столовая, Медчасть (3 пары)
+    cursor.execute("SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL")
+    if not cursor.fetchone():
+        cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', ('Опрос девушек', None))
+        conn.commit()
+    cursor.execute("SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL")
+    female_parent = cursor.fetchone()
+    if female_parent:
+        fid = female_parent['id']
+        for name in ('ПУТСО', 'Столовая', 'Медчасть'):
+            cursor.execute("SELECT id FROM duty_objects WHERE name = ? AND parent_id = ?", (name, fid))
+            if not cursor.fetchone():
+                cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, fid))
     conn.commit()
     conn.close()
-    print("✅ Объекты для опроса инициализированы: 4 основных наряда (6 пар), 6 объектов столовой (13 случайных пар)")
+    print("✅ Объекты для опроса инициализированы: 4 основных наряда (6 пар), 6 объектов столовой (13 случайных пар), опрос девушек (3 пары)")
 
 def get_survey_results_by_course(course_year):
     """Получает результаты опроса (веса объектов). course_year пока не фильтрует — веса глобальные."""
