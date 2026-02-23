@@ -135,50 +135,84 @@
 
   <!-- Экран нарядов -->
   <div id="duties-screen" class="app-screen">
-    <div style="padding: 16px;">
-      <!-- Баннер: сначала проголосуйте -->
-      <div id="duty-survey-banner" style="background: #1E293B; border: 1px solid #3B82F6; border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-        <p style="color: #93C5FD; margin: 0 0 8px 0; font-weight: 600;">📊 Для работы нарядов сначала проголосуйте</p>
-        <p style="color: #94A3B8; font-size: 14px; margin: 0 0 12px 0;">Оцените сложность объектов. Без опроса веса нарядов не рассчитаются.</p>
-        <a href="#" onclick="switchTab('survey'); return false;" style="display: inline-block; background: #3B82F6; color: white; padding: 8px 16px; border-radius: 8px; text-decoration: none; font-size: 14px;">Пройти опрос →</a>
-      </div>
-      <!-- Навигация по месяцам -->
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <button id="prev-month-btn" onclick="changeMonth(-1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">←</button>
-        <h3 id="current-month" style="color: #93C5FD; margin: 0; font-size: 18px;">Февраль 2026</h3>
-        <button id="next-month-btn" onclick="changeMonth(1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">→</button>
-      </div>
-      <p id="duties-month-stats" style="color: #94A3B8; font-size: 13px; margin: 0 0 16px 0; display: none;"></p>
+    <div style="padding: 12px 16px;">
 
-      <!-- Поиск по дате -->
-      <div style="margin-bottom: 16px;">
-        <input 
-          type="date" 
-          id="duty-date-search" 
-          style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #CBD5E1; font-size: 14px;"
-          onchange="searchDutyByDate(this.value)"
-        />
-        <button onclick="clearDateSearch()" style="margin-top: 8px; background: #3B82F6; border: none; color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; width: 100%;">Очистить поиск</button>
-      </div>
-      
-      <!-- Загрузка графика (сержант / помощник / админ) -->
-      <div id="duty-upload-block" style="display: none; margin-bottom: 16px; padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #8B5CF6;">
-        <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">📤 Загрузить график</p>
-        <p style="color: #94A3B8; font-size: 12px; margin: 0 0 8px 0;">Скачайте шаблон, заполните его (группа, год, ФИО, месяц, дни, роли) и загрузите файл.</p>
-        <a id="duty-template-link" href="#" target="_blank" rel="noopener" style="display: inline-block; margin-bottom: 8px; color: #60A5FA;">📥 Скачать шаблон .xlsx</a>
-        <input type="file" id="duty-upload-file" accept=".xlsx" style="display: block; margin-bottom: 8px; color: #CBD5E1;" />
-        <button type="button" id="duty-upload-btn" style="padding: 8px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Загрузить</button>
+      <!-- Баннер опроса -->
+      <div id="duty-survey-banner" style="background: #1E293B; border: 1px solid #3B82F6; border-radius: 8px; padding: 12px; margin-bottom: 12px;"></div>
+
+      <!-- Горизонтальный тулбар с функциями -->
+      <div id="duty-toolbar" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 12px; scrollbar-width: thin;">
+        <button type="button" class="duty-tool-btn duty-tool-active" data-view="my" onclick="dutySetView('my')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #3B82F6; color: white; font-size: 13px; cursor: pointer;">Мои наряды</button>
+        <button type="button" class="duty-tool-btn" data-view="calendar" onclick="dutySetView('calendar')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">Календарь</button>
+        <button type="button" class="duty-tool-btn" data-view="search" onclick="dutySetView('search')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">Поиск по дате</button>
+        <button type="button" class="duty-tool-btn" data-view="upload" onclick="dutySetView('upload')" id="duty-tool-upload" style="display: none; white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">📤 Загрузить</button>
+        <button type="button" class="duty-tool-btn" data-view="stats" onclick="dutySetView('stats')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">Статистика</button>
       </div>
 
-      <!-- Список нарядов -->
-      <div id="duties-list-container">
-        <p style="color: #64748B; text-align: center;">Загрузка нарядов...</p>
+      <!-- ===== ВИД 1: МОИ НАРЯДЫ ===== -->
+      <div id="duty-view-my">
+        <!-- Навигация по месяцам (только загруженные) -->
+        <div id="duty-month-nav" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <button id="prev-month-btn" onclick="changeMonth(-1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">←</button>
+          <h3 id="current-month" style="color: #93C5FD; margin: 0; font-size: 18px;">—</h3>
+          <button id="next-month-btn" onclick="changeMonth(1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">→</button>
+        </div>
+        <p id="duties-month-stats" style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0; display: none;"></p>
+        <!-- Вкладки Предстоящие / Прошедшие -->
+        <div id="duty-tabs" style="display: flex; gap: 0; margin-bottom: 12px; border-radius: 8px; overflow: hidden; border: 1px solid #334155;">
+          <button type="button" id="duty-tab-upcoming" onclick="dutySetTab('upcoming')" style="flex: 1; padding: 10px; background: #3B82F6; color: white; border: none; font-size: 14px; cursor: pointer;">Предстоящие</button>
+          <button type="button" id="duty-tab-past" onclick="dutySetTab('past')" style="flex: 1; padding: 10px; background: #1E293B; color: #94A3B8; border: none; font-size: 14px; cursor: pointer;">Прошедшие</button>
+        </div>
+        <!-- Список нарядов -->
+        <div id="duties-list-container">
+          <p style="color: #64748B; text-align: center;">Загрузка нарядов...</p>
+        </div>
       </div>
-      
-      <!-- Результаты поиска по дате -->
-      <div id="date-search-results" style="display: none; margin-top: 20px;">
-        <h4 style="color: #93C5FD; margin-bottom: 12px;">Участники наряда на выбранную дату:</h4>
-        <div id="date-search-content"></div>
+
+      <!-- ===== ВИД 2: КАЛЕНДАРЬ ===== -->
+      <div id="duty-view-calendar" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <button onclick="calMonth(-1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">←</button>
+          <h3 id="cal-month-label" style="color: #93C5FD; margin: 0; font-size: 18px;">—</h3>
+          <button onclick="calMonth(1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">→</button>
+        </div>
+        <div id="duty-calendar-grid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 16px;"></div>
+        <div id="duty-day-detail" style="display: none;"></div>
+      </div>
+
+      <!-- ===== ВИД 3: ПОИСК ===== -->
+      <div id="duty-view-search" style="display: none;">
+        <input type="date" id="duty-date-search" style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #CBD5E1; font-size: 14px; margin-bottom: 12px; box-sizing: border-box;" onchange="searchDutyByDate(this.value)" />
+        <div id="date-search-results" style="display: none;">
+          <div id="date-search-content"></div>
+        </div>
+      </div>
+
+      <!-- ===== ВИД 4: ЗАГРУЗКА ===== -->
+      <div id="duty-view-upload" style="display: none;">
+        <div style="padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #8B5CF6;">
+          <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">📤 Загрузить график</p>
+          <p style="color: #94A3B8; font-size: 12px; margin: 0 0 8px 0;">Скачайте шаблон, заполните (группа, год в AO4, ФИО, месяц, дни, роли) и загрузите.</p>
+          <a id="duty-template-link" href="#" target="_blank" rel="noopener" style="display: inline-block; margin-bottom: 8px; color: #60A5FA;">📥 Скачать шаблон .xlsx</a>
+          <input type="file" id="duty-upload-file" accept=".xlsx" style="display: block; margin-bottom: 8px; color: #CBD5E1;" />
+          <button type="button" id="duty-upload-btn" style="padding: 8px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Загрузить</button>
+        </div>
+      </div>
+
+      <!-- ===== ВИД 5: СТАТИСТИКА ===== -->
+      <div id="duty-view-stats" style="display: none;">
+        <div id="duty-stats-content" style="color: #94A3B8; text-align: center;">Загрузка...</div>
+      </div>
+
+      <!-- Модальное окно: детали наряда -->
+      <div id="duty-detail-modal" style="display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.92); z-index: 1100; padding: 16px; overflow-y: auto;">
+        <div style="max-width: 500px; margin: 40px auto;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 id="duty-detail-title" style="color: #93C5FD; margin: 0;"></h3>
+            <button type="button" onclick="closeDutyDetail()" style="background: none; border: none; color: #94A3B8; font-size: 24px; cursor: pointer;">✕</button>
+          </div>
+          <div id="duty-detail-body"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -215,18 +249,17 @@
         </div>
         <p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Системные опросы (сложность нарядов)</p>
         <div id="survey-system-cards" style="display: flex; flex-direction: column; gap: 10px;"></div>
+        <div id="survey-finalize-in-list" style="display: none; margin-top: 12px; padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #8B5CF6;">
+          <p style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0;">Подсчитать веса и завершить текущий раунд опроса.</p>
+          <button type="button" id="survey-finalize-in-list-btn" style="padding: 10px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Завершить опрос</button>
+        </div>
         <div id="survey-custom-section" style="margin-top: 20px; display: none;">
           <p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Опросы вашей группы / курса</p>
           <div id="survey-custom-cards" style="display: flex; flex-direction: column; gap: 10px;"></div>
         </div>
-        <div id="survey-create-wrap" style="margin-top: 16px; display: none;">
+        <div id="survey-create-wrap" style="margin-top: 20px; display: none;">
           <button type="button" id="survey-create-btn" style="width: 100%; padding: 12px; background: #334155; color: #93C5FD; border: 1px dashed #64748B; border-radius: 8px; cursor: pointer;">➕ Создать опрос</button>
         </div>
-      </div>
-      <!-- Для админа/помощника: завершить опрос досрочно -->
-      <div id="survey-finalize-block" style="display: none; margin-bottom: 16px; padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #8B5CF6;">
-        <p style="color: #94A3B8; font-size: 13px; margin-bottom: 8px;">Подсчитать веса и завершить текущий раунд опроса.</p>
-        <button type="button" id="survey-finalize-btn" style="padding: 10px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Завершить опрос</button>
       </div>
       <!-- Уже прошли опрос: не показывать форму повторно -->
       <div id="survey-already-passed" class="survey-intro-block" style="display: none;">
@@ -271,7 +304,7 @@
           </div>
           <div class="survey-intro-card" data-card="4">
             <h3 style="color: #93C5FD; font-size: 15px; margin-bottom: 10px;">Как участвовать</h3>
-            <p style="color: #CBD5E1; font-size: 14px; line-height: 1.5;">Два блока: 6 пар по основным нарядам (Курс, ГБР, Столовая, ЗУБ) и 13 случайных пар по объектам в столовой (Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки). Сравниваем объекты, не наряды. Правильных ответов нет — только ваше мнение.</p>
+            <p style="color: #CBD5E1; font-size: 14px; line-height: 1.5;">Два блока: 6 пар по основным нарядам (Курс, ГБР, Столовая, ЗУБ) и все 15 пар по объектам в столовой (Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки) — без повторений, честно. Правильных ответов нет — только ваше мнение.</p>
           </div>
         </div>
         <div class="survey-intro-nav">

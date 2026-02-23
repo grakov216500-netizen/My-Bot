@@ -71,8 +71,8 @@ _db.DB_NAME = DATABASE
 # === Отложенные импорты ===
 def import_modules():
     global check_and_update_courses, init_db, get_db
-    global check_task_reminders, restore_task_reminders  # ← Теперь восстанавливаем и задачи!
-    global restore_duty_reminders
+    global check_task_reminders, restore_task_reminders
+    global restore_duty_reminders, auto_distribute_duties
     global start_command, get_registration_handler
     global menu_router, back_router, my_duties_router
     global tasks_router, profile_router, get_profile_edit_handler
@@ -100,6 +100,13 @@ def import_modules():
     except Exception as e:
         logger.critical(f"❌ Ошибка загрузки reminders: {e}")
         sys.exit(1)
+
+    try:
+        from handlers.duty_distributor import auto_distribute_duties
+        logger.info("✅ duty_distributor загружен")
+    except Exception as e:
+        logger.warning(f"⚠️ duty_distributor не загружен: {e}")
+        auto_distribute_duties = None
 
     try:
         from handlers.menu import start_command, router as menu_router, back_router
@@ -276,6 +283,11 @@ async def post_init(application):
     # ✅ Проверка напоминаний о задачах каждые 30 секунд
     application.job_queue.run_repeating(check_task_reminders, interval=30, first=5)
     logger.info("⏰ Напоминания о задачах: добавлены")
+
+    # ✅ Автораспределение нарядов — каждые 5 минут
+    if auto_distribute_duties:
+        application.job_queue.run_repeating(auto_distribute_duties, interval=300, first=60)
+        logger.info("⏰ Автораспределение нарядов: каждые 5 мин")
 
     # ✅ Восстановление напоминаний о задачах при старте
     try:

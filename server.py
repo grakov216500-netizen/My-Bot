@@ -505,18 +505,31 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
 
 
 @app.get("/api/duties/by-date")
-async def get_duties_by_date(date: str):
+async def get_duties_by_date(date: str, telegram_id: int = 0):
     """
-    Возвращает всех участников наряда на конкретную дату из всех групп.
-    Формат date: YYYY-MM-DD
+    Возвращает всех участников наряда на конкретную дату.
+    Если telegram_id передан — фильтрует по курсу (enrollment_year) пользователя.
     """
     conn = get_db()
     if not conn:
         return {"error": "База данных не найдена"}
     
     try:
-        # Пробуем duty_schedule
-        try:
+        ey = None
+        if telegram_id:
+            user = conn.execute("SELECT enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+            if user:
+                ey = user["enrollment_year"]
+
+        if ey:
+            query = """
+                SELECT fio, role, group_name, enrollment_year, gender
+                FROM duty_schedule
+                WHERE date = ? AND enrollment_year = ?
+                ORDER BY role, group_name, fio
+            """
+            rows = conn.execute(query, (date, ey)).fetchall()
+        else:
             query = """
                 SELECT fio, role, group_name, enrollment_year, gender
                 FROM duty_schedule
@@ -524,35 +537,322 @@ async def get_duties_by_date(date: str):
                 ORDER BY role, group_name, fio
             """
             rows = conn.execute(query, (date,)).fetchall()
-            
-            # Группируем по ролям
-            by_role = {}
-            for row in rows:
-                role = row['role']
-                if role not in by_role:
-                    by_role[role] = []
-                by_role[role].append({
-                    "fio": row['fio'],
-                    "group": row['group_name'],
-                    "course": row['enrollment_year'],
-                    "gender": row['gender']
-                })
-            
-            conn.close()
-            return {
-                "date": date,
-                "by_role": by_role,
-                "total": len(rows)
-            }
-        except Exception as e:
-            print(f"[WARNING] duty_schedule не доступна: {e}")
-            return {"error": "Таблица duty_schedule не найдена"}
+        
+        by_role = {}
+        for row in rows:
+            role = row['role']
+            if role not in by_role:
+                by_role[role] = []
+            by_role[role].append({
+                "fio": row['fio'],
+                "group": row['group_name'],
+                "course": row['enrollment_year'],
+                "gender": row['gender']
+            })
+        
+        return {
+            "date": date,
+            "by_role": by_role,
+            "total": len(rows)
+        }
     except Exception as e:
         print(f"[ERROR] Ошибка при запросе нарядов по дате: {e}")
         return {"error": f"Ошибка БД: {str(e)}"}
     finally:
         if conn:
             conn.close()
+
+@app.get("/api/duties/available-months")
+async def get_available_months(telegram_id: int):
+    """Возвращает список месяцев (YYYY-MM), для которых есть загруженные графики в рамках курса пользователя."""
+    conn = get_db()
+    if not conn:
+        return {"months": []}
+    try:
+        user = conn.execute(
+            "SELECT enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not user:
+            return {"months": []}
+        ey = user["enrollment_year"]
+        rows = conn.execute("""
+            SELECT DISTINCT substr(date, 1, 7) as ym
+            FROM duty_schedule
+            WHERE enrollment_year = ?
+            ORDER BY ym
+        """, (ey,)).fetchall()
+        return {"months": [r["ym"] for r in rows]}
+    except Exception as e:
+        print(f"[ERROR] available-months: {e}")
+        return {"months": []}
+    finally:
+        conn.close()
+
+
+@app.get("/api/duties/day-detail")
+async def get_duty_day_detail(date: str, role: str, telegram_id: int):
+    """Подробная информация о конкретном наряде (роль) на конкретную дату: все участники того же курса."""
+    conn = get_db()
+    if not conn:
+        return {"error": "БД не найдена"}
+    try:
+        user = conn.execute(
+            "SELECT enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not user:
+            return {"error": "Пользователь не найден"}
+        ey = user["enrollment_year"]
+        rows = conn.execute("""
+            SELECT fio, group_name, gender
+            FROM duty_schedule
+            WHERE date = ? AND role = ? AND enrollment_year = ?
+            ORDER BY group_name, fio
+        """, (date, role, ey)).fetchall()
+        participants = [{"fio": r["fio"], "group": r["group_name"], "gender": r["gender"]} for r in rows]
+        
+        shift_data = []
+        canteen_data = []
+        if role in ("к", "гбр"):
+            try:
+                s_rows = conn.execute("""
+                    SELECT fio, shift FROM duty_shift_assignments
+                    WHERE date = ? AND role = ? AND enrollment_year = ?
+                    ORDER BY shift, fio
+                """, (date, role, ey)).fetchall()
+                shift_data = [{"fio": r["fio"], "shift": r["shift"]} for r in s_rows]
+            except Exception:
+                pass
+        elif role == "с":
+            try:
+                c_rows = conn.execute("""
+                    SELECT fio, object_name FROM duty_canteen_assignments
+                    WHERE date = ? AND enrollment_year = ?
+                    ORDER BY object_name, fio
+                """, (date, ey)).fetchall()
+                canteen_data = [{"fio": r["fio"], "object": r["object_name"]} for r in c_rows]
+            except Exception:
+                pass
+        
+        return {
+            "date": date,
+            "role": role,
+            "role_full": get_full_role(role),
+            "participants": participants,
+            "count": len(participants),
+            "shifts": shift_data,
+            "canteen": canteen_data,
+        }
+    except Exception as e:
+        print(f"[ERROR] day-detail: {e}")
+        return {"error": str(e)}
+    finally:
+        conn.close()
+
+
+# ============================================
+# 2.5. РАСПРЕДЕЛЕНИЕ ПО СМЕНАМ И ОБЪЕКТАМ
+# ============================================
+
+CANTEEN_OBJECTS = ["ГЦ", "овощи", "тарелки", "железо", "стаканы", "лента"]
+
+def distribute_shifts_for_date(date_str: str, role: str, ey: int, conn):
+    """Распределяет людей по сменам для Курс/ГБР. Возвращает список назначений."""
+    rows = conn.execute("""
+        SELECT fio, group_name FROM duty_schedule
+        WHERE date = ? AND role = ? AND enrollment_year = ?
+        ORDER BY fio
+    """, (date_str, role, ey)).fetchall()
+    people = [r["fio"] for r in rows]
+    if not people:
+        return []
+    
+    random.shuffle(people)
+    assignments = []
+    
+    if role == "к":
+        for i, fio in enumerate(people):
+            if i < 3:
+                shift = i + 1
+            else:
+                shift = 0  # дежурный
+            assignments.append({"fio": fio, "shift": shift})
+    elif role == "гбр":
+        for i, fio in enumerate(people):
+            shift = (i // 2) + 1
+            assignments.append({"fio": fio, "shift": shift})
+    else:
+        for i, fio in enumerate(people):
+            shift = (i % 3) + 1
+            assignments.append({"fio": fio, "shift": shift})
+    
+    conn.execute("DELETE FROM duty_shift_assignments WHERE date = ? AND role = ? AND enrollment_year = ?",
+                 (date_str, role, ey))
+    for a in assignments:
+        conn.execute("""
+            INSERT OR REPLACE INTO duty_shift_assignments (date, role, fio, shift, enrollment_year)
+            VALUES (?, ?, ?, ?, ?)
+        """, (date_str, role, a["fio"], a["shift"], ey))
+        conn.execute("""
+            INSERT INTO duty_assignment_history (fio, date, role, shift, enrollment_year)
+            VALUES (?, ?, ?, ?, ?)
+        """, (a["fio"], date_str, role, a["shift"], ey))
+    conn.commit()
+    return assignments
+
+
+def distribute_canteen_for_date(date_str: str, ey: int, conn):
+    """Распределяет людей по объектам столовой с учётом рейтинга и истории."""
+    rows = conn.execute("""
+        SELECT fio, group_name FROM duty_schedule
+        WHERE date = ? AND role = 'с' AND enrollment_year = ?
+        ORDER BY fio
+    """, (date_str, ey)).fetchall()
+    people = [r["fio"] for r in rows]
+    if not people:
+        return []
+
+    scores = {}
+    for fio in people:
+        user_row = conn.execute("SELECT global_score FROM users WHERE fio = ? AND enrollment_year = ?",
+                                (fio, ey)).fetchone()
+        gs = user_row["global_score"] if user_row and user_row["global_score"] else 0
+        
+        hist = conn.execute("""
+            SELECT sub_object FROM duty_assignment_history
+            WHERE fio = ? AND role = 'с' AND enrollment_year = ?
+            ORDER BY date DESC LIMIT 5
+        """, (fio, ey)).fetchall()
+        history = [h["sub_object"] for h in hist if h["sub_object"]]
+        
+        streak_penalty = 0
+        if len(history) >= 2:
+            weights_map = {}
+            try:
+                w_rows = conn.execute("""
+                    SELECT do.name, ow.weight FROM duty_objects do
+                    JOIN object_weights ow ON do.id = ow.object_id
+                """).fetchall()
+                weights_map = {r["name"]: r["weight"] for r in w_rows}
+            except Exception:
+                pass
+            
+            heavy = [o for o in CANTEEN_OBJECTS if weights_map.get(o, 10) >= 12]
+            if history[0] in heavy and len(history) > 1 and history[1] in heavy:
+                streak_penalty = 5
+        
+        scores[fio] = 0.5 * gs + streak_penalty
+    
+    sorted_people = sorted(people, key=lambda f: scores.get(f, 0))
+    
+    weights_map = {}
+    try:
+        w_rows = conn.execute("""
+            SELECT do.name, ow.weight FROM duty_objects do
+            JOIN object_weights ow ON do.id = ow.object_id
+        """).fetchall()
+        weights_map = {r["name"]: r["weight"] for r in w_rows}
+    except Exception:
+        pass
+    
+    objects_sorted = sorted(CANTEEN_OBJECTS, key=lambda o: weights_map.get(o, 10), reverse=True)
+    
+    assignments = []
+    obj_idx = 0
+    for fio in sorted_people:
+        obj = objects_sorted[obj_idx % len(objects_sorted)]
+        obj_idx += 1
+        assignments.append({"fio": fio, "object": obj})
+    
+    conn.execute("DELETE FROM duty_canteen_assignments WHERE date = ? AND enrollment_year = ?",
+                 (date_str, ey))
+    for a in assignments:
+        conn.execute("""
+            INSERT OR REPLACE INTO duty_canteen_assignments (date, fio, object_name, enrollment_year)
+            VALUES (?, ?, ?, ?)
+        """, (date_str, a["fio"], a["object"], ey))
+        conn.execute("""
+            INSERT INTO duty_assignment_history (fio, date, role, sub_object, enrollment_year)
+            VALUES (?, ?, 'с', ?, ?)
+        """, (a["fio"], date_str, a["object"], ey))
+    conn.commit()
+    return assignments
+
+
+@app.post("/api/duties/distribute")
+async def distribute_duty(date: str = Form(...), role: str = Form(...), telegram_id: int = Form(...)):
+    """Ручной запуск распределения по сменам/объектам (для сержантов/админов)."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(500, detail="БД не найдена")
+    try:
+        user = conn.execute("SELECT enrollment_year, role as user_role FROM users WHERE telegram_id = ?",
+                            (telegram_id,)).fetchone()
+        if not user:
+            raise HTTPException(404, detail="Пользователь не найден")
+        if user["user_role"] not in ("admin", "sergeant", "assistant"):
+            raise HTTPException(403, detail="Недостаточно прав")
+        ey = user["enrollment_year"]
+        
+        if role == "с":
+            result = distribute_canteen_for_date(date, ey, conn)
+            return {"status": "ok", "type": "canteen", "assignments": result, "count": len(result)}
+        else:
+            result = distribute_shifts_for_date(date, role, ey, conn)
+            return {"status": "ok", "type": "shift", "assignments": result, "count": len(result)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] distribute: {e}")
+        raise HTTPException(500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.get("/api/duties/shifts")
+async def get_duty_shifts(date: str, role: str, telegram_id: int):
+    """Получить распределение по сменам на дату."""
+    conn = get_db()
+    if not conn:
+        return {"assignments": []}
+    try:
+        user = conn.execute("SELECT enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if not user:
+            return {"assignments": []}
+        ey = user["enrollment_year"]
+        rows = conn.execute("""
+            SELECT fio, shift FROM duty_shift_assignments
+            WHERE date = ? AND role = ? AND enrollment_year = ?
+            ORDER BY shift, fio
+        """, (date, role, ey)).fetchall()
+        return {"date": date, "role": role, "assignments": [{"fio": r["fio"], "shift": r["shift"]} for r in rows]}
+    except Exception as e:
+        return {"assignments": [], "error": str(e)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/duties/canteen-assignments")
+async def get_canteen_assignments(date: str, telegram_id: int):
+    """Получить распределение по объектам столовой."""
+    conn = get_db()
+    if not conn:
+        return {"assignments": []}
+    try:
+        user = conn.execute("SELECT enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if not user:
+            return {"assignments": []}
+        ey = user["enrollment_year"]
+        rows = conn.execute("""
+            SELECT fio, object_name FROM duty_canteen_assignments
+            WHERE date = ? AND enrollment_year = ?
+            ORDER BY object_name, fio
+        """, (date, ey)).fetchall()
+        return {"date": date, "assignments": [{"fio": r["fio"], "object": r["object_name"]} for r in rows]}
+    except Exception as e:
+        return {"assignments": [], "error": str(e)}
+    finally:
+        conn.close()
+
 
 # ============================================
 # 3. ЗАДАЧНИК: API ДЛЯ WEBAPP
@@ -777,10 +1077,9 @@ async def check_schedule_month(group: str, enrollment_year: int, month: str):
 
 
 def _generate_schedule_template_bytes():
-    """Генерирует .xlsx шаблон графика нарядов (группа E1, год E3, ФИО F6:H21, месяц I4, дни I5:AM5, ячейки I6:AM21)."""
+    """Генерирует .xlsx шаблон графика нарядов. Группа E1, год в AO4 (=$AO$4), ФИО F6:H21, месяц I4, дни I5:AM5, ячейки I6:AM21."""
     try:
         import openpyxl
-        from openpyxl.styles import Font, Alignment, Border, Side
     except ImportError:
         return None
     wb = openpyxl.Workbook()
@@ -790,7 +1089,8 @@ def _generate_schedule_template_bytes():
     # Группа — E1
     ws["E1"] = "Группа (напр. ИО61)"
     ws["E2"] = ""
-    ws["E3"] = "Год (напр. 2025)"
+    # Год — AO4 (клише =$AO$4: в этой ячейке год, чтобы графики не терялись)
+    ws["AO4"] = 2025
     # Заголовки месяц/дни — I4:AM5
     month_names = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
     ws.cell(4, 9, "месяц (напр. январь)")
@@ -1055,7 +1355,7 @@ async def get_survey_pairs(stage: str = "main"):
             pairs = _get_all_pairs(objects)
             conn.close()
             return {"pairs": pairs, "stage": stage}
-        else:  # canteen — только 6 объектов столовой, 13 случайных пар
+        else:  # canteen — 6 объектов столовой, все возможные пары без повторений (15 пар)
             CANTEEN_OBJECT_NAMES = [
                 "Горячий цех", "Овощной цех", "Стаканы", "Железо", "Лента", "Тарелки"
             ]
@@ -1069,19 +1369,15 @@ async def get_survey_pairs(stage: str = "main"):
                 "SELECT id, name FROM duty_objects WHERE parent_id = ? ORDER BY id",
                 (canteen["id"],)
             ).fetchall()
-            # Ровно 6 объектов: Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки (Мойка-тарелки → Тарелки)
             by_name = {r["name"]: r for r in rows}
             objects = []
             for display_name in CANTEEN_OBJECT_NAMES:
                 r = by_name.get(display_name) or (by_name.get("Мойка-тарелки") if display_name == "Тарелки" else None)
                 if r:
                     objects.append({"id": r["id"], "name": display_name})
-            # дедупликация по id (если Тарелки и Мойка-тарелки оба есть — один раз)
             seen = set()
             objects = [o for o in objects if o["id"] not in seen and not seen.add(o["id"])]
             pairs = _get_all_pairs(objects)
-            if len(pairs) > 13:
-                pairs = random.sample(pairs, 13)
             conn.close()
             return {"pairs": pairs, "stage": stage}
         
@@ -1174,9 +1470,15 @@ async def get_survey_status():
         conn.close()
 
 
+def _clamp_coef(k: float) -> float:
+    """Нижнее значение 0.8, верхний коэф не больше 2.0."""
+    return max(0.8, min(2.0, k))
+
+
 def _calc_weights_from_pair_votes(conn):
     """
     Рассчитывает веса по формуле: S = сумма баллов объекта, avg = среднее, k = S/avg, вес = 10 × k.
+    Коэффициент k ограничен: от 0.8 до 2.0.
     Этап 1: основные наряды (4 шт.). Этап 2: объекты столовой (6 шт.).
     """
     # Этап 1: основные наряды
@@ -1207,6 +1509,7 @@ def _calc_weights_from_pair_votes(conn):
         for oid in main_ids:
             s = scores.get(oid, 0)
             k = (s / avg) if (avg > 0 and s > 0) else 0.8
+            k = _clamp_coef(k)
             w = 10 * k
             conn.execute("""
                 INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
@@ -1250,6 +1553,7 @@ def _calc_weights_from_pair_votes(conn):
             for oid in sub_ids:
                 s = sub_scores.get(oid, 0)
                 k_sub = (s / sub_avg) if (sub_avg > 0 and s > 0) else 0.8
+                k_sub = _clamp_coef(k_sub)
                 w_sub = canteen_weight * k_sub
                 conn.execute("""
                     INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
@@ -1285,6 +1589,7 @@ def _calc_weights_from_pair_votes(conn):
             for oid in female_ids:
                 s = f_scores.get(oid, 0)
                 k = (s / f_avg) if (f_avg > 0 and s > 0) else 0.8
+                k = _clamp_coef(k)
                 w = 10 * k
                 conn.execute("""
                     INSERT INTO object_weights (object_id, weight) VALUES (?, ?)

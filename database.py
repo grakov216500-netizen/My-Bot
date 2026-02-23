@@ -61,6 +61,11 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN global_score REAL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
     # ⚠️ Миграция старых ролей
     cursor.execute("UPDATE users SET role = 'user' WHERE role IN ('курсант', 'user')")
     cursor.execute("UPDATE users SET role = 'sergeant' WHERE role IN ('сержант', 'sergeant')")
@@ -223,7 +228,48 @@ def init_db():
         )
     ''')
 
-    # === 6. ИНДЕКСЫ (оптимизация) ===
+    # === 6. РАСПРЕДЕЛЕНИЕ ПО СМЕНАМ (Курс, ГБР) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS duty_shift_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL CHECK(date LIKE '____-__-__'),
+            role TEXT NOT NULL,
+            fio TEXT NOT NULL,
+            shift INTEGER NOT NULL DEFAULT 0,
+            enrollment_year INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(date, role, fio, enrollment_year)
+        )
+    ''')
+
+    # === 7. РАСПРЕДЕЛЕНИЕ ПО ОБЪЕКТАМ (Столовая) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS duty_canteen_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL CHECK(date LIKE '____-__-__'),
+            fio TEXT NOT NULL,
+            object_name TEXT NOT NULL,
+            enrollment_year INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(date, fio, enrollment_year)
+        )
+    ''')
+
+    # === 8. ИСТОРИЯ НАЗНАЧЕНИЙ (для алгоритма) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS duty_assignment_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fio TEXT NOT NULL,
+            date TEXT NOT NULL,
+            role TEXT NOT NULL,
+            sub_object TEXT,
+            shift INTEGER,
+            enrollment_year INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    # === 9. ИНДЕКСЫ (оптимизация) ===
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_tg_id ON users (telegram_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_group_year ON users (group_name, enrollment_year)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_status ON users (status)')
@@ -239,6 +285,10 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_pair_votes_stage ON survey_pair_votes (stage)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_duty_objects_parent ON duty_objects (parent_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_object_weights_object ON object_weights (object_id)')
+    
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_shift_assign_date ON duty_shift_assignments (date, role)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_canteen_assign_date ON duty_canteen_assignments (date)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_assign_history_fio ON duty_assignment_history (fio, role)')
 
     conn.commit()
     conn.close()

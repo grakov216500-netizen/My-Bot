@@ -113,7 +113,15 @@ function setupReminderModal() {
 
 function setupProfileAndAdmin() {
     const openBtn = document.getElementById('open-profile-btn');
-    if (openBtn) openBtn.addEventListener('click', openProfileScreen);
+    if (openBtn) {
+        openBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); openProfileScreen(); });
+        openBtn.style.cursor = 'pointer';
+    }
+    const avatarImg = document.querySelector('.avatar');
+    if (avatarImg) {
+        avatarImg.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); openProfileScreen(); });
+        avatarImg.style.cursor = 'pointer';
+    }
     const backBtn = document.getElementById('profile-back');
     if (backBtn) backBtn.addEventListener('click', closeProfileScreen);
     const backUnregBtn = document.getElementById('profile-back-unreg');
@@ -140,8 +148,6 @@ function setupProfileAndAdmin() {
     if (adminBackBtn) adminBackBtn.addEventListener('click', closeAdminPanel);
     const adminLoadBtn = document.getElementById('admin-load-users');
     if (adminLoadBtn) adminLoadBtn.addEventListener('click', loadAdminUsersList);
-    const finalizeBtn = document.getElementById('survey-finalize-btn');
-    if (finalizeBtn) finalizeBtn.addEventListener('click', finalizeSurvey);
 }
 
 async function finalizeSurvey() {
@@ -386,9 +392,17 @@ function switchTab(tabName) {
     } else if (tabName === 'duties') {
         if (dutiesScreen) dutiesScreen.style.display = 'block';
         updateDutySurveyBanner();
-        const uploadBlock = document.getElementById('duty-upload-block');
-        if (uploadBlock) uploadBlock.style.display = (userRole === 'sergeant' || userRole === 'assistant' || userRole === 'admin') ? 'block' : 'none';
-        loadDutiesForMonth(); // Загружаем наряды на текущий месяц
+        var isPriv = userRole === 'sergeant' || userRole === 'assistant' || userRole === 'admin';
+        var uploadToolBtn = document.getElementById('duty-tool-upload');
+        if (uploadToolBtn) uploadToolBtn.style.display = isPriv ? 'inline-block' : 'none';
+        loadDutyAvailableMonths().then(function() {
+            if (dutyAvailableMonths.length > 0 && dutyAvailableMonths.indexOf(currentYear + '-' + String(currentMonth).padStart(2, '0')) === -1) {
+                var last = dutyAvailableMonths[dutyAvailableMonths.length - 1].split('-');
+                currentYear = parseInt(last[0]);
+                currentMonth = parseInt(last[1]);
+            }
+            loadDutiesForMonth();
+        });
         bindDutyUploadOnce();
     } else if (tabName === 'study') {
         if (studyScreen) studyScreen.style.display = 'block';
@@ -897,13 +911,13 @@ function showSurveyList() {
     const content = document.getElementById('survey-content');
     const alreadyPassed = document.getElementById('survey-already-passed');
     const customBlock = document.getElementById('survey-custom-block');
-    const finalizeBlock = document.getElementById('survey-finalize-block');
+    const finalizeInList = document.getElementById('survey-finalize-in-list');
     if (listBlock) listBlock.style.display = 'block';
     if (intro) intro.style.display = 'none';
     if (content) content.style.display = 'none';
     if (alreadyPassed) alreadyPassed.style.display = 'none';
     if (customBlock) customBlock.style.display = 'none';
-    if (finalizeBlock) finalizeBlock.style.display = (userRole === 'admin' || userRole === 'assistant') ? 'block' : 'none';
+    if (finalizeInList) finalizeInList.style.display = (userRole === 'admin' || userRole === 'assistant') ? 'block' : 'none';
     currentSurveyType = null;
     currentCustomSurveyId = null;
 }
@@ -920,7 +934,7 @@ async function loadSurveyList() {
         const gender = data.user_gender || 'male';
         systemEl.innerHTML = '';
         data.system.forEach(function(item) {
-            if (item.for_gender !== gender) return;
+            if (userRole !== 'admin' && userRole !== 'assistant' && item.for_gender !== gender) return;
             const card = document.createElement('div');
             card.className = 'survey-list-card';
             card.style.cssText = 'background:#1E293B;border-radius:12px;padding:14px;border-left:4px solid #3B82F6;cursor:pointer;';
@@ -928,6 +942,13 @@ async function loadSurveyList() {
             card.onclick = function() { openSystemSurvey(item.id); };
             systemEl.appendChild(card);
         });
+        var finalizeWrap = document.getElementById('survey-finalize-in-list');
+        if (finalizeWrap) finalizeWrap.style.display = (userRole === 'admin' || userRole === 'assistant') ? 'block' : 'none';
+        var finalizeBtn = document.getElementById('survey-finalize-in-list-btn');
+        if (finalizeBtn && !finalizeBtn._bound) {
+            finalizeBtn._bound = true;
+            finalizeBtn.addEventListener('click', finalizeSurvey);
+        }
         if (data.custom && data.custom.length > 0) {
             customSection.style.display = 'block';
             customCards.innerHTML = '';
@@ -1405,7 +1426,7 @@ async function handleSurveySubmit() {
         surveyCurrentStage = 'canteen';
         renderSurveyPairs('canteen');
         document.getElementById('survey-stage-indicator').textContent =
-            'Этап 2 из 2: Объекты в столовой (Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки) — 13 пар';
+            'Этап 2 из 2: Объекты в столовой (Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки) — все ' + surveyPairsCanteen.length + ' пар';
         return;
     }
 
@@ -1496,7 +1517,7 @@ async function loadSurveyResults() {
         });
         
         const stageForPairs = data.survey_stage || 'main';
-        html += '<p style="margin-top: 12px;"><button type="button" onclick="openPairStatsModal(\'' + stageForPairs + '\')" style="padding: 8px 16px; background: #334155; color: #93C5FD; border: 1px solid #64748B; border-radius: 8px; cursor: pointer;">Подробнее по парам (A/B/равно)</button></p>';
+        html += '<p style="margin-top: 12px;"><button type="button" onclick="openPairStatsModal(\'' + stageForPairs + '\')" style="padding: 8px 16px; background: #334155; color: #93C5FD; border: 1px solid #64748B; border-radius: 8px; cursor: pointer;">Подробнее по парам</button></p>';
         window._surveyResultsHtml = html;
         // Показываем результаты в разделе Опрос (survey-already-passed)
         var alreadyBlock = document.getElementById('survey-results-in-tab');
@@ -1602,11 +1623,260 @@ function openSettings() {
 
 // === ФУНКЦИИ ДЛЯ РАБОТЫ С НАРЯДАМИ ===
 
+let dutyAvailableMonths = [];
+let dutyCurrentView = 'my';
+let dutyCurrentTab = 'upcoming';
+let calM = new Date().getMonth() + 1;
+let calY = new Date().getFullYear();
+
+function dutySetView(view) {
+    dutyCurrentView = view;
+    ['my', 'calendar', 'search', 'upload', 'stats'].forEach(function(v) {
+        var el = document.getElementById('duty-view-' + v);
+        if (el) el.style.display = v === view ? 'block' : 'none';
+    });
+    document.querySelectorAll('.duty-tool-btn').forEach(function(b) {
+        var active = b.getAttribute('data-view') === view;
+        b.style.background = active ? '#3B82F6' : '#1E293B';
+        b.style.color = active ? 'white' : '#CBD5E1';
+    });
+    if (view === 'my') loadDutiesForMonth();
+    if (view === 'calendar') renderDutyCalendar();
+    if (view === 'stats') loadDutyStats();
+}
+
+function dutySetTab(tab) {
+    dutyCurrentTab = tab;
+    document.getElementById('duty-tab-upcoming').style.background = tab === 'upcoming' ? '#3B82F6' : '#1E293B';
+    document.getElementById('duty-tab-upcoming').style.color = tab === 'upcoming' ? 'white' : '#94A3B8';
+    document.getElementById('duty-tab-past').style.background = tab === 'past' ? '#3B82F6' : '#1E293B';
+    document.getElementById('duty-tab-past').style.color = tab === 'past' ? 'white' : '#94A3B8';
+    loadDutiesForMonth();
+}
+
+async function loadDutyAvailableMonths() {
+    try {
+        var res = await fetch(baseUrl + '/api/duties/available-months?telegram_id=' + userId);
+        var data = res.ok ? await res.json() : {};
+        dutyAvailableMonths = data.months || [];
+    } catch (e) { dutyAvailableMonths = []; }
+}
+
+function calMonth(delta) {
+    calM += delta;
+    if (calM > 12) { calM = 1; calY++; }
+    if (calM < 1) { calM = 12; calY--; }
+    renderDutyCalendar();
+}
+
+function renderDutyCalendar() {
+    var grid = document.getElementById('duty-calendar-grid');
+    var label = document.getElementById('cal-month-label');
+    if (!grid || !label) return;
+    var mn = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    label.textContent = mn[calM - 1] + ' ' + calY;
+    var ym = calY + '-' + String(calM).padStart(2, '0');
+    var hasData = dutyAvailableMonths.indexOf(ym) !== -1;
+    if (!hasData) {
+        grid.innerHTML = '<p style="grid-column: 1/-1; color: #94A3B8; text-align: center; padding: 20px;">График на этот месяц отсутствует</p>';
+        document.getElementById('duty-day-detail').style.display = 'none';
+        return;
+    }
+    var days = new Date(calY, calM, 0).getDate();
+    var firstDow = (new Date(calY, calM - 1, 1).getDay() + 6) % 7;
+    var dayNames = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+    var html = dayNames.map(function(d) { return '<div style="text-align:center;color:#64748B;font-size:12px;padding:4px 0;">' + d + '</div>'; }).join('');
+    for (var i = 0; i < firstDow; i++) html += '<div></div>';
+    var todayStr = new Date().toISOString().slice(0, 10);
+    for (var d = 1; d <= days; d++) {
+        var ds = calY + '-' + String(calM).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        var isToday = ds === todayStr;
+        html += '<div onclick="calSelectDay(\'' + ds + '\')" style="text-align:center;padding:8px 2px;border-radius:8px;cursor:pointer;background:' + (isToday ? '#3B82F6' : '#1E293B') + ';color:' + (isToday ? 'white' : '#CBD5E1') + ';font-size:14px;">' + d + '</div>';
+    }
+    grid.innerHTML = html;
+    document.getElementById('duty-day-detail').style.display = 'none';
+}
+
+async function calSelectDay(dateStr) {
+    var det = document.getElementById('duty-day-detail');
+    if (!det) return;
+    det.style.display = 'block';
+    det.innerHTML = '<p style="color:#94A3B8;">Загрузка...</p>';
+    try {
+        var res = await fetch(baseUrl + '/api/duties/by-date?date=' + dateStr + '&telegram_id=' + userId);
+        var data = res.ok ? await res.json() : {};
+        if (data.total === 0 || !data.by_role) {
+            det.innerHTML = '<p style="color:#64748B;">На ' + formatDate(dateStr) + ' нарядов нет</p>';
+            return;
+        }
+        var html = '<h4 style="color:#93C5FD;margin:0 0 12px 0;">' + formatDate(dateStr) + '</h4>';
+        Object.keys(data.by_role).forEach(function(role) {
+            var parts = data.by_role[role];
+            var roleFull = get_full_role(role) || role;
+            html += '<div onclick="openDutyDetail(\'' + dateStr + '\',\'' + role + '\')" style="background:#1E293B;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;border-left:4px solid #3B82F6;">';
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+            html += '<span style="color:#CBD5E1;font-weight:600;">' + roleFull + '</span>';
+            html += '<span style="color:#94A3B8;font-size:13px;">' + parts.length + ' чел.</span>';
+            html += '</div></div>';
+        });
+        det.innerHTML = html;
+    } catch (e) {
+        det.innerHTML = '<p style="color:#f87171;">Ошибка загрузки</p>';
+    }
+}
+
+async function openDutyDetail(dateStr, role) {
+    var modal = document.getElementById('duty-detail-modal');
+    var title = document.getElementById('duty-detail-title');
+    var body = document.getElementById('duty-detail-body');
+    if (!modal || !body) return;
+    modal.style.display = 'block';
+    title.textContent = (get_full_role(role) || role) + ' — ' + formatDate(dateStr);
+    body.innerHTML = '<p style="color:#94A3B8;">Загрузка...</p>';
+    try {
+        var res = await fetch(baseUrl + '/api/duties/day-detail?date=' + dateStr + '&role=' + encodeURIComponent(role) + '&telegram_id=' + userId);
+        var data = res.ok ? await res.json() : {};
+        if (!data.participants || data.participants.length === 0) {
+            body.innerHTML = '<p style="color:#64748B;">Нет участников</p>';
+            return;
+        }
+        var html = '<p style="color:#94A3B8;margin-bottom:12px;">Всего: ' + data.count + ' чел.</p>';
+
+        var isPriv = userRole === 'sergeant' || userRole === 'assistant' || userRole === 'admin';
+        var isShiftRole = role === 'к' || role === 'гбр';
+        var isCanteen = role === 'с';
+
+        if (isShiftRole && data.shifts && data.shifts.length > 0) {
+            html += '<h5 style="color:#93C5FD;margin:12px 0 8px;">Распределение по сменам</h5>';
+            var byShift = {};
+            data.shifts.forEach(function(a) {
+                var s = a.shift === 0 ? 'Дежурный' : (a.shift + '-я смена');
+                if (!byShift[s]) byShift[s] = [];
+                byShift[s].push(a.fio);
+            });
+            Object.keys(byShift).forEach(function(s) {
+                html += '<div style="background:#0f172a;border-radius:6px;padding:8px;margin-bottom:6px;">';
+                html += '<p style="color:#60A5FA;font-size:13px;margin:0 0 4px;">' + s + '</p>';
+                byShift[s].forEach(function(fio) {
+                    var isMe = userFio && fio === userFio;
+                    html += '<p style="color:' + (isMe ? '#3B82F6' : '#CBD5E1') + ';font-size:14px;margin:2px 0;">' + fio + (isMe ? ' (вы)' : '') + '</p>';
+                });
+                html += '</div>';
+            });
+        } else if (isShiftRole) {
+            html += '<p style="color:#F59E0B;font-size:13px;margin:8px 0;">⏳ Смены будут распределены автоматически за 3 часа до наряда (в 15:30)</p>';
+        }
+
+        if (isCanteen && data.canteen && data.canteen.length > 0) {
+            html += '<h5 style="color:#93C5FD;margin:12px 0 8px;">Распределение по объектам</h5>';
+            var byObj = {};
+            data.canteen.forEach(function(a) {
+                if (!byObj[a.object]) byObj[a.object] = [];
+                byObj[a.object].push(a.fio);
+            });
+            Object.keys(byObj).forEach(function(obj) {
+                html += '<div style="background:#0f172a;border-radius:6px;padding:8px;margin-bottom:6px;">';
+                html += '<p style="color:#60A5FA;font-size:13px;margin:0 0 4px;">' + obj + '</p>';
+                byObj[obj].forEach(function(fio) {
+                    var isMe = userFio && fio === userFio;
+                    html += '<p style="color:' + (isMe ? '#3B82F6' : '#CBD5E1') + ';font-size:14px;margin:2px 0;">' + fio + (isMe ? ' (вы)' : '') + '</p>';
+                });
+                html += '</div>';
+            });
+        } else if (isCanteen) {
+            html += '<p style="color:#F59E0B;font-size:13px;margin:8px 0;">⏳ Объекты будут распределены автоматически за 3 часа до наряда (в 15:30)</p>';
+        }
+
+        html += '<h5 style="color:#93C5FD;margin:12px 0 8px;">Все участники</h5>';
+        data.participants.forEach(function(p) {
+            var isMe = userFio && p.fio === userFio;
+            html += '<div style="display:flex;justify-content:space-between;padding:10px;background:#1E293B;border-radius:8px;margin-bottom:6px;' + (isMe ? 'border-left:3px solid #3B82F6;' : '') + '">';
+            html += '<span style="color:' + (isMe ? '#3B82F6' : '#CBD5E1') + ';font-size:14px;">' + p.fio + (isMe ? ' (вы)' : '') + '</span>';
+            html += '<span style="color:#94A3B8;font-size:13px;">' + p.group + '</span>';
+            html += '</div>';
+        });
+
+        if (isPriv && (isShiftRole || isCanteen)) {
+            html += '<button type="button" onclick="distributeNow(\'' + dateStr + '\',\'' + role + '\')" style="width:100%;margin-top:12px;padding:10px;background:#8B5CF6;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;">Распределить сейчас</button>';
+            html += '<p style="color:#64748B;font-size:11px;margin-top:4px;text-align:center;">Ручное распределение (перезапишет текущее)</p>';
+        }
+
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<p style="color:#f87171;">Ошибка</p>';
+    }
+}
+
+async function distributeNow(dateStr, role) {
+    if (!confirm('Распределить людей по сменам/объектам? Текущее распределение будет перезаписано.')) return;
+    try {
+        var form = new FormData();
+        form.append('date', dateStr);
+        form.append('role', role);
+        form.append('telegram_id', userId);
+        var res = await fetch(baseUrl + '/api/duties/distribute', { method: 'POST', body: form });
+        var data = res.ok ? await res.json() : {};
+        if (res.ok) {
+            showToast('Распределение выполнено: ' + (data.count || 0) + ' назначений');
+            openDutyDetail(dateStr, role);
+        } else {
+            showToast(data.detail || 'Ошибка');
+        }
+    } catch (e) {
+        showToast('Ошибка сети');
+    }
+}
+
+function closeDutyDetail() {
+    var m = document.getElementById('duty-detail-modal');
+    if (m) m.style.display = 'none';
+}
+
+async function loadDutyStats() {
+    var el = document.getElementById('duty-stats-content');
+    if (!el) return;
+    el.innerHTML = '<p style="color:#94A3B8;">Загрузка...</p>';
+    try {
+        var res = await fetch(baseUrl + '/api/duties?telegram_id=' + userId);
+        var data = res.ok ? await res.json() : {};
+        var duties = data.duties || [];
+        var total = duties.length;
+        var roleCount = {};
+        duties.forEach(function(d) {
+            var r = d.role_full || d.role;
+            roleCount[r] = (roleCount[r] || 0) + 1;
+        });
+        var html = '<h4 style="color:#93C5FD;margin:0 0 12px 0;">Ваша статистика за все время</h4>';
+        html += '<p style="color:#CBD5E1;margin-bottom:12px;">Всего нарядов: <strong>' + total + '</strong></p>';
+        Object.keys(roleCount).sort(function(a, b) { return roleCount[b] - roleCount[a]; }).forEach(function(r) {
+            var pct = total > 0 ? Math.round(100 * roleCount[r] / total) : 0;
+            html += '<div style="display:flex;justify-content:space-between;padding:8px 12px;background:#1E293B;border-radius:8px;margin-bottom:6px;">';
+            html += '<span style="color:#CBD5E1;">' + r + '</span>';
+            html += '<span style="color:#3B82F6;font-weight:600;">' + roleCount[r] + ' (' + pct + '%)</span>';
+            html += '</div>';
+        });
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p style="color:#f87171;">Ошибка загрузки</p>';
+    }
+}
+
+function openSurveyResultsView() {
+    document.getElementById('main-content').classList.add('hidden');
+    document.getElementById('main-content').style.display = 'none';
+    document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
+    document.getElementById('survey-screen').style.display = 'block';
+    document.getElementById('survey-list-block').style.display = 'none';
+    document.getElementById('survey-already-passed').style.display = 'block';
+    var r = document.getElementById('survey-results-in-tab');
+    if (r && window._surveyResultsHtml) { r.innerHTML = window._surveyResultsHtml; r.style.display = 'block'; }
+}
+
 function updateDutySurveyBanner() {
     var banner = document.getElementById('duty-survey-banner');
     if (!banner) return;
     if (window.surveyWeightsCalculated) {
-        banner.innerHTML = '<p style="color: #10B981; margin: 0; font-size: 14px;">Опрос завершён, веса рассчитаны.</p><a href="#" onclick="switchTab(\'survey\'); return false;" style="color: #60A5FA; font-size: 13px;">Посмотреть результаты</a>';
+        banner.innerHTML = '<p style="color: #10B981; margin: 0; font-size: 14px;">Опрос завершён, веса рассчитаны.</p><a href="#" onclick="openSurveyResultsView(); return false;" style="color: #60A5FA; font-size: 13px;">Посмотреть результаты</a>';
         banner.style.background = '#0f172a';
         banner.style.borderColor = '#10B981';
     } else {
@@ -1650,6 +1920,7 @@ function bindDutyUploadOnce() {
                 var msg = (data.message || ('График загружен: ' + (data.count || 0) + ' записей'));
                 showToast(msg);
                 fileInput.value = '';
+                await loadDutyAvailableMonths();
                 loadDutiesForMonth();
                 loadDuties(userId);
             } else {
@@ -1661,105 +1932,88 @@ function bindDutyUploadOnce() {
     });
 }
 
-/**
- * Загружает наряды пользователя на текущий месяц
- */
 async function loadDutiesForMonth() {
-    const container = document.getElementById('duties-list-container');
+    var container = document.getElementById('duties-list-container');
     if (!container) return;
-    
+    var monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    var monthEl = document.getElementById('current-month');
+    if (monthEl) monthEl.textContent = monthNames[currentMonth - 1] + ' ' + currentYear;
+
+    var ym = currentYear + '-' + String(currentMonth).padStart(2, '0');
+    var hasData = dutyAvailableMonths.indexOf(ym) !== -1;
+    var monthNav = document.getElementById('duty-month-nav');
+    var tabs = document.getElementById('duty-tabs');
+    var statsEl = document.getElementById('duties-month-stats');
+
+    if (!hasData && dutyAvailableMonths.length === 0) {
+        if (monthNav) monthNav.style.display = 'none';
+        if (tabs) tabs.style.display = 'none';
+        if (statsEl) statsEl.style.display = 'none';
+        container.innerHTML = '<p style="color: #94A3B8; text-align: center; padding: 20px;">График нарядов ещё не загружен.<br/><small>Обратитесь к сержанту</small></p>';
+        return;
+    }
+    if (monthNav) monthNav.style.display = 'flex';
+    if (tabs) tabs.style.display = 'flex';
+
     try {
-        const response = await fetch(`${baseUrl}/api/duties?telegram_id=${userId}&month=${currentMonth}&year=${currentYear}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        
+        var response = await fetch(baseUrl + '/api/duties?telegram_id=' + userId + '&month=' + currentMonth + '&year=' + currentYear);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        var data = await response.json();
+
         if (data.error) {
-            const statsEl = document.getElementById('duties-month-stats');
             if (statsEl) statsEl.style.display = 'none';
-            const friendly = data.error.includes('График нарядов') || data.error.includes('не загружен');
-            container.innerHTML = friendly
-                ? `<p style="color: #94A3B8; text-align: center; padding: 20px;">${data.error}<br/><small>Обратитесь к сержанту</small></p>`
-                : `<p style="color: #f87171;">Ошибка: ${data.error}</p>`;
-            var monthNav = document.querySelector('#duties-screen div[style*="justify-content: space-between"]');
-            if (monthNav) monthNav.style.display = 'none';
-            var dateSearch = document.getElementById('duty-date-search');
-            if (dateSearch && dateSearch.closest('div')) dateSearch.closest('div').style.display = 'none';
+            container.innerHTML = '<p style="color: #94A3B8; text-align: center; padding: 20px;">' + data.error + '</p>';
             return;
         }
-        var monthNav = document.querySelector('#duties-screen div[style*="justify-content: space-between"]');
-        if (monthNav) monthNav.style.display = 'flex';
-        var dateSearchWrap = document.getElementById('duty-date-search') && document.getElementById('duty-date-search').closest('div');
-        if (dateSearchWrap) dateSearchWrap.style.display = 'block';
-        // Обновляем заголовок месяца
-        const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-                           'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-        document.getElementById('current-month').textContent = `${monthNames[currentMonth - 1]} ${currentYear}`;
 
-        // Статистика по месяцу
-        const totalInMonth = data.total != null ? data.total : data.duties.length;
-        const statsEl = document.getElementById('duties-month-stats');
+        var today = new Date().toISOString().slice(0, 10);
+        var duties = data.duties || [];
+        var filtered;
+        if (dutyCurrentTab === 'upcoming') {
+            filtered = duties.filter(function(d) { return d.date >= today; });
+        } else {
+            filtered = duties.filter(function(d) { return d.date < today; });
+        }
+
         if (statsEl) {
-            statsEl.textContent = 'В этом месяце: ' + totalInMonth + ' наряд(ов)';
+            var upcoming = duties.filter(function(d) { return d.date >= today; }).length;
+            var past = duties.length - upcoming;
+            statsEl.textContent = 'Всего: ' + duties.length + ' | Предстоящие: ' + upcoming + ' | Прошедшие: ' + past;
             statsEl.style.display = 'block';
         }
-        
-        if (data.duties.length === 0) {
-            container.innerHTML = '<p style="color: #64748B; text-align: center;">Нарядов на этот месяц нет</p>';
+
+        if (filtered.length === 0) {
+            container.innerHTML = '<p style="color: #64748B; text-align: center;padding:16px;">' + (dutyCurrentTab === 'upcoming' ? 'Нет предстоящих нарядов' : 'Нет прошедших нарядов') + '</p>';
             return;
         }
-        
-        // Группируем наряды по датам
-        const byDate = {};
-        data.duties.forEach(duty => {
-            if (!byDate[duty.date]) {
-                byDate[duty.date] = [];
-            }
+
+        var byDate = {};
+        filtered.forEach(function(duty) {
+            if (!byDate[duty.date]) byDate[duty.date] = [];
             byDate[duty.date].push(duty);
         });
-        
-        let html = '';
-        Object.keys(byDate).sort().forEach(date => {
-            const dutiesOnDate = byDate[date];
-            const dateFormatted = formatDate(date);
-            
-            html += `<div style="background: #1E293B; border-radius: 8px; padding: 12px; margin-bottom: 12px;">`;
-            html += `<h4 style="color: #93C5FD; margin: 0 0 8px 0; font-size: 16px;">${dateFormatted}</h4>`;
-            
-            dutiesOnDate.forEach(duty => {
-                html += `<div style="background: #0f172a; border-radius: 6px; padding: 10px; margin-bottom: 8px;">`;
-                html += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">`;
-                html += `<span style="color: #CBD5E1; font-weight: 500;">${duty.role_full || duty.role}</span>`;
-                if (duty.group) {
-                    html += `<span style="color: #94A3B8; font-size: 13px;">Группа: ${duty.group}</span>`;
-                }
-                html += `</div>`;
-                
-                // Показываем участников наряда
-                if (duty.partners && duty.partners.length > 0) {
-                    html += `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #334155;">`;
-                    html += `<p style="color: #94A3B8; font-size: 12px; margin: 0 0 6px 0;">Участники наряда:</p>`;
-                    duty.partners.forEach(partner => {
-                        const isMe = userFio && partner.fio === userFio;
-                        html += `<div style="display: flex; justify-content: space-between; padding: 4px 0;">`;
-                        html += `<span style="color: ${isMe ? '#3B82F6' : '#CBD5E1'}; font-size: 13px;">${partner.fio}${isMe ? ' (вы)' : ''}</span>`;
-                        if (partner.group) {
-                            html += `<span style="color: #64748B; font-size: 12px;">${partner.group}</span>`;
-                        }
-                        html += `</div>`;
-                    });
-                    html += `</div>`;
-                }
-                
-                html += `</div>`;
+
+        var html = '';
+        var sortedDates = Object.keys(byDate).sort();
+        if (dutyCurrentTab === 'past') sortedDates.reverse();
+        sortedDates.forEach(function(date) {
+            var dutiesOnDate = byDate[date];
+            var isPast = date < today;
+            html += '<div style="background:' + (isPast ? '#1a2332' : '#1E293B') + ';border-radius:8px;padding:12px;margin-bottom:10px;' + (isPast ? 'opacity:0.7;' : '') + '">';
+            html += '<h4 style="color:' + (isPast ? '#64748B' : '#93C5FD') + ';margin:0 0 8px 0;font-size:15px;">' + formatDate(date) + '</h4>';
+            dutiesOnDate.forEach(function(duty) {
+                html += '<div onclick="openDutyDetail(\'' + date + '\',\'' + duty.role + '\')" style="background:#0f172a;border-radius:6px;padding:10px;margin-bottom:6px;cursor:pointer;border-left:3px solid #3B82F6;">';
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                html += '<span style="color:#CBD5E1;font-weight:500;">' + (duty.role_full || duty.role) + '</span>';
+                var pCount = duty.partners ? duty.partners.length : 0;
+                html += '<span style="color:#94A3B8;font-size:12px;">' + pCount + ' чел.</span>';
+                html += '</div></div>';
             });
-            
-            html += `</div>`;
+            html += '</div>';
         });
-        
         container.innerHTML = html;
-        console.log(`✅ Загружено ${data.duties.length} нарядов на ${monthNames[currentMonth - 1]} ${currentYear}`);
     } catch (err) {
-        console.error('❌ Ошибка загрузки нарядов:', err);
+        console.error('Ошибка загрузки нарядов:', err);
         container.innerHTML = '<p style="color: #f87171;">Ошибка загрузки нарядов</p>';
     }
 }
@@ -1768,13 +2022,25 @@ async function loadDutiesForMonth() {
  * Изменяет месяц для просмотра нарядов
  */
 function changeMonth(delta) {
-    currentMonth += delta;
-    if (currentMonth > 12) {
-        currentMonth = 1;
-        currentYear++;
-    } else if (currentMonth < 1) {
-        currentMonth = 12;
-        currentYear--;
+    if (dutyAvailableMonths.length > 0) {
+        var ym = currentYear + '-' + String(currentMonth).padStart(2, '0');
+        var idx = dutyAvailableMonths.indexOf(ym);
+        var next = idx + delta;
+        if (next >= 0 && next < dutyAvailableMonths.length) {
+            var parts = dutyAvailableMonths[next].split('-');
+            currentYear = parseInt(parts[0]);
+            currentMonth = parseInt(parts[1]);
+        } else if (delta > 0) {
+            currentMonth += delta;
+            if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+        } else {
+            currentMonth += delta;
+            if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+        }
+    } else {
+        currentMonth += delta;
+        if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+        else if (currentMonth < 1) { currentMonth = 12; currentYear--; }
     }
     loadDutiesForMonth();
 }
@@ -1791,7 +2057,7 @@ async function searchDutyByDate(dateStr) {
     if (!resultsDiv || !contentDiv) return;
     
     try {
-        const response = await fetch(`${baseUrl}/api/duties/by-date?date=${dateStr}`);
+        const response = await fetch(`${baseUrl}/api/duties/by-date?date=${dateStr}&telegram_id=${userId}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         
@@ -1807,23 +2073,17 @@ async function searchDutyByDate(dateStr) {
             return;
         }
         
-        let html = `<p style="color: #94A3B8; margin-bottom: 12px;">Всего участников: ${data.total}</p>`;
+        let html = '<h4 style="color:#93C5FD;margin:0 0 12px;">' + formatDate(dateStr) + ' — ' + data.total + ' чел.</h4>';
         
-        Object.keys(data.by_role).forEach(role => {
-            const roleFull = get_full_role(role) || role;
-            const participants = data.by_role[role];
+        Object.keys(data.by_role).forEach(function(role) {
+            var roleFull = get_full_role(role) || role;
+            var participants = data.by_role[role];
             
-            html += `<div style="background: #1E293B; border-radius: 8px; padding: 12px; margin-bottom: 12px;">`;
-            html += `<h5 style="color: #93C5FD; margin: 0 0 8px 0; font-size: 15px;">${roleFull} (${participants.length} чел.)</h5>`;
-            
-            participants.forEach(p => {
-                html += `<div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #334155;">`;
-                html += `<span style="color: #CBD5E1; font-size: 14px;">${p.fio}</span>`;
-                html += `<span style="color: #94A3B8; font-size: 13px;">${p.group} (${p.course} курс)</span>`;
-                html += `</div>`;
-            });
-            
-            html += `</div>`;
+            html += '<div onclick="openDutyDetail(\'' + dateStr + '\',\'' + role + '\')" style="background:#1E293B;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;border-left:4px solid #3B82F6;">';
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+            html += '<span style="color:#CBD5E1;font-weight:600;">' + roleFull + '</span>';
+            html += '<span style="color:#94A3B8;font-size:13px;">' + participants.length + ' чел. →</span>';
+            html += '</div></div>';
         });
         
         contentDiv.innerHTML = html;

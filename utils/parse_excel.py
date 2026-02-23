@@ -36,11 +36,16 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
                 if str(val).strip().lower() not in ['nan', '']:
                     group = str(val).strip()
                     break
-        # 1.1 Год — E3 (сержанты указывают год в ячейке E3, чтобы не путаться)
+        # 1.1 Год — AO4 (клише =$AO$4: год в одной ячейке, чтобы графики не терялись)
+        # AO = 41-я колонка (0-based: 40), строка 4 = индекс 3
         year = None
-        if len(df) > 2 and 4 < len(df.iloc[2]) and pd.notna(df.iloc[2, 4]):
+        if len(df) > 3 and len(df.columns) > 40 and pd.notna(df.iloc[3, 40]):
             try:
-                y = int(float(df.iloc[2, 4]))
+                val = df.iloc[3, 40]
+                if hasattr(val, '__int__') or isinstance(val, (int, float)):
+                    y = int(float(val))
+                else:
+                    y = int(float(str(val).strip()))
                 if 2020 <= y <= 2030:
                     year = y
             except Exception:

@@ -685,6 +685,35 @@ body::-webkit-scrollbar-thumb:hover {
   }
 }
 
+/* === Тулбар нарядов (горизонтальный скролл) === */
+#duty-toolbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+#duty-toolbar::-webkit-scrollbar {
+  display: none;
+}
+.duty-tool-btn {
+  transition: background 0.2s, color 0.2s;
+  flex-shrink: 0;
+}
+.duty-tool-btn:active {
+  transform: scale(0.95);
+}
+
+/* === Сетка календаря нарядов === */
+#duty-calendar-grid > div {
+  transition: background 0.15s;
+}
+#duty-calendar-grid > div:active {
+  background: #334155 !important;
+}
+
+/* === Модалка деталей наряда === */
+#duty-detail-modal {
+  animation: fadeIn 0.2s ease;
+}
+
 /* === Анимации === */
 @keyframes fadeIn {
   from { opacity: 0; }
