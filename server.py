@@ -834,6 +834,7 @@ async def upload_schedule(
                 """INSERT OR REPLACE INTO duty_schedule (fio, date, role, group_name, enrollment_year, gender)
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (d["fio"], d["date"], d["role"], d["group"], enrollment_year, d.get("gender", "male"))
+            )
         conn.commit()
         conn.close()
         return {
