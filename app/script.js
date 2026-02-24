@@ -1222,8 +1222,8 @@ async function checkSurveyStateAndShowFemale() {
         if (content) content.style.display = 'none';
         alreadyPassed.style.display = 'block';
         alreadyPassed.querySelector('h2').textContent = '📊 Опрос для девушек';
-        var passedBody = alreadyPassed.querySelector('p');
-        if (passedBody) passedBody.textContent = 'Этот опрос только для девушек. Вы можете посмотреть результаты.';
+        var passedBody = alreadyPassed.querySelector('#survey-already-text');
+        if (passedBody) passedBody.textContent = 'Этот опрос только для девушек. Вы можете посмотреть результаты в списке опросов.';
         var resultsWrap = document.getElementById('survey-results-in-tab');
         if (resultsWrap) { resultsWrap.style.display = 'none'; resultsWrap.innerHTML = ''; }
         try {
@@ -1238,8 +1238,6 @@ async function checkSurveyStateAndShowFemale() {
                 }
             }
         } catch (e) { console.warn(e); }
-        var btnToHome = alreadyPassed.querySelector('.survey-intro-start-btn');
-        if (btnToHome) btnToHome.textContent = 'На главную';
         return;
     }
     try {
@@ -1249,8 +1247,8 @@ async function checkSurveyStateAndShowFemale() {
         if (data.voted && data.survey_stage === 'female' && data.results && data.results.length > 0) {
             alreadyPassed.style.display = 'block';
             alreadyPassed.querySelector('h2').textContent = '📊 Опрос для девушек';
-            var p1 = alreadyPassed.querySelectorAll('p')[1];
-            if (p1) p1.textContent = 'Результаты ниже.';
+            var p1 = alreadyPassed.querySelector('#survey-already-text');
+            if (p1) p1.textContent = 'Результаты ниже на этой странице.';
             intro.style.display = 'none';
             content.style.display = 'none';
             return;

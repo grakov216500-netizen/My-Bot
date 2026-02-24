@@ -1165,7 +1165,7 @@ async def check_schedule_month(group: str, enrollment_year: int, month: str):
         conn.close()
 
 
-SCHEDULE_TEMPLATE_PATH = r"C:\Users\MSI\Desktop\Графики нарядов\graph_ИО6 — копия.xlsx"
+SCHEDULE_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "schedule_template_custom.xlsx")
 
 
 def _generate_schedule_template_bytes():

@@ -323,24 +323,18 @@
       <div id="survey-already-passed" class="survey-intro-block" style="display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="color: #93C5FD; margin: 0;">📊 Опрос сложности нарядов</h2>
-          <div>
-            <button type="button" onclick="showSurveyList()" class="survey-back-btn" style="margin-right:8px;">← К списку</button>
-            <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
-          </div>
+          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
         </div>
         <p style="color: #10B981; font-size: 16px; font-weight: 600; margin-bottom: 12px;">✅ Вы уже прошли опрос.</p>
-        <p style="color: #94A3B8; font-size: 14px;">Веса объектов и результаты — ниже. Повторно проходить не нужно.</p>
+        <p id="survey-already-text" style="color: #94A3B8; font-size: 14px;">Веса объектов и результаты можно посмотреть в списке опросов.</p>
         <div id="survey-results-in-tab" style="display: none; margin-top: 16px;"></div>
-        <button type="button" onclick="switchTab('home')" class="survey-intro-start-btn" style="margin-top: 20px;">На главную</button>
+        <button type="button" onclick="showSurveyList()" class="survey-intro-start-btn" style="margin-top: 20px;">← К списку</button>
       </div>
       <!-- Ввод в курс дела: перелистываемые карточки -->
       <div id="survey-intro" class="survey-intro-block" style="display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="color: #93C5FD; margin: 0;">📊 Опрос сложности нарядов</h2>
-          <div>
-            <button type="button" onclick="showSurveyList()" class="survey-back-btn" style="margin-right:8px;">← К списку</button>
-            <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
-          </div>
+          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
         </div>
         <div class="survey-intro-cards">
           <div class="survey-intro-card active" data-card="0">
@@ -377,10 +371,7 @@
       <div id="survey-content" class="survey-content-block" style="display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="color: #93C5FD; margin: 0;">📊 Опрос сложности нарядов</h2>
-          <div>
-            <button type="button" onclick="showSurveyList()" class="survey-back-btn" style="margin-right:8px;">← К списку</button>
-            <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
-          </div>
+          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
         </div>
         <p style="color: #CBD5E1; margin-bottom: 16px;" id="survey-description">Какой наряд сложнее морально/физически? Выберите один вариант.</p>
         <div id="survey-stage-indicator" style="color: #93C5FD; font-size: 14px; margin-bottom: 12px;"></div>
@@ -394,10 +385,7 @@
       <div id="survey-custom-block" style="display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="color: #93C5FD; margin: 0;" id="survey-custom-title">Опрос</h2>
-          <div>
-            <button type="button" onclick="showSurveyList()" class="survey-back-btn" style="margin-right:8px;">← К списку</button>
-            <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
-          </div>
+          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
         </div>
         <div id="survey-custom-options" style="display: flex; flex-direction: column; gap: 8px;"></div>
         <div id="survey-custom-complete-wrap" style="margin-top: 16px; display: none;">
