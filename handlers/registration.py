@@ -12,14 +12,38 @@ from telegram.ext import (
 from database import get_db, update_user_last_active
 from utils.welcome_message import get_welcome_message
 from utils.course_calculator import get_course_info
-from datetime import datetime
+from datetime import datetime, date
 import logging
 
 logger = logging.getLogger(__name__)
 
-# ===== КОНСТАНТЫ =====
+# ===== КОНСТАНТЫ И ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
 FACULTY_CHOICES = ['Инженерно-технический', 'Юридический']
-ENROLLMENT_YEARS = [2021, 2022, 2023, 2024, 2025, 2026]
+
+
+def get_dynamic_enrollment_years() -> list[int]:
+    """
+    Динамически формирует список годов набора для регистрации.
+
+    Логика:
+    - опираемся на учебный год, где перевод на следующий курс происходит 15 августа;
+    - показываем только актуальные 5 наборов (1–5 курс);
+    - будущий набор (ещё не начавшийся 1 курс) не показываем;
+    - самые старые выпускники (6+ курс) исчезают из кнопок, но остаются в БД.
+    """
+    today = date.today()
+    # Такой же расчёт учебного года, как в get_current_course
+    if today.month < 8 or (today.month == 8 and today.day < 15):
+        academic_year = today.year - 1
+    else:
+        academic_year = today.year
+
+    years: list[int] = []
+    # Последние 5 наборов: с academic_year-4 по academic_year
+    for y in range(academic_year - 4, academic_year + 1):
+        if y >= 2020:  # нижняя граница «здравого смысла»
+            years.append(y)
+    return years
 GENDER_CHOICES = [
     ('male', '👨 Мужской'),
     ('female', '👩 Женский')
@@ -27,6 +51,8 @@ GENDER_CHOICES = [
 
 # ===== СОСТОЯНИЯ =====
 CHOOSE_FACULTY, CHOOSE_YEAR, CHOOSE_GROUP, ENTER_CUSTOM_GROUP, ENTER_FIO, CHOOSE_GENDER, CONFIRMATION = range(7)
+# Отдельное состояние для ручного ввода года
+ENTER_YEAR_MANUAL = 7
 
 # === ОТОБРАЖЕНИЕ РОЛЕЙ ===
 ROLE_TITLES = {
@@ -39,9 +65,10 @@ ROLE_TITLES = {
 # ===== КЛАВИАТУРЫ =====
 def get_year_keyboard():
     """Клавиатура: год поступления + курс"""
+    years = get_dynamic_enrollment_years()
     keyboard = []
     row = []
-    for year in ENROLLMENT_YEARS:
+    for year in years:
         course_info = get_course_info(year)
         btn_text = f"📅 {year} ({course_info['current']} курс)"
         row.append(InlineKeyboardButton(btn_text, callback_data=f"year_{year}"))
@@ -50,6 +77,10 @@ def get_year_keyboard():
             row = []
     if row:
         keyboard.append(row)
+    # Дополнительная кнопка — ручной ввод года набора
+    keyboard.append([
+        InlineKeyboardButton("✏️ Ввести год вручную", callback_data="year_manual")
+    ])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -156,14 +187,16 @@ async def choose_faculty(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def choose_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    # Обрабатываем только конкретные года year_XXXX
     try:
         year = int(query.data.replace("year_", ""))
     except (ValueError, IndexError):
         await query.edit_message_text("❌ Неверные данные.")
         return ConversationHandler.END
 
-    if year not in ENROLLMENT_YEARS:
-        await query.edit_message_text("❌ Неверный год.")
+    # Проверяем, что год в актуальном диапазоне
+    if year not in get_dynamic_enrollment_years():
+        await query.edit_message_text("❌ Этот год сейчас недоступен для регистрации.")
         return ConversationHandler.END
 
     context.user_data['enrollment_year'] = year
@@ -174,6 +207,55 @@ async def choose_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Выберите вашу <b>группу</b>:",
         reply_markup=get_group_keyboard(faculty, year),
         parse_mode='HTML'
+    )
+    return CHOOSE_GROUP
+
+
+async def ask_year_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Запрос ручного ввода года поступления."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "✏️ Введите <b>год поступления</b> (например, <code>2023</code>):",
+        parse_mode="HTML"
+    )
+    return ENTER_YEAR_MANUAL
+
+
+async def handle_year_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка текста года поступления, введённого вручную."""
+    text = (update.message.text or "").strip()
+    try:
+        year = int(text)
+    except ValueError:
+        await update.message.reply_text(
+            "❌ Неверный формат.\nВведите год в виде четырёх цифр, например 2023."
+        )
+        return ENTER_YEAR_MANUAL
+
+    dynamic_years = get_dynamic_enrollment_years()
+    if not dynamic_years:
+        await update.message.reply_text("❌ Сейчас регистрация по годам недоступна.")
+        return ConversationHandler.END
+
+    min_year = min(dynamic_years)
+    max_year = max(dynamic_years)
+
+    if year < min_year or year > max_year:
+        await update.message.reply_text(
+            f"❌ Год должен быть в диапазоне {min_year}–{max_year}.\n"
+            f"Попробуйте ещё раз:"
+        )
+        return ENTER_YEAR_MANUAL
+
+    context.user_data['enrollment_year'] = year
+    faculty = context.user_data.get('faculty', FACULTY_CHOICES[0])
+
+    await update.message.reply_text(
+        f"📅 <b>Год поступления:</b> {year}\n\n"
+        "Теперь выберите вашу <b>группу</b>:",
+        reply_markup=get_group_keyboard(faculty, year),
+        parse_mode="HTML"
     )
     return CHOOSE_GROUP
 
@@ -509,12 +591,16 @@ def get_registration_handler():
         ],
         states={
             CHOOSE_FACULTY: [CallbackQueryHandler(choose_faculty, pattern='^faculty_')],
-            CHOOSE_YEAR: [CallbackQueryHandler(choose_year, pattern='^year_')],
+            CHOOSE_YEAR: [
+                CallbackQueryHandler(ask_year_manual, pattern='^year_manual$'),
+                CallbackQueryHandler(choose_year, pattern='^year_')
+            ],
             CHOOSE_GROUP: [CallbackQueryHandler(choose_group, pattern='^group_')],
             ENTER_CUSTOM_GROUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_custom_group)],
             ENTER_FIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_fio)],
             CHOOSE_GENDER: [CallbackQueryHandler(choose_gender, pattern='^gender_')],
-            CONFIRMATION: [CallbackQueryHandler(confirmation, pattern='^confirm_')]
+            CONFIRMATION: [CallbackQueryHandler(confirmation, pattern='^confirm_')],
+            ENTER_YEAR_MANUAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_year_manual)],
         },
         fallbacks=[CommandHandler('cancel', cancel_registration)],
         allow_reentry=True,

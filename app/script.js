@@ -1822,6 +1822,12 @@ function dutySetView(view) {
         b.style.color = active ? 'white' : '#CBD5E1';
     });
     if (view === 'my') loadDutiesForMonth();
+    if (view === 'search') {
+        // Календарь по датам для всего курса
+        calM = currentMonth;
+        calY = currentYear;
+        renderDutyCalendar();
+    }
     if (view === 'stats') loadDutyStats();
 }
 

@@ -178,13 +178,16 @@
         </div>
       </div>
 
-      <!-- ===== ВИД 2: АРХИВ ===== -->
+      <!-- ===== ВИД 2: ПОИСК ПО ДАТЕ (КАЛЕНДАРЬ) ===== -->
       <div id="duty-view-search" style="display: none;">
-        <p style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0;">Выберите дату для просмотра нарядов</p>
-        <input type="date" id="duty-date-search" style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #CBD5E1; font-size: 14px; margin-bottom: 12px; box-sizing: border-box;" onchange="searchDutyByDate(this.value)" />
-        <div id="date-search-results" style="display: none;">
-          <div id="date-search-content"></div>
+        <p style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0;">Календарь показывает наряды всего курса за выбранный месяц.</p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <button type="button" onclick="calMonth(-1)" style="background:#1E293B;border:none;color:#CBD5E1;padding:8px 16px;border-radius:8px;cursor:pointer;">←</button>
+          <h3 id="cal-month-label" style="color:#93C5FD;margin:0;font-size:16px;">Месяц</h3>
+          <button type="button" onclick="calMonth(1)" style="background:#1E293B;border:none;color:#CBD5E1;padding:8px 16px;border-radius:8px;cursor:pointer;">→</button>
         </div>
+        <div id="duty-calendar-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:12px;"></div>
+        <div id="duty-day-detail" style="display:none;padding:12px;background:#1E293B;border-radius:8px;"></div>
       </div>
 
       <!-- ===== ВИД 3: ГРАФИК (быстрые кнопки + скролл) ===== -->

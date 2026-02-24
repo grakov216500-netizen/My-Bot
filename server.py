@@ -1165,12 +1165,32 @@ async def check_schedule_month(group: str, enrollment_year: int, month: str):
         conn.close()
 
 
+SCHEDULE_TEMPLATE_PATH = r"C:\Users\MSI\Desktop\Графики нарядов\graph_ИО6 — копия.xlsx"
+
+
 def _generate_schedule_template_bytes():
-    """Генерирует .xlsx шаблон графика нарядов. Группа E1, год в AO4 (=$AO$4), ФИО F6:H21, месяц I4, дни I5:AM5, ячейки I6:AM21."""
+    """
+    Возвращает .xlsx шаблон графика нарядов.
+    В первую очередь пытаемся отдать пользовательский файл SCHEDULE_TEMPLATE_PATH,
+    чтобы курсанты скачивали именно ваш актуальный шаблон.
+    Если файла нет или произошла ошибка чтения — генерируем запасной шаблон
+    тем же форматом, который ожидает парсер (группа E1, год AO4, ФИО F6:H21,
+    месяц I4, дни I5:AM5, ячейки I6:AM21).
+    """
+    # 1. Пользовательский шаблон с диска
+    try:
+        if os.path.exists(SCHEDULE_TEMPLATE_PATH):
+            with open(SCHEDULE_TEMPLATE_PATH, "rb") as f:
+                return f.read()
+    except Exception as e:
+        print(f"[WARN] Не удалось прочитать пользовательский шаблон: {e}")
+
+    # 2. Резервный генератор (старый вариант через openpyxl)
     try:
         import openpyxl
     except ImportError:
         return None
+
     wb = openpyxl.Workbook()
     ws = wb.active
     if ws.title == "Sheet":
@@ -1179,9 +1199,9 @@ def _generate_schedule_template_bytes():
     ws["E1"] = "Группа (напр. ИО61)"
     ws["E2"] = ""
     # Год — AO4 (клише =$AO$4: в этой ячейке год, чтобы графики не терялись)
-    ws["AO4"] = 2025
+    from datetime import date as _date
+    ws["AO4"] = _date.today().year
     # Заголовки месяц/дни — I4:AM5
-    month_names = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
     ws.cell(4, 9, "месяц (напр. январь)")
     for c in range(1, 32):
         ws.cell(5, 8 + c, c)
@@ -1192,8 +1212,8 @@ def _generate_schedule_template_bytes():
     for r in range(7, 22):
         for c in range(6, 9):
             ws.cell(r, c, "")
-    # Подсказка по ролям
     ws.cell(22, 1, "Роли: к, дк, с, ад, гбр, зуб, столовая и т.д.")
+
     import io
     buf = io.BytesIO()
     wb.save(buf)
