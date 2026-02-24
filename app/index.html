@@ -153,7 +153,6 @@
       <!-- Горизонтальный тулбар: Мои наряды (объединены с календарём), Архив, График, Статистика -->
       <div id="duty-toolbar" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 12px; scrollbar-width: thin;">
         <button type="button" class="duty-tool-btn duty-tool-active" data-view="my" onclick="dutySetView('my')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #3B82F6; color: white; font-size: 13px; cursor: pointer;">Мои наряды</button>
-        <button type="button" class="duty-tool-btn" data-view="search" onclick="dutySetView('search')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">Архив</button>
         <button type="button" class="duty-tool-btn" data-view="upload" onclick="dutySetView('upload')" id="duty-tool-upload" style="display: none; white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">График</button>
         <button type="button" class="duty-tool-btn" data-view="stats" onclick="dutySetView('stats')" style="white-space: nowrap; padding: 8px 16px; border-radius: 20px; border: 1px solid #334155; background: #1E293B; color: #CBD5E1; font-size: 13px; cursor: pointer;">Статистика</button>
       </div>
@@ -176,21 +175,19 @@
         <div id="duties-list-container">
           <p style="color: #64748B; text-align: center;">Загрузка нарядов...</p>
         </div>
-      </div>
-
-      <!-- ===== ВИД 2: ПОИСК ПО ДАТЕ (КАЛЕНДАРЬ) ===== -->
-      <div id="duty-view-search" style="display: none;">
-        <p style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0;">Календарь показывает наряды всего курса за выбранный месяц.</p>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <!-- Календарь поиска по дате для всего курса (бывший «Архив») -->
+        <div style="margin-top:16px;padding-top:12px;border-top:1px dashed #334155;">
+          <p style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0;">Календарь показывает наряды всего курса за выбранный месяц.</p>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <button type="button" onclick="calMonth(-1)" style="background:#1E293B;border:none;color:#CBD5E1;padding:8px 16px;border-radius:8px;cursor:pointer;">←</button>
           <h3 id="cal-month-label" style="color:#93C5FD;margin:0;font-size:16px;">Месяц</h3>
           <button type="button" onclick="calMonth(1)" style="background:#1E293B;border:none;color:#CBD5E1;padding:8px 16px;border-radius:8px;cursor:pointer;">→</button>
+          </div>
+          <div id="duty-calendar-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:12px;"></div>
+          <div id="duty-day-detail" style="display:none;padding:12px;background:#1E293B;border-radius:8px;"></div>
         </div>
-        <div id="duty-calendar-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:12px;"></div>
-        <div id="duty-day-detail" style="display:none;padding:12px;background:#1E293B;border-radius:8px;"></div>
       </div>
-
-      <!-- ===== ВИД 3: ГРАФИК (быстрые кнопки + скролл) ===== -->
+      <!-- ===== ВИД 2: ГРАФИК (быстрые кнопки + скролл) ===== -->
       <div id="duty-view-upload" style="display: none;">
         <div id="duty-graph-quick-btns" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
           <button type="button" id="duty-graph-btn-upload" style="padding: 10px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px;">📤 Загрузить график</button>

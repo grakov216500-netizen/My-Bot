@@ -433,6 +433,10 @@ function switchTab(tabName) {
                 currentMonth = parseInt(last[1]);
             }
             loadDutiesForMonth();
+            // синхронизируем календарь архива внутри "Моих нарядов"
+            calM = currentMonth;
+            calY = currentYear;
+            renderDutyCalendar();
         });
         bindDutyUploadOnce();
     } else if (tabName === 'study') {
@@ -1812,7 +1816,7 @@ let calY = new Date().getFullYear();
 
 function dutySetView(view) {
     dutyCurrentView = view;
-    ['my', 'search', 'upload', 'stats'].forEach(function(v) {
+    ['my', 'upload', 'stats'].forEach(function(v) {
         var el = document.getElementById('duty-view-' + v);
         if (el) el.style.display = v === view ? 'block' : 'none';
     });
@@ -1822,12 +1826,6 @@ function dutySetView(view) {
         b.style.color = active ? 'white' : '#CBD5E1';
     });
     if (view === 'my') loadDutiesForMonth();
-    if (view === 'search') {
-        // Календарь по датам для всего курса
-        calM = currentMonth;
-        calY = currentYear;
-        renderDutyCalendar();
-    }
     if (view === 'stats') loadDutyStats();
 }
 
