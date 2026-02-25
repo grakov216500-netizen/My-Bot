@@ -33,13 +33,44 @@ CORS_ORIGINS = [
 ]
 
 
+def _is_allowed_origin(origin: str) -> bool:
+    """Проверка origin для CORS (в т.ч. варианты с/без слеша и поддомены GitHub Pages)."""
+    if not origin or not isinstance(origin, str):
+        return False
+    origin = origin.rstrip("/")
+    if origin in CORS_ORIGINS:
+        return True
+    if "grakov216500-netizen.github.io" in origin and (origin.startswith("https://") or origin.startswith("http://")):
+        return True
+    return False
+
+
 class ForceCORSHeadersMiddleware(BaseHTTPMiddleware):
     """Добавляет CORS-заголовки ко всем ответам (в т.ч. при 4xx/5xx), чтобы браузер не блокировал из-за CORS."""
     async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            # Ответ при исключении — иначе браузер не получит CORS и покажет "blocked by CORS"
+            origin = request.headers.get("origin") or "https://grakov216500-netizen.github.io"
+            if not _is_allowed_origin(origin):
+                origin = "https://grakov216500-netizen.github.io"
+            from starlette.responses import JSONResponse
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error", "error": str(e)},
+                headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                },
+            )
         origin = request.headers.get("origin")
-        if origin and origin in CORS_ORIGINS:
-            response.headers["Access-Control-Allow-Origin"] = origin
+        if origin and _is_allowed_origin(origin):
+            response.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
+        else:
+            response.headers.setdefault("Access-Control-Allow-Origin", "https://grakov216500-netizen.github.io")
         response.headers.setdefault("Access-Control-Allow-Credentials", "true")
         response.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
         response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, Authorization")
