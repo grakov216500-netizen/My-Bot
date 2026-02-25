@@ -45,6 +45,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const userOk = await loadUserProfile(userId);
     userRegistered = !!userOk;
+    if (userOk === 'server_error') {
+        showTechnicalWorks();
+        return;
+    }
     if (!userOk) {
         showUnregisteredState();
         return;
@@ -862,6 +866,7 @@ async function loadUserProfile(userId) {
         const response = await fetch(`${baseUrl}/api/user?telegram_id=${userId}`);
         const data = await response.json();
         if (!response.ok || data.error) {
+            if (response.status >= 500 || response.status === 0) return 'server_error';
             console.warn("⚠️ Пользователь не найден или ошибка:", data.error);
             return false;
         }
@@ -888,11 +893,29 @@ async function loadUserProfile(userId) {
         return true;
     } catch (err) {
         console.error("❌ Ошибка загрузки профиля:", err);
-        return false;
+        return 'server_error';
     }
 }
 
 let userRegistered = false;
+
+function showTechnicalWorks() {
+    var unreg = document.getElementById('unregistered-screen');
+    if (unreg) unreg.style.display = 'none';
+    var tech = document.getElementById('technical-works-screen');
+    if (tech) {
+        tech.style.display = 'flex';
+    }
+    var header = document.getElementById('main-header');
+    if (header) header.style.display = 'none';
+    document.querySelectorAll('.app-screen').forEach(function(el) { el.style.display = 'none'; });
+    var main = document.getElementById('main-content');
+    if (main) { main.classList.add('hidden'); main.style.display = 'none'; }
+    var fab = document.getElementById('add-task-fab');
+    if (fab) fab.style.display = 'none';
+    var nav = document.getElementById('bottom-nav');
+    if (nav) nav.style.display = 'none';
+}
 
 function showUnregisteredState() {
     userRegistered = false;
@@ -2473,6 +2496,8 @@ function fillDutyEditDropdowns() {
         }
     });
 })();
+
+async function loadProfileDutyStats() {
     var sickEl = document.getElementById('profile-stats-sick');
     var replacedEl = document.getElementById('profile-stats-replaced');
     if (!sickEl || !replacedEl) return;

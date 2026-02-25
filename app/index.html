@@ -20,6 +20,12 @@
     <p style="color: #64748B; font-size: 14px;">Сначала пройдите регистрацию в боте (кнопка «Начать регистрацию» или команда /start), затем снова откройте панель управления.</p>
   </div>
 
+  <!-- Экран «Технические работы» при недоступности сервера -->
+  <div id="technical-works-screen" style="display: none; position: fixed; inset: 0; background: #0F172A; z-index: 9999; flex-direction: column; justify-content: center; align-items: center; padding: 24px; box-sizing: border-box;">
+    <p style="color: #FBBF24; font-size: 20px; margin-bottom: 12px;">⚠️ Технические работы</p>
+    <p style="color: #94A3B8; font-size: 14px; text-align: center;">Сервер временно недоступен. Попробуйте позже.</p>
+  </div>
+
   <!-- Шапка: клик по аватару → Мой профиль -->
   <header class="header" id="main-header">
     <div class="user-section clickable-profile" id="open-profile-btn" role="button" tabindex="0" onclick="openProfileScreen(); return false;" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
