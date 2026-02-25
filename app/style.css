@@ -22,6 +22,7 @@
   z-index: 5;
   background: #0F172A;
   padding: 16px;
+  padding-top: 56px; /* чтобы шапка не загораживала первый блок (погода, Мои данные) */
   -webkit-overflow-scrolling: touch;
 }
 .app-screen.active {
@@ -30,6 +31,7 @@
 #main-content {
   min-height: 100vh;
   padding-bottom: 80px;
+  padding-top: 56px; /* место под sticky-шапку, чтобы не загораживала погоду и контент */
 }
 #main-content.hidden {
   display: none !important;
@@ -579,6 +581,9 @@ body::-webkit-scrollbar-thumb:hover {
   font-size: 20px;
   cursor: pointer;
   padding: 4px 8px;
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
 }
 .survey-intro-block,
 .survey-content-block {

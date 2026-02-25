@@ -55,6 +55,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     await loadDuties(userId);
     await loadSurveyResults();
+    loadWeather();
 });
 
 let currentTab = 'home';
@@ -156,22 +157,21 @@ function setupProfileAndAdmin() {
     if (adminLoadBtn) adminLoadBtn.addEventListener('click', loadAdminUsersList);
 }
 
-async function finalizeSurvey() {
+async function finalizeSurvey(stage) {
     if (userRole !== 'admin' && userRole !== 'assistant') return;
     try {
         const res = await fetch(baseUrl + '/api/survey/finalize', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ admin_id: userId })
+            body: JSON.stringify({ admin_id: userId, stage: stage || null })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Ошибка');
         const voted = data.total_voted != null ? data.total_voted : 0;
-        document.getElementById('survey-screen').style.display = 'none';
-        switchTab('home');
-        await loadSurveyResults();
-        await loadDuties(userId);
-        showToast('Опрос завершён. Проголосовало: ' + voted + ' чел.');
+        var nextEl = document.getElementById('survey-next-period');
+        if (nextEl && data.next_period) nextEl.textContent = 'До следующего периода: ' + data.next_period;
+        showToast('Веса сохранены. Проголосовало: ' + voted + ' чел.');
+        loadSurveyList();
     } catch (e) {
         showToast(e.message || 'Ошибка завершения опроса');
     }
@@ -970,11 +970,12 @@ async function loadDuties(userId) {
             const roleFull = data.next_duty.role_full || data.next_duty.role;
             const daysLeft = getDaysLeft(data.next_duty.date);
             const dateFormatted = formatDate(data.next_duty.date);
+            const dayOfWeek = getDayOfWeek(data.next_duty.date);
 
             widget.innerHTML = `
                 <h3>🎖️ Ближайший наряд</h3>
                 <p>${roleFull}</p>
-                <p>Через ${daysLeft} дней (${dateFormatted})</p>
+                <p>Через ${daysLeft} дней — ${dateFormatted}, ${dayOfWeek}</p>
             `;
         } else {
             // Если таблица duties существует, но записей нет — предлагаем пройти опрос
@@ -1049,11 +1050,14 @@ async function loadSurveyList() {
         });
         var finalizeWrap = document.getElementById('survey-finalize-in-list');
         if (finalizeWrap) finalizeWrap.style.display = (userRole === 'admin' || userRole === 'assistant') ? 'block' : 'none';
-        var finalizeBtn = document.getElementById('survey-finalize-in-list-btn');
-        if (finalizeBtn && !finalizeBtn._bound) {
-            finalizeBtn._bound = true;
-            finalizeBtn.addEventListener('click', finalizeSurvey);
-        }
+        ['survey-finalize-main-btn', 'survey-finalize-canteen-btn', 'survey-finalize-female-btn'].forEach(function(id, idx) {
+            var btn = document.getElementById(id);
+            var stage = idx === 0 ? 'main' : (idx === 1 ? 'canteen' : 'female');
+            if (btn && !btn._finalizeBound) {
+                btn._finalizeBound = true;
+                btn.addEventListener('click', function() { finalizeSurvey(stage); });
+            }
+        });
         if (data.custom && data.custom.length > 0) {
             customSection.style.display = 'block';
             customCards.innerHTML = '';
@@ -1261,6 +1265,8 @@ async function checkSurveyStateAndShowFemale() {
         if (content) content.style.display = 'none';
         alreadyPassed.style.display = 'block';
         alreadyPassed.querySelector('h2').textContent = '📊 Опрос для девушек';
+        var labelEl = document.getElementById('survey-already-passed-label');
+        if (labelEl) labelEl.textContent = ''; /* не показывать «Вы уже прошли опрос» парням */
         var passedBody = alreadyPassed.querySelector('#survey-already-text');
         if (passedBody) passedBody.textContent = 'Этот опрос только для девушек. Вы можете посмотреть результаты в списке опросов.';
         var resultsWrap = document.getElementById('survey-results-in-tab');
@@ -1286,6 +1292,8 @@ async function checkSurveyStateAndShowFemale() {
         if (data.voted && data.survey_stage === 'female' && data.results && data.results.length > 0) {
             alreadyPassed.style.display = 'block';
             alreadyPassed.querySelector('h2').textContent = '📊 Опрос для девушек';
+            var labelEl = document.getElementById('survey-already-passed-label');
+            if (labelEl) labelEl.textContent = '✅ Вы уже прошли опрос.';
             var p1 = alreadyPassed.querySelector('#survey-already-text');
             if (p1) p1.textContent = 'Результаты ниже на этой странице.';
             intro.style.display = 'none';
@@ -1372,15 +1380,50 @@ async function checkSurveyStateAndShow() {
         const response = await fetch(`${baseUrl}/api/survey/user-results?telegram_id=${userId}`);
         if (!response.ok) throw new Error('HTTP');
         const data = await response.json();
-        if (data.voted && data.results && data.results.length > 0) {
+        var labelEl = document.getElementById('survey-already-passed-label');
+        if (labelEl) labelEl.textContent = '✅ Вы уже прошли опрос.';
+        var allStagesDone = data.voted_main !== undefined ? (data.voted_main && data.voted_canteen) : (data.voted && data.results && data.results.length > 0);
+        if (data.voted && allStagesDone && data.results && data.results.length > 0) {
             alreadyPassed.style.display = 'block';
-            if (alreadyPassed.querySelector('h2')) alreadyPassed.querySelector('h2').textContent = (data.survey_stage === 'female' ? '📊 Опрос для девушек' : '📊 Опрос для парней (сложность нарядов)');
-            var p2 = alreadyPassed.querySelectorAll('p')[1];
+            if (alreadyPassed.querySelector('h2')) alreadyPassed.querySelector('h2').textContent = '📊 Опрос для парней (сложность нарядов)';
+            var p2 = alreadyPassed.querySelector('#survey-already-text');
             if (p2) p2.textContent = 'Результаты ниже.';
             intro.style.display = 'none';
             if (content) content.style.display = 'none';
             return;
         }
+        if (data.voted_main && !data.voted_canteen) {
+            alreadyPassed.style.display = 'none';
+            showSurveyIntro();
+            window._surveyContinueStage = 'canteen';
+            var startBtn = document.getElementById('survey-intro-start');
+            if (startBtn) {
+                startBtn.textContent = 'Продолжить — этап «Столовая»';
+                startBtn.onclick = function() {
+                    if (intro) intro.style.display = 'none';
+                    if (content) content.style.display = 'block';
+                    loadSurveyObjects(); 
+                    surveyCurrentStage = 'canteen';
+                    var stageIndicator = document.getElementById('survey-stage-indicator');
+                    if (stageIndicator) stageIndicator.textContent = 'Сравнение объектов столовой — выберите тяжелее/легче/равны';
+                    surveyPairsMain = [];
+                    surveyPairsCanteen = (window._surveyPairsCanteenCache || []);
+                    if (surveyPairsCanteen.length === 0) {
+                        fetch(baseUrl + '/api/survey/pairs?stage=canteen').then(function(r) { return r.json(); }).then(function(d) {
+                            surveyPairsCanteen = d.pairs || [];
+                            window._surveyPairsCanteenCache = surveyPairsCanteen;
+                            renderSurveyPairs('canteen');
+                            document.getElementById('submit-survey-btn').onclick = handleSurveySubmit;
+                        });
+                    } else {
+                        renderSurveyPairs('canteen');
+                        document.getElementById('submit-survey-btn').onclick = handleSurveySubmit;
+                    }
+                };
+            }
+            return;
+        }
+        window._surveyContinueStage = null;
     } catch (e) {
         console.warn('Проверка опроса:', e);
     }
@@ -1398,6 +1441,11 @@ function showSurveyIntro() {
     if (intro) {
         intro.style.display = 'block';
         intro.querySelector('h2').textContent = '📊 Опрос сложности нарядов';
+    }
+    var startBtn = document.getElementById('survey-intro-start');
+    if (startBtn) {
+        startBtn.textContent = 'Пройти опрос';
+        startBtn.onclick = null;
     }
     if (content) content.style.display = 'none';
     surveyIntroIndex = 0;
@@ -1419,12 +1467,14 @@ function showSurveyIntro() {
                 renderSurveyIntroDots();
             }
         });
-        document.getElementById('survey-intro-start').addEventListener('click', function() {
+    }
+    if (startBtn) {
+        startBtn.onclick = function() {
             if (intro) intro.style.display = 'none';
             if (content) content.style.display = 'block';
             if (currentSurveyType === 'female') loadSurveyObjectsFemale();
             else loadSurveyObjects();
-        });
+        };
     }
 }
 
@@ -1816,7 +1866,40 @@ function getDifficultyExplanation(median) {
     }
 }
 
+/** Погода в Воронеже — Open-Meteo (без ключа, CORS разрешён). */
+async function loadWeather() {
+    const el = document.getElementById('weather-text');
+    if (!el) return;
+    try {
+        const url = 'https://api.open-meteo.com/v1/forecast?latitude=51.672&longitude=39.1843&current=temperature_2m,weather_code&timezone=Europe/Moscow';
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Ошибка погоды');
+        const data = await res.json();
+        const cur = data.current;
+        if (!cur) throw new Error('Нет данных');
+        const temp = Math.round(Number(cur.temperature_2m));
+        const code = Number(cur.weather_code) || 0;
+        const desc = weatherCodeToText(code);
+        el.textContent = `${temp}°C, ${desc}`;
+    } catch (e) {
+        el.textContent = 'Не удалось загрузить погоду';
+        console.warn('loadWeather:', e);
+    }
+}
+
+function weatherCodeToText(code) {
+    if (code === 0) return 'ясно';
+    if (code <= 3) return 'облачно';
+    if (code >= 45 && code <= 48) return 'туман';
+    if (code >= 51 && code <= 67) return 'дождь';
+    if (code >= 71 && code <= 77) return 'снег';
+    if (code >= 80 && code <= 82) return 'ливень';
+    if (code >= 95 && code <= 99) return 'гроза';
+    return 'переменная облачность';
+}
+
 function getDaysLeft(dateStr) {
+
     const today = new Date();
     const date = new Date(dateStr);
     const diffTime = date - today;
@@ -1976,6 +2059,8 @@ async function openDutyDetail(dateStr, role, fromSearch) {
     if (!modal || !body) return;
     modal.style.display = 'block';
     title.textContent = (get_full_role(role) || role) + ' — ' + formatDate(dateStr);
+    var titleSub = document.getElementById('duty-detail-title-day');
+    if (titleSub) titleSub.textContent = getDayOfWeek(dateStr);
     body.innerHTML = '<p style="color:#94A3B8;">Загрузка...</p>';
     var isSearchView = fromSearch === true;
     try {
@@ -2049,11 +2134,6 @@ async function openDutyDetail(dateStr, role, fromSearch) {
                 html += '</div>';
             }
         });
-
-        if (isPriv && !isSearchView && (isShiftRole || isCanteen)) {
-            html += '<button type="button" onclick="distributeNow(\'' + dateStr + '\',\'' + role + '\')" style="width:100%;margin-top:12px;padding:10px;background:#8B5CF6;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;">Распределить сейчас</button>';
-            html += '<p style="color:#64748B;font-size:11px;margin-top:4px;text-align:center;">Ручное распределение (перезапишет текущее)</p>';
-        }
 
         body.innerHTML = html;
     } catch (e) {
@@ -2235,14 +2315,14 @@ function renderDutyGraphCards() {
         html += '<span style="color:#CBD5E1;">' + label + '</span>';
         html += '<span style="display:flex;gap:8px;">';
         html += '<button type="button" onclick="openEditScheduleModal(\'' + ym + '\')" style="padding:6px 12px;background:#1E3A5F;color:#93C5FD;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Правка</button>';
-        html += '<button type="button" onclick="deleteScheduleMonth(\'' + ym + '\')" style="padding:6px 12px;background:#7F1D1D;color:#FCA5A5;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Удалить</button>';
+        html += '<button type="button" onclick="deleteScheduleMonth(\'' + ym + '\')" style="padding:6px 12px;background:#7F1D1D;color:#FCA5A5;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Убрать</button>';
         html += '</span></div>';
     });
     container.innerHTML = html;
 }
 
 async function deleteScheduleMonth(ym) {
-    if (!confirm('Удалить график за этот месяц? Данные будут удалены безвозвратно.')) return;
+    if (!confirm('Убрать график за этот месяц? Данные будут удалены безвозвратно.')) return;
     try {
         var res = await fetch(baseUrl + '/api/schedule/month?ym=' + encodeURIComponent(ym) + '&telegram_id=' + userId, { method: 'DELETE' });
         var data = res.ok ? await res.json() : { detail: (await res.json()).detail || 'Ошибка' };
@@ -2269,6 +2349,31 @@ async function openEditScheduleModal(ym) {
     var modal = document.getElementById('duty-edit-modal');
     var ymSpan = document.getElementById('duty-edit-modal-ym');
     if (ymSpan) ymSpan.textContent = ym;
+    var calEl = document.getElementById('duty-edit-mini-calendar');
+    if (calEl) {
+        var parts = ym.split('-');
+        var y = parseInt(parts[0], 10);
+        var m = parseInt(parts[1], 10);
+        var daysInMonth = new Date(y, m, 0).getDate();
+        var firstDow = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+        var dayNames = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+        var html = dayNames.map(function(d) { return '<div style="text-align:center;color:#64748B;">' + d + '</div>'; }).join('');
+        for (var i = 0; i < firstDow; i++) html += '<div></div>';
+        for (var d = 1; d <= daysInMonth; d++) {
+            var ds = ym + '-' + String(d).padStart(2, '0');
+            html += '<button type="button" data-date="' + ds + '" style="padding:6px;background:#1E293B;border:1px solid #334155;border-radius:6px;color:#E2E8F0;cursor:pointer;font-size:12px;">' + d + '</button>';
+        }
+        calEl.innerHTML = html;
+        calEl.querySelectorAll('button[data-date]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var dateStr = this.getAttribute('data-date');
+                ['duty-edit-remove-date', 'duty-edit-add-date', 'duty-edit-remove-only-date', 'duty-edit-change-date'].forEach(function(id) {
+                    var el = document.getElementById(id);
+                    if (el) el.value = dateStr;
+                });
+            });
+        });
+    }
     document.getElementById('duty-edit-form-remove').style.display = 'none';
     document.getElementById('duty-edit-form-add').style.display = 'none';
     document.getElementById('duty-edit-form-remove-only').style.display = 'none';
@@ -2301,13 +2406,22 @@ function fillDutyEditDropdowns() {
     dutyEditContext.cadets_in_schedule.forEach(function(c) {
         removeFio.innerHTML += '<option value="' + (c.fio || '').replace(/"/g, '&quot;') + '">' + (c.fio || '') + '</option>';
     });
-    removeReplacement.innerHTML = '<option value="">— выбрать —</option>';
     addFio.innerHTML = '<option value="">— выбрать —</option>';
     dutyEditContext.group_users.forEach(function(u) {
         var fio = (u.fio || '').replace(/"/g, '&quot;');
-        removeReplacement.innerHTML += '<option value="' + fio + '">' + (u.fio || '') + '</option>';
         addFio.innerHTML += '<option value="' + fio + '" data-group="' + (u.group_name || '').replace(/"/g, '&quot;') + '">' + (u.fio || '') + '</option>';
     });
+    var replacementDatalist = document.getElementById('duty-edit-replacement-datalist');
+    if (replacementDatalist) {
+        replacementDatalist.innerHTML = '';
+        dutyEditContext.group_users.forEach(function(u) {
+            var opt = document.createElement('option');
+            opt.value = u.fio || '';
+            replacementDatalist.appendChild(opt);
+        });
+    }
+    var replacementInput = document.getElementById('duty-edit-remove-replacement');
+    if (replacementInput) replacementInput.value = '';
     var reasons = dutyEditContext.reasons || ['заболел', 'командировка', 'рапорт', 'другое'];
     removeReason.innerHTML = reasons.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('');
     var roleOpts = DUTY_ROLE_CODES.map(function(r) { return '<option value="' + r + '">' + get_full_role(r) + '</option>'; }).join('');
@@ -2635,24 +2749,13 @@ async function loadDutiesForMonth() {
 
 /**
  * Изменяет месяц для просмотра нарядов.
- * Если есть загруженные месяцы — листаем только по ним. Иначе — по календарю (1–12).
+ * Листаем свободно по календарю (1–12), независимо от загруженных графиков.
+ * Если за выбранный месяц данных нет — сверху показывается текст «График нарядов ещё не загружен».
  */
 function changeMonth(delta) {
-    if (dutyAvailableMonths.length > 0) {
-        var ym = currentYear + '-' + String(currentMonth).padStart(2, '0');
-        var idx = dutyAvailableMonths.indexOf(ym);
-        var next = idx + delta;
-        if (next >= 0 && next < dutyAvailableMonths.length) {
-            var parts = dutyAvailableMonths[next].split('-');
-            currentYear = parseInt(parts[0]);
-            currentMonth = parseInt(parts[1]);
-        }
-        // иначе остаёмся на текущем месяце (не выходим за границы загруженных)
-    } else {
-        currentMonth += delta;
-        if (currentMonth > 12) { currentMonth = 1; currentYear++; }
-        else if (currentMonth < 1) { currentMonth = 12; currentYear--; }
-    }
+    currentMonth += delta;
+    if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+    else if (currentMonth < 1) { currentMonth = 12; currentYear--; }
     calM = currentMonth;
     calY = currentYear;
     loadDutiesForMonth();
@@ -2724,7 +2827,7 @@ function get_full_role(roleCode) {
         'дк': 'Дежурный по курсу',
         'с': 'Столовая',
         'дс': 'Дежурный по столовой',
-        'ад': 'Административный',
+        'ад': 'ГБР',
         'п': 'Патруль',
         'ж': 'Железо',
         'т': 'Тарелки',

@@ -6,12 +6,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import random
 import sqlite3
 import statistics  # для расчёта медианы
 import tempfile
+import threading
+import time
+import urllib.request
+import json
 
 # Импортируем функцию расчёта курса
 from utils.course_calculator import get_current_course
@@ -56,6 +60,9 @@ app.add_middleware(
 # === Путь к БД ===
 DB_PATH = os.path.join(os.path.dirname(__file__), "bot.db")
 
+# Токен бота для отправки напоминаний из серверного планировщика (тот же BOT_TOKEN, что и у бота)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 
 @app.on_event("startup")
 async def startup_init_db():
@@ -68,13 +75,21 @@ async def startup_init_db():
     except Exception as e:
         print(f"[WARN] Инициализация БД при старте: {e}")
 
+    # Запуск фонового планировщика напоминаний о задачах (не зависит от процесса бота)
+    if BOT_TOKEN:
+        thread = threading.Thread(target=_task_reminders_loop, daemon=True)
+        thread.start()
+        print("[OK] Планировщик напоминаний о задачах запущен (каждые 30 сек)")
+    else:
+        print("[WARN] BOT_TOKEN не задан — напоминания о задачах отправляет только бот")
+
 # === Словарь ролей ===
 ROLE_NAMES = {
     'к': 'Курс',
     'дк': 'Дежурный по курсу',
     'с': 'Столовая',
     'дс': 'Дежурный по столовой',
-    'ад': 'Административный',
+    'ад': 'ГБР',
     'п': 'Патруль',
     'ж': 'Железо',
     'т': 'Тарелки',
@@ -132,6 +147,63 @@ def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _send_telegram_message(chat_id: int, text: str) -> bool:
+    """Отправляет сообщение в Telegram через Bot API. Возвращает True при успехе."""
+    if not BOT_TOKEN:
+        return False
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    body = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return 200 <= resp.status < 300
+    except Exception as e:
+        if "bot was blocked" in str(e).lower() or "blocked" in str(e).lower():
+            print(f"[REMINDER] Пользователь {chat_id} заблокировал бота")
+        else:
+            print(f"[REMINDER] Ошибка отправки в {chat_id}: {e}")
+        return False
+
+
+def _run_task_reminders_once():
+    """Один проход: найти задачи с дедлайном в окне ±90 сек, отправить напоминания, отметить reminded=1."""
+    conn = get_db()
+    if not conn:
+        return
+    try:
+        now = datetime.now()
+        time_lower = (now - timedelta(seconds=90)).strftime("%Y-%m-%d %H:%M:%S")
+        time_upper = (now + timedelta(seconds=90)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = conn.execute("""
+            SELECT id, text, deadline, user_id FROM tasks
+            WHERE done = 0 AND reminded = 0 AND deadline IS NOT NULL
+              AND datetime(deadline) >= datetime(?) AND datetime(deadline) <= datetime(?)
+        """, (time_lower, time_upper)).fetchall()
+        for row in rows:
+            task_id = row["id"]
+            user_id = row["user_id"]
+            text = (row["text"] or "").strip()
+            msg = f"⏰ <b>Время выполнить задачу!</b>\n\n{text}"
+            if _send_telegram_message(user_id, msg):
+                conn.execute("UPDATE tasks SET reminded = 1 WHERE id = ?", (task_id,))
+                conn.commit()
+                print(f"[REMINDER] Задача {task_id} → {user_id}")
+    except Exception as e:
+        print(f"[REMINDER] Ошибка: {e}")
+    finally:
+        conn.close()
+
+
+def _task_reminders_loop():
+    """Фоновый цикл: каждые 30 сек проверяет дедлайны задач и отправляет напоминания."""
+    while True:
+        try:
+            _run_task_reminders_once()
+        except Exception as e:
+            print(f"[REMINDER] Цикл: {e}")
+        time.sleep(30)
 
 # ============================================
 # 1. ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (ИСПРАВЛЕНО)
@@ -749,13 +821,33 @@ async def get_duty_day_detail(date: str, role: str, telegram_id: int):
             WHERE ds.date = ? AND ds.role = ? AND ds.enrollment_year = ?
             ORDER BY ds.group_name, ds.fio
         """, (date, role, ey)).fetchall()
-        participants = [
-            {"fio": r["fio"], "group": r["group_name"], "gender": r["gender"], "telegram_id": r["telegram_id"]}
-            for r in rows
-        ]
+        # Подставляем telegram_id по инициалам, если точное ФИО не совпало
+        fio_to_telegram = {}
+        for r in conn.execute(
+            "SELECT fio, telegram_id FROM users WHERE enrollment_year = ? AND status = 'активен'", (ey,)
+        ).fetchall():
+            for v in _fio_match_variants(r["fio"]) or [r["fio"]]:
+                fio_to_telegram[v] = r["telegram_id"]
+        participants = []
+        for r in rows:
+            tid = r["telegram_id"] if r["telegram_id"] is not None else fio_to_telegram.get(r["fio"])
+            participants.append({
+                "fio": r["fio"], "group": r["group_name"], "gender": r["gender"], "telegram_id": tid
+            })
         
         shift_data = []
         canteen_data = []
+
+        # Автораспределение за 3 часа до наряда: если назначений ещё нет.
+        try:
+            duty_start = datetime.strptime(date, "%Y-%m-%d").replace(hour=18, minute=30, second=0, microsecond=0)
+            auto_time = duty_start - timedelta(hours=3)  # 15:30 того же дня
+            now = datetime.now()
+        except Exception:
+            duty_start = None
+            auto_time = None
+            now = datetime.now()
+
         if role in ("к", "гбр"):
             try:
                 s_rows = conn.execute("""
@@ -763,6 +855,17 @@ async def get_duty_day_detail(date: str, role: str, telegram_id: int):
                     WHERE date = ? AND role = ? AND enrollment_year = ?
                     ORDER BY shift, fio
                 """, (date, role, ey)).fetchall()
+                if not s_rows and auto_time and now >= auto_time:
+                    # Автоматически распределяем смены, если ещё не распределены
+                    try:
+                        distribute_shifts_for_date(date, role, ey, conn)
+                    except Exception:
+                        pass
+                    s_rows = conn.execute("""
+                        SELECT fio, shift FROM duty_shift_assignments
+                        WHERE date = ? AND role = ? AND enrollment_year = ?
+                        ORDER BY shift, fio
+                    """, (date, role, ey)).fetchall()
                 shift_data = [{"fio": r["fio"], "shift": r["shift"]} for r in s_rows]
             except Exception:
                 pass
@@ -773,6 +876,16 @@ async def get_duty_day_detail(date: str, role: str, telegram_id: int):
                     WHERE date = ? AND enrollment_year = ?
                     ORDER BY object_name, fio
                 """, (date, ey)).fetchall()
+                if not c_rows and auto_time and now >= auto_time:
+                    try:
+                        distribute_canteen_for_date(date, ey, conn)
+                    except Exception:
+                        pass
+                    c_rows = conn.execute("""
+                        SELECT fio, object_name FROM duty_canteen_assignments
+                        WHERE date = ? AND enrollment_year = ?
+                        ORDER BY object_name, fio
+                    """, (date, ey)).fetchall()
                 canteen_data = [{"fio": r["fio"], "object": r["object_name"]} for r in c_rows]
             except Exception:
                 pass
@@ -814,12 +927,18 @@ def distribute_shifts_for_date(date_str: str, role: str, ey: int, conn):
     assignments = []
     
     if role == "к":
-        for i, fio in enumerate(people):
-            if i < 3:
-                shift = i + 1
-            else:
-                shift = 0  # дежурный
-            assignments.append({"fio": fio, "shift": shift})
+        # Фиксированный дежурный по курсу (shift=0) + до 3 дневальных (shift=1..3)
+        if len(people) == 1:
+            assignments.append({"fio": people[0], "shift": 0})
+        else:
+            # Первый — дежурный по курсу
+            assignments.append({"fio": people[0], "shift": 0})
+            day_count = min(3, len(people) - 1)
+            for i in range(day_count):
+                assignments.append({"fio": people[1 + i], "shift": i + 1})
+            # Остальные, если есть, остаются без смены (shift=0)
+            for fio in people[1 + day_count:]:
+                assignments.append({"fio": fio, "shift": 0})
     elif role == "гбр":
         for i, fio in enumerate(people):
             shift = (i // 2) + 1
@@ -1960,13 +2079,13 @@ def _clamp_coef(k: float, max_k: float = 2.0) -> float:
     return max(0.8, min(max_k, k))
 
 
-def _calc_weights_from_pair_votes(conn):
+def _calc_weights_from_pair_votes(conn, stage_filter: str = None):
     """
     Рассчитывает веса по формуле: S = сумма баллов объекта, avg = среднее, k = S/avg, вес = 10 × k.
-    Коэффициент k ограничен: от 0.8 до 2.0.
-    Этап 1: основные наряды (4 шт.). Этап 2: объекты столовой (6 шт.).
+    stage_filter: None = все этапы, 'main' | 'canteen' | 'female' = только этот этап.
     """
     # Этап 1: основные наряды
+    if stage_filter is None or stage_filter == 'main':
     main_ids = [r['id'] for r in conn.execute(
         "SELECT id FROM duty_objects WHERE parent_id IS NULL ORDER BY id"
     ).fetchall()]
@@ -2002,84 +2121,86 @@ def _calc_weights_from_pair_votes(conn):
             """, (oid, w))
 
     # Этап 2: объекты столовой — веса относительные к весу столовой
-    canteen_row = conn.execute(
-        "SELECT id FROM duty_objects WHERE name='Столовая' AND parent_id IS NULL"
-    ).fetchone()
-    if canteen_row:
-        canteen_id = canteen_row['id']
-        canteen_weight_row = conn.execute(
-            "SELECT weight FROM object_weights WHERE object_id = ?", (canteen_id,)
+    if stage_filter is None or stage_filter == 'canteen':
+        canteen_row = conn.execute(
+            "SELECT id FROM duty_objects WHERE name='Столовая' AND parent_id IS NULL"
         ).fetchone()
-        canteen_weight = canteen_weight_row['weight'] if canteen_weight_row else 10
+        if canteen_row:
+            canteen_id = canteen_row['id']
+            canteen_weight_row = conn.execute(
+                "SELECT weight FROM object_weights WHERE object_id = ?", (canteen_id,)
+            ).fetchone()
+            canteen_weight = canteen_weight_row['weight'] if canteen_weight_row else 10
 
-        sub_ids = [r['id'] for r in conn.execute(
-            "SELECT id FROM duty_objects WHERE parent_id = ? ORDER BY id", (canteen_id,)
-        ).fetchall()]
+            sub_ids = [r['id'] for r in conn.execute(
+                "SELECT id FROM duty_objects WHERE parent_id = ? ORDER BY id", (canteen_id,)
+            ).fetchall()]
 
-        sub_scores = {oid: 0.0 for oid in sub_ids}
-        sub_votes = conn.execute(
-            "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage='canteen'"
-        ).fetchall()
-        for v in sub_votes:
-            a, b = v['object_a_id'], v['object_b_id']
-            if v['choice'] == 'a':
-                sub_scores[a] = sub_scores.get(a, 0) + 2
-                sub_scores[b] = sub_scores.get(b, 0) + 0
-            elif v['choice'] == 'b':
-                sub_scores[a] = sub_scores.get(a, 0) + 0
-                sub_scores[b] = sub_scores.get(b, 0) + 2
-            else:
-                sub_scores[a] = sub_scores.get(a, 0) + 1
-                sub_scores[b] = sub_scores.get(b, 0) + 1
+            sub_scores = {oid: 0.0 for oid in sub_ids}
+            sub_votes = conn.execute(
+                "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage='canteen'"
+            ).fetchall()
+            for v in sub_votes:
+                a, b = v['object_a_id'], v['object_b_id']
+                if v['choice'] == 'a':
+                    sub_scores[a] = sub_scores.get(a, 0) + 2
+                    sub_scores[b] = sub_scores.get(b, 0) + 0
+                elif v['choice'] == 'b':
+                    sub_scores[a] = sub_scores.get(a, 0) + 0
+                    sub_scores[b] = sub_scores.get(b, 0) + 2
+                else:
+                    sub_scores[a] = sub_scores.get(a, 0) + 1
+                    sub_scores[b] = sub_scores.get(b, 0) + 1
 
-        if len(sub_ids) > 0:
-            sub_total = sum(sub_scores.get(i, 0) for i in sub_ids)
-            sub_avg = sub_total / len(sub_ids) if sub_total > 0 else 1
-            for oid in sub_ids:
-                s = sub_scores.get(oid, 0)
-                k_sub = (s / sub_avg) if (sub_avg > 0 and s > 0) else 0.8
-                k_sub = _clamp_coef(k_sub, max_k=1.6)
-                w_sub = canteen_weight * k_sub
-                conn.execute("""
-                    INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
-                    ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
-                """, (oid, w_sub))
+            if len(sub_ids) > 0:
+                sub_total = sum(sub_scores.get(i, 0) for i in sub_ids)
+                sub_avg = sub_total / len(sub_ids) if sub_total > 0 else 1
+                for oid in sub_ids:
+                    s = sub_scores.get(oid, 0)
+                    k_sub = (s / sub_avg) if (sub_avg > 0 and s > 0) else 0.8
+                    k_sub = _clamp_coef(k_sub, max_k=1.6)
+                    w_sub = canteen_weight * k_sub
+                    conn.execute("""
+                        INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
+                        ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
+                    """, (oid, w_sub))
 
     # Этап 3: опрос для девушек (ПУТСО, Столовая, Медчасть)
-    female_parent = conn.execute(
-        "SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL"
-    ).fetchone()
-    if female_parent:
-        female_ids = [r["id"] for r in conn.execute(
-            "SELECT id FROM duty_objects WHERE parent_id = ? ORDER BY id", (female_parent["id"],)
-        ).fetchall()]
-        if female_ids:
-            f_scores = {oid: 0.0 for oid in female_ids}
-            f_votes = conn.execute(
-                "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage = 'female'"
-            ).fetchall()
-            for v in f_votes:
-                a, b = v["object_a_id"], v["object_b_id"]
-                if v["choice"] == "a":
-                    f_scores[a] = f_scores.get(a, 0) + 2
-                    f_scores[b] = f_scores.get(b, 0) + 0
-                elif v["choice"] == "b":
-                    f_scores[a] = f_scores.get(a, 0) + 0
-                    f_scores[b] = f_scores.get(b, 0) + 2
-                else:
-                    f_scores[a] = f_scores.get(a, 0) + 1
-                    f_scores[b] = f_scores.get(b, 0) + 1
-            f_total = sum(f_scores.get(i, 0) for i in female_ids)
-            f_avg = f_total / len(female_ids) if f_total > 0 else 1
-            for oid in female_ids:
-                s = f_scores.get(oid, 0)
-                k = (s / f_avg) if (f_avg > 0 and s > 0) else 0.8
-                k = _clamp_coef(k, max_k=1.6)
-                w = 10 * k
-                conn.execute("""
-                    INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
-                    ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
-                """, (oid, w))
+    if stage_filter is None or stage_filter == 'female':
+        female_parent = conn.execute(
+            "SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL"
+        ).fetchone()
+        if female_parent:
+            female_ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM duty_objects WHERE parent_id = ? ORDER BY id", (female_parent["id"],)
+            ).fetchall()]
+            if female_ids:
+                f_scores = {oid: 0.0 for oid in female_ids}
+                f_votes = conn.execute(
+                    "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage = 'female'"
+                ).fetchall()
+                for v in f_votes:
+                    a, b = v["object_a_id"], v["object_b_id"]
+                    if v["choice"] == "a":
+                        f_scores[a] = f_scores.get(a, 0) + 2
+                        f_scores[b] = f_scores.get(b, 0) + 0
+                    elif v["choice"] == "b":
+                        f_scores[a] = f_scores.get(a, 0) + 0
+                        f_scores[b] = f_scores.get(b, 0) + 2
+                    else:
+                        f_scores[a] = f_scores.get(a, 0) + 1
+                        f_scores[b] = f_scores.get(b, 0) + 1
+                f_total = sum(f_scores.get(i, 0) for i in female_ids)
+                f_avg = f_total / len(female_ids) if f_total > 0 else 1
+                for oid in female_ids:
+                    s = f_scores.get(oid, 0)
+                    k = (s / f_avg) if (f_avg > 0 and s > 0) else 0.8
+                    k = _clamp_coef(k, max_k=1.6)
+                    w = 10 * k
+                    conn.execute("""
+                        INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
+                        ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
+                    """, (oid, w))
 
 
 @app.post("/api/survey/finalize")
@@ -2102,10 +2223,18 @@ async def finalize_survey(data: dict):
 
     conn = get_db()
     try:
+        stage = (data.get('stage') or '').strip() or None
+        if stage and stage not in ('main', 'canteen', 'female'):
+            stage = None
         voted = conn.execute("SELECT COUNT(DISTINCT user_id) as cnt FROM survey_pair_votes").fetchone()["cnt"]
-        _calc_weights_from_pair_votes(conn)
+        _calc_weights_from_pair_votes(conn, stage_filter=stage)
         conn.commit()
-        return {"status": "ok", "message": "Веса вычислены и сохранены", "total_voted": voted}
+        from datetime import date as date_type
+        today = date_type.today()
+        next_month = today.month + 1 if today.month < 12 else 1
+        next_year = today.year if today.month < 12 else today.year + 1
+        next_label = f"{next_year}-{next_month:02d}"
+        return {"status": "ok", "message": "Веса вычислены и сохранены", "total_voted": voted, "stage": stage, "next_period": next_label}
     except Exception as e:
         print(f"[ERROR] Ошибка финализации опроса: {e}")
         raise HTTPException(status_code=500, detail="Ошибка вычисления")
@@ -2242,15 +2371,20 @@ async def get_user_survey_results(telegram_id: int):
                 conn.close()
                 return {"voted": True, "results": [dict(r) for r in results], "survey_stage": "female"}
         else:
-            voted = conn.execute(
-                "SELECT 1 FROM survey_pair_votes WHERE user_id = ? AND stage IN ('main', 'canteen') LIMIT 1",
+            voted_main = conn.execute(
+                "SELECT 1 FROM survey_pair_votes WHERE user_id = ? AND stage = 'main' LIMIT 1",
                 (db_user_id,)
             ).fetchone() is not None
+            voted_canteen = conn.execute(
+                "SELECT 1 FROM survey_pair_votes WHERE user_id = ? AND stage = 'canteen' LIMIT 1",
+                (db_user_id,)
+            ).fetchone() is not None
+            voted = voted_main or voted_canteen
         if not voted:
             conn.close()
             return {"voted": False, "message": "Вы ещё не прошли опрос"}
 
-        # Юноши: веса основных нарядов и столовой (исключаем блок «Опрос девушек»)
+        # Юноши: возвращаем по этапам и результаты (веса основных нарядов и столовой)
         female_parent = conn.execute(
             "SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL"
         ).fetchone()
@@ -2265,8 +2399,10 @@ async def get_user_survey_results(telegram_id: int):
 
         return {
             "voted": True,
+            "voted_main": voted_main,
+            "voted_canteen": voted_canteen,
             "results": [dict(r) for r in results],
-            "survey_stage": "main"
+            "survey_stage": "main" if voted_main else "canteen"
         }
     except HTTPException:
         raise
