@@ -2008,7 +2008,7 @@ async function openDutyDetail(dateStr, role, fromSearch) {
                 });
                 html += '</div>';
             });
-        } else if (isShiftRole) {
+        } else if (isShiftRole && !isSearchView) {
             html += '<p style="color:#F59E0B;font-size:13px;margin:8px 0;">⏳ Смены будут распределены автоматически за 3 часа до наряда (в 15:30)</p>';
         }
 
@@ -2028,7 +2028,7 @@ async function openDutyDetail(dateStr, role, fromSearch) {
                 });
                 html += '</div>';
             });
-        } else if (isCanteen) {
+        } else if (isCanteen && !isSearchView) {
             html += '<p style="color:#F59E0B;font-size:13px;margin:8px 0;">⏳ Объекты будут распределены автоматически за 3 часа до наряда (в 15:30)</p>';
         }
 
@@ -2050,7 +2050,7 @@ async function openDutyDetail(dateStr, role, fromSearch) {
             }
         });
 
-        if (isPriv && (isShiftRole || isCanteen)) {
+        if (isPriv && !isSearchView && (isShiftRole || isCanteen)) {
             html += '<button type="button" onclick="distributeNow(\'' + dateStr + '\',\'' + role + '\')" style="width:100%;margin-top:12px;padding:10px;background:#8B5CF6;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;">Распределить сейчас</button>';
             html += '<p style="color:#64748B;font-size:11px;margin-top:4px;text-align:center;">Ручное распределение (перезапишет текущее)</p>';
         }
@@ -2546,11 +2546,26 @@ async function loadDutiesForMonth() {
     var monthEl = document.getElementById('current-month');
     if (monthEl) monthEl.textContent = monthNames[currentMonth - 1] + ' ' + currentYear;
 
+    var yearSel = document.getElementById('duty-filter-year');
+    var monthSel = document.getElementById('duty-filter-month');
+    if (yearSel && yearSel.value !== String(currentYear)) yearSel.value = currentYear;
+    if (monthSel && monthSel.value !== String(currentMonth)) monthSel.value = currentMonth;
+
     var ym = currentYear + '-' + String(currentMonth).padStart(2, '0');
     var hasData = dutyAvailableMonths.indexOf(ym) !== -1;
     var monthNav = document.getElementById('duty-month-nav');
     var tabs = document.getElementById('duty-tabs');
     var statsEl = document.getElementById('duties-month-stats');
+
+    var today = new Date();
+    var isPastMonth = currentYear < today.getFullYear() || (currentYear === today.getFullYear() && currentMonth < today.getMonth() + 1);
+    if (isPastMonth && dutyCurrentTab === 'upcoming') {
+        dutyCurrentTab = 'past';
+        document.getElementById('duty-tab-upcoming').style.background = '#1E293B';
+        document.getElementById('duty-tab-upcoming').style.color = '#94A3B8';
+        document.getElementById('duty-tab-past').style.background = '#3B82F6';
+        document.getElementById('duty-tab-past').style.color = 'white';
+    }
 
     if (!hasData && dutyAvailableMonths.length === 0) {
         if (monthNav) monthNav.style.display = 'none';
