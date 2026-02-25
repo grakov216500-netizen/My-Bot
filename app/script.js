@@ -2557,16 +2557,6 @@ async function loadDutiesForMonth() {
     var tabs = document.getElementById('duty-tabs');
     var statsEl = document.getElementById('duties-month-stats');
 
-    var today = new Date();
-    var isPastMonth = currentYear < today.getFullYear() || (currentYear === today.getFullYear() && currentMonth < today.getMonth() + 1);
-    if (isPastMonth && dutyCurrentTab === 'upcoming') {
-        dutyCurrentTab = 'past';
-        document.getElementById('duty-tab-upcoming').style.background = '#1E293B';
-        document.getElementById('duty-tab-upcoming').style.color = '#94A3B8';
-        document.getElementById('duty-tab-past').style.background = '#3B82F6';
-        document.getElementById('duty-tab-past').style.color = 'white';
-    }
-
     if (!hasData && dutyAvailableMonths.length === 0) {
         if (monthNav) monthNav.style.display = 'none';
         if (tabs) tabs.style.display = 'none';

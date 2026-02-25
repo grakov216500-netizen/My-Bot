@@ -89,6 +89,26 @@ ROLE_NAMES = {
 def get_full_role(role_code: str) -> str:
     return ROLE_NAMES.get(role_code.lower(), role_code.upper())
 
+
+def _fio_match_variants(full_fio: str) -> list:
+    """Строит варианты ФИО для сопоставления: полное и в виде инициалов (Граков В.А.)."""
+    if not full_fio or not full_fio.strip():
+        return []
+    parts = [p.strip() for p in full_fio.strip().split() if p.strip()]
+    if not parts:
+        return []
+    variants = [full_fio.strip()]
+    if len(parts) >= 3:
+        surname, name, patronymic = parts[0], parts[1], parts[2]
+        variants.append(f"{surname} {name[0]}.{patronymic[0]}.")
+        variants.append(f"{surname} {name[0]}.{patronymic[0]}")
+        variants.append(f"{surname} {name[0]} {patronymic[0]}")
+        variants.append(f"{surname} {name[0]}. {patronymic[0]}.")
+    elif len(parts) == 2:
+        variants.append(f"{parts[0]} {parts[1][0]}.")
+    return list(dict.fromkeys(variants))
+
+
 def _get_duty_points_map(conn) -> dict:
     """Роль (код) -> очки по опросу. Основные наряды: Курс, ГБР, Столовая, ЗУБ."""
     role_to_name = {'к': 'Курс', 'гбр': 'ГБР', 'с': 'Столовая', 'зуб': 'ЗУБ'}
@@ -480,27 +500,32 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
                     else:
                         month_start = month_end = None
                     if month_start and month_end:
-                    
-                        query = """
+                        fio_variants = _fio_match_variants(user_fio) or [user_fio or ""]
+                        placeholders = ",".join(["?"] * len(fio_variants))
+                        query = f"""
                             SELECT date, role, group_name, enrollment_year
                             FROM duty_schedule
-                            WHERE fio = ? AND date >= ? AND date < ?
+                            WHERE fio IN ({placeholders}) AND date >= ? AND date < ?
                             ORDER BY date
                         """
-                        rows = conn.execute(query, (user_fio, month_start, month_end)).fetchall()
+                        rows = conn.execute(query, (*fio_variants, month_start, month_end)).fetchall()
                     else:
+                        fio_variants = _fio_match_variants(user_fio) or [user_fio or ""]
+                        placeholders = ",".join(["?"] * len(fio_variants))
                         rows = conn.execute(
-                            "SELECT date, role, group_name, enrollment_year FROM duty_schedule WHERE fio = ? ORDER BY date",
-                            (user_fio,)
+                            f"SELECT date, role, group_name, enrollment_year FROM duty_schedule WHERE fio IN ({placeholders}) ORDER BY date",
+                            tuple(fio_variants),
                         ).fetchall()
                 else:
-                    query = """
+                    fio_variants = _fio_match_variants(user_fio) or [user_fio or ""]
+                    placeholders = ",".join(["?"] * len(fio_variants))
+                    query = f"""
                         SELECT date, role, group_name, enrollment_year
                         FROM duty_schedule
-                        WHERE fio = ?
+                        WHERE fio IN ({placeholders})
                         ORDER BY date
                     """
-                    rows = conn.execute(query, (user_fio,)).fetchall()
+                    rows = conn.execute(query, tuple(fio_variants)).fetchall()
                 
                 duties_list = []
                 points_map = _get_duty_points_map(conn)

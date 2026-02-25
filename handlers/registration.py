@@ -58,14 +58,14 @@ ROLE_TITLES = {
 
 # ===== КЛАВИАТУРЫ =====
 def get_year_keyboard():
-    """Клавиатура: год поступления + курс (только курсы 1–5; 5 курс = выпускник, после 15 августа убираем из списка)."""
+    """Клавиатура: год поступления + курс (1–5 курс; в регистрации всегда «N курс», выпускник только в профиле)."""
     years = get_dynamic_enrollment_years()
     keyboard = []
     row = []
     for year in years:
         course_info = get_course_info(year)
         course = course_info['current']
-        label = f"🎓 {year} (выпускник)" if course >= 5 else f"📅 {year} ({course} курс)"
+        label = f"📅 {year} ({course} курс)"
         row.append(InlineKeyboardButton(label, callback_data=f"year_{year}"))
         if len(row) == 2:
             keyboard.append(row)
