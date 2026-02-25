@@ -185,8 +185,21 @@ function openProfileScreen() {
         if (unregMsg) unregMsg.style.display = 'none';
         if (profileToggle) profileToggle.style.display = 'flex';
         document.getElementById('profile-fio').value = userFio || '';
-        document.getElementById('profile-course').textContent = (document.getElementById('userCourse') && document.getElementById('userCourse').textContent) || '—';
-        document.getElementById('profile-group').value = (document.getElementById('userGroup') && document.getElementById('userGroup').textContent.replace(/^Группа:\s*/, '')) || '';
+        var courseSel = document.getElementById('profile-course');
+        if (courseSel && courseSel.tagName === 'SELECT') {
+            if (!courseSel.options.length) {
+                for (var y = 2028; y >= 2020; y--) {
+                    var opt = document.createElement('option');
+                    opt.value = y;
+                    opt.textContent = y + ' (год набора)';
+                    courseSel.appendChild(opt);
+                }
+            }
+            courseSel.value = window._userEnrollmentYear || '';
+        } else if (courseSel) {
+            courseSel.textContent = (window._userCourseLabel != null ? window._userCourseLabel : '—');
+        }
+        document.getElementById('profile-group').value = (window._userGroup || '').replace(/^Группа:\s*/, '') || '';
         document.getElementById('profile-role').textContent = 'Роль: ' + getRoleLabel(userRole);
         document.getElementById('profile-admin-panel').style.display = userRole === 'admin' ? 'inline-block' : 'none';
         document.getElementById('profile-assistant-panel').style.display = userRole === 'assistant' ? 'inline-block' : 'none';
@@ -215,18 +228,23 @@ function closeProfileScreen() {
 async function saveProfile() {
     const fio = document.getElementById('profile-fio').value.trim();
     const group = document.getElementById('profile-group').value.trim();
+    var enrollmentYear = null;
+    var courseSel = document.getElementById('profile-course');
+    if (courseSel && courseSel.tagName === 'SELECT' && courseSel.value) {
+        enrollmentYear = parseInt(courseSel.value, 10);
+    }
     try {
+        const body = { telegram_id: userId, fio: fio || undefined, group_name: group };
+        if (enrollmentYear != null) body.enrollment_year = enrollmentYear;
         const res = await fetch(baseUrl + '/api/user', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ telegram_id: userId, fio: fio || undefined, group_name: group })
+            body: JSON.stringify(body)
         });
         if (!res.ok) throw new Error((await res.json()).detail || 'Ошибка');
         userFio = fio;
-        const userNameEl = document.getElementById('userName');
-        const userGroupEl = document.getElementById('userGroup');
-        if (userNameEl) userNameEl.textContent = fio || userFio;
-        if (userGroupEl) userGroupEl.textContent = 'Группа: ' + (group || '—');
+        window._userGroup = group;
+        window._userEnrollmentYear = enrollmentYear;
         showToast('Профиль сохранён');
         if (!userRegistered) {
             userRegistered = true;
@@ -432,8 +450,8 @@ function switchTab(tabName) {
                 currentYear = parseInt(last[0]);
                 currentMonth = parseInt(last[1]);
             }
+            fillDutyYearMonthFilter();
             loadDutiesForMonth();
-            // синхронизируем календарь архива внутри "Моих нарядов"
             calM = currentMonth;
             calY = currentYear;
             renderDutyCalendar();
@@ -860,12 +878,10 @@ async function loadUserProfile(userId) {
 
         const fullName = data.full_name || "—";
         userRole = data.role || 'user';
-        if (userNameEl) userNameEl.textContent = fullName;
-        if (userCourseEl) userCourseEl.textContent = `Курс: ${data.course || "—"}`;
-        if (userGroupEl) userGroupEl.textContent = `Группа: ${data.group || "—"}`;
-        const userRoleEl = document.getElementById('userRole');
-        if (userRoleEl) userRoleEl.textContent = 'Роль: ' + getRoleLabel(userRole);
         userFio = fullName;
+        window._userCourseLabel = data.course_label != null ? data.course_label : (data.course || "—");
+        window._userGroup = data.group || "—";
+        window._userEnrollmentYear = data.enrollment_year || null;
         console.log("✅ Профиль загружен:", fullName, "роль:", userRole);
         var header = document.getElementById('main-header');
         if (header) header.style.display = '';
@@ -1844,10 +1860,45 @@ async function loadDutyAvailableMonths() {
     } catch (e) { dutyAvailableMonths = []; }
 }
 
+function fillDutyYearMonthFilter() {
+    var yearSel = document.getElementById('duty-filter-year');
+    var monthSel = document.getElementById('duty-filter-month');
+    if (!yearSel || !monthSel) return;
+    var y = new Date().getFullYear();
+    yearSel.innerHTML = '';
+    for (var i = y - 2; i <= y + 2; i++) {
+        yearSel.innerHTML += '<option value="' + i + '"' + (i === currentYear ? ' selected' : '') + '>' + i + '</option>';
+    }
+    var monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    monthSel.innerHTML = monthNames.map(function(name, idx) {
+        var m = idx + 1;
+        return '<option value="' + m + '"' + (m === currentMonth ? ' selected' : '') + '>' + name + '</option>';
+    }).join('');
+    yearSel.onchange = function() {
+        currentYear = parseInt(yearSel.value);
+        calY = currentYear;
+        loadDutiesForMonth();
+        renderDutyCalendar();
+    };
+    monthSel.onchange = function() {
+        currentMonth = parseInt(monthSel.value);
+        calM = currentMonth;
+        loadDutiesForMonth();
+        renderDutyCalendar();
+    };
+}
+
 function calMonth(delta) {
     calM += delta;
     if (calM > 12) { calM = 1; calY++; }
     if (calM < 1) { calM = 12; calY--; }
+    currentMonth = calM;
+    currentYear = calY;
+    var yearSel = document.getElementById('duty-filter-year');
+    var monthSel = document.getElementById('duty-filter-month');
+    if (yearSel) yearSel.value = calY;
+    if (monthSel) monthSel.value = calM;
+    loadDutiesForMonth();
     renderDutyCalendar();
 }
 
@@ -1895,7 +1946,7 @@ async function calSelectDay(dateStr) {
         Object.keys(data.by_role).forEach(function(role) {
             var parts = data.by_role[role];
             var roleFull = get_full_role(role) || role;
-            html += '<div onclick="openDutyDetail(\'' + dateStr + '\',\'' + role + '\')" style="background:#1E293B;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;border-left:4px solid #3B82F6;">';
+            html += '<div onclick="openDutyDetail(\'' + dateStr + '\',\'' + role + '\', true)" style="background:#1E293B;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;border-left:4px solid #3B82F6;">';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
             html += '<span style="color:#CBD5E1;font-weight:600;">' + roleFull + '</span>';
             html += '<span style="color:#94A3B8;font-size:13px;">' + parts.length + ' чел.</span>';
@@ -1907,7 +1958,7 @@ async function calSelectDay(dateStr) {
     }
 }
 
-async function openDutyDetail(dateStr, role) {
+async function openDutyDetail(dateStr, role, fromSearch) {
     var modal = document.getElementById('duty-detail-modal');
     var title = document.getElementById('duty-detail-title');
     var body = document.getElementById('duty-detail-body');
@@ -1915,6 +1966,7 @@ async function openDutyDetail(dateStr, role) {
     modal.style.display = 'block';
     title.textContent = (get_full_role(role) || role) + ' — ' + formatDate(dateStr);
     body.innerHTML = '<p style="color:#94A3B8;">Загрузка...</p>';
+    var isSearchView = fromSearch === true;
     try {
         var res = await fetch(baseUrl + '/api/duties/day-detail?date=' + dateStr + '&role=' + encodeURIComponent(role) + '&telegram_id=' + userId);
         var data = res.ok ? await res.json() : {};
@@ -1969,7 +2021,7 @@ async function openDutyDetail(dateStr, role) {
             html += '<p style="color:#F59E0B;font-size:13px;margin:8px 0;">⏳ Объекты будут распределены автоматически за 3 часа до наряда (в 15:30)</p>';
         }
 
-        html += '<h5 style="color:#93C5FD;margin:12px 0 8px;">Бригада</h5>';
+        html += '<h5 style="color:#93C5FD;margin:12px 0 8px;">' + (isSearchView ? 'Участники' : 'Бригада') + '</h5>';
         data.participants.forEach(function(p) {
             var isMe = userFio && p.fio === userFio;
             var tid = p.telegram_id;
@@ -2133,7 +2185,16 @@ function bindDutyUploadOnce() {
                 showToast(msg);
                 fileInput.value = '';
                 await loadDutyAvailableMonths();
+                if (data.month_ym) {
+                    var p = data.month_ym.split('-');
+                    currentYear = parseInt(p[0]);
+                    currentMonth = parseInt(p[1]);
+                    calY = currentYear;
+                    calM = currentMonth;
+                }
+                fillDutyYearMonthFilter();
                 loadDutiesForMonth();
+                renderDutyCalendar();
                 loadDuties(userId);
             } else {
                 showToast(data.detail || 'Ошибка загрузки');
@@ -2198,12 +2259,19 @@ async function openEditScheduleModal(ym) {
     if (ymSpan) ymSpan.textContent = ym;
     document.getElementById('duty-edit-form-remove').style.display = 'none';
     document.getElementById('duty-edit-form-add').style.display = 'none';
+    document.getElementById('duty-edit-form-remove-only').style.display = 'none';
+    document.getElementById('duty-edit-form-change-role').style.display = 'none';
     modal.style.display = 'flex';
     try {
         var res = await fetch(baseUrl + '/api/duties/edit-context?ym=' + encodeURIComponent(ym) + '&telegram_id=' + userId);
         if (!res.ok) { showToast('Нет прав или ошибка загрузки'); return; }
         dutyEditContext = await res.json();
         fillDutyEditDropdowns();
+        var defaultDate = ym + '-01';
+        var ro = document.getElementById('duty-edit-remove-only-date');
+        var cd = document.getElementById('duty-edit-change-date');
+        if (ro) ro.placeholder = defaultDate;
+        if (cd) cd.placeholder = defaultDate;
     } catch (e) {
         showToast('Ошибка сети');
     }
@@ -2233,18 +2301,64 @@ function fillDutyEditDropdowns() {
     var roleOpts = DUTY_ROLE_CODES.map(function(r) { return '<option value="' + r + '">' + get_full_role(r) + '</option>'; }).join('');
     removeRole.innerHTML = '<option value="">— выбрать —</option>' + roleOpts;
     addRole.innerHTML = '<option value="">— выбрать —</option>' + roleOpts;
+    var removeOnlyFio = document.getElementById('duty-edit-remove-only-fio');
+    var removeOnlyRole = document.getElementById('duty-edit-remove-only-role');
+    var changeFio = document.getElementById('duty-edit-change-fio');
+    var changeNewRole = document.getElementById('duty-edit-change-new-role');
+    if (removeOnlyFio) {
+        removeOnlyFio.innerHTML = '<option value="">— выбрать —</option>';
+        dutyEditContext.cadets_in_schedule.forEach(function(c) {
+            removeOnlyFio.innerHTML += '<option value="' + (c.fio || '').replace(/"/g, '&quot;') + '">' + (c.fio || '') + '</option>';
+        });
+    }
+    if (removeOnlyRole) removeOnlyRole.innerHTML = '<option value="">— выбрать —</option>' + DUTY_ROLE_CODES.map(function(r) { return '<option value="' + r + '">' + get_full_role(r) + '</option>'; }).join('');
+    if (changeFio) {
+        changeFio.innerHTML = '<option value="">— выбрать —</option>';
+        dutyEditContext.cadets_in_schedule.forEach(function(c) {
+            changeFio.innerHTML += '<option value="' + (c.fio || '').replace(/"/g, '&quot;') + '">' + (c.fio || '') + '</option>';
+        });
+    }
+    if (changeNewRole) changeNewRole.innerHTML = '<option value="">— выбрать —</option>' + DUTY_ROLE_CODES.map(function(r) { return '<option value="' + r + '">' + get_full_role(r) + '</option>'; }).join('');
 }
 
 (function initDutyEditModal() {
     var modal = document.getElementById('duty-edit-modal');
     if (!modal) return;
-    document.getElementById('duty-edit-btn-remove').addEventListener('click', function() {
-        document.getElementById('duty-edit-form-remove').style.display = 'block';
+    function hideAllForms() {
+        document.getElementById('duty-edit-form-remove').style.display = 'none';
         document.getElementById('duty-edit-form-add').style.display = 'none';
+        document.getElementById('duty-edit-form-remove-only').style.display = 'none';
+        document.getElementById('duty-edit-form-change-role').style.display = 'none';
+    }
+    function clearActive() {
+        ['duty-edit-btn-remove', 'duty-edit-btn-add', 'duty-edit-btn-remove-only', 'duty-edit-btn-change-role'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) el.classList.remove('duty-edit-btn-active');
+        });
+    }
+    document.getElementById('duty-edit-btn-remove').addEventListener('click', function() {
+        hideAllForms();
+        document.getElementById('duty-edit-form-remove').style.display = 'block';
+        clearActive();
+        this.classList.add('duty-edit-btn-active');
     });
     document.getElementById('duty-edit-btn-add').addEventListener('click', function() {
+        hideAllForms();
         document.getElementById('duty-edit-form-add').style.display = 'block';
-        document.getElementById('duty-edit-form-remove').style.display = 'none';
+        clearActive();
+        this.classList.add('duty-edit-btn-active');
+    });
+    document.getElementById('duty-edit-btn-remove-only').addEventListener('click', function() {
+        hideAllForms();
+        document.getElementById('duty-edit-form-remove-only').style.display = 'block';
+        clearActive();
+        this.classList.add('duty-edit-btn-active');
+    });
+    document.getElementById('duty-edit-btn-change-role').addEventListener('click', function() {
+        hideAllForms();
+        document.getElementById('duty-edit-form-change-role').style.display = 'block';
+        clearActive();
+        this.classList.add('duty-edit-btn-active');
     });
     document.getElementById('duty-edit-close').addEventListener('click', function() {
         modal.style.display = 'none';
@@ -2308,9 +2422,57 @@ function fillDutyEditDropdowns() {
             showToast('Ошибка сети');
         }
     });
+    document.getElementById('duty-edit-submit-remove-only') && document.getElementById('duty-edit-submit-remove-only').addEventListener('click', async function() {
+        var fio = document.getElementById('duty-edit-remove-only-fio').value.trim();
+        var date = document.getElementById('duty-edit-remove-only-date').value.trim();
+        var role = document.getElementById('duty-edit-remove-only-role').value.trim();
+        if (!fio || !date || !role) { showToast('Заполните все поля'); return; }
+        try {
+            var res = await fetch(baseUrl + '/api/duties/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegram_id: userId, date: date, fio_removed: fio, role: role })
+            });
+            var data = res.ok ? await res.json() : await res.json().then(function(j) { return j; }).catch(function() { return {}; });
+            if (res.ok) {
+                showToast(data.message || 'Наряд удалён');
+                modal.style.display = 'none';
+                loadDutyAvailableMonths().then(function() { renderDutyGraphCards(); });
+                loadDutiesForMonth();
+                loadDuties(userId);
+            } else {
+                showToast(data.detail || 'Ошибка');
+            }
+        } catch (e) {
+            showToast('Ошибка сети');
+        }
+    });
+    document.getElementById('duty-edit-submit-change-role') && document.getElementById('duty-edit-submit-change-role').addEventListener('click', async function() {
+        var fio = document.getElementById('duty-edit-change-fio').value.trim();
+        var date = document.getElementById('duty-edit-change-date').value.trim();
+        var newRole = document.getElementById('duty-edit-change-new-role').value.trim();
+        if (!fio || !date || !newRole) { showToast('Заполните все поля'); return; }
+        try {
+            var res = await fetch(baseUrl + '/api/duties/change-role', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegram_id: userId, date: date, fio: fio, new_role: newRole })
+            });
+            var data = res.ok ? await res.json() : await res.json().then(function(j) { return j; }).catch(function() { return {}; });
+            if (res.ok) {
+                showToast(data.message || 'Роль изменена');
+                modal.style.display = 'none';
+                loadDutyAvailableMonths().then(function() { renderDutyGraphCards(); });
+                loadDutiesForMonth();
+                loadDuties(userId);
+            } else {
+                showToast(data.detail || 'Ошибка');
+            }
+        } catch (e) {
+            showToast('Ошибка сети');
+        }
+    });
 })();
-
-async function loadProfileDutyStats() {
     var sickEl = document.getElementById('profile-stats-sick');
     var replacedEl = document.getElementById('profile-stats-replaced');
     if (!sickEl || !replacedEl) return;
@@ -2337,6 +2499,10 @@ async function loadProfileDutyStats() {
         var reportDate = document.getElementById('sick-leave-date').value.trim();
         if (!reportDate || reportDate.length !== 10) {
             showToast('Введите дату в формате ГГГГ-ММ-ДД');
+            return;
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
+            showToast('Формат даты: ГГГГ-ММ-ДД (например 2026-02-15)');
             return;
         }
         try {
@@ -2395,15 +2561,24 @@ async function loadDutiesForMonth() {
 
         var today = new Date().toISOString().slice(0, 10);
         var duties = data.duties || [];
+        function isDutyCompleted(dateStr) {
+            var nextDay = dateStr.replace(/(\d{4})-(\d{2})-(\d{2})/, function(_, y, m, d) {
+                var d2 = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                d2.setDate(d2.getDate() + 1);
+                return d2.getFullYear() + '-' + String(d2.getMonth() + 1).padStart(2, '0') + '-' + String(d2.getDate()).padStart(2, '0');
+            });
+            var boundary = new Date(nextDay + 'T18:30:00').getTime();
+            return Date.now() >= boundary;
+        }
         var filtered;
         if (dutyCurrentTab === 'upcoming') {
-            filtered = duties.filter(function(d) { return d.date >= today; });
+            filtered = duties.filter(function(d) { return !isDutyCompleted(d.date); });
         } else {
-            filtered = duties.filter(function(d) { return d.date < today; });
+            filtered = duties.filter(function(d) { return isDutyCompleted(d.date); });
         }
 
         if (statsEl) {
-            var upcoming = duties.filter(function(d) { return d.date >= today; }).length;
+            var upcoming = duties.filter(function(d) { return !isDutyCompleted(d.date); }).length;
             var past = duties.length - upcoming;
             statsEl.textContent = 'Всего: ' + duties.length + ' | Ожидается: ' + upcoming + ' | Завершённые: ' + past;
             statsEl.style.display = 'block';
@@ -2418,16 +2593,18 @@ async function loadDutiesForMonth() {
         var html = '';
         sorted.forEach(function(duty) {
             var date = duty.date;
-            var isPast = date < today;
+            var completed = isDutyCompleted(date);
             var role = (duty.role || '').replace(/"/g, '&quot;');
-            html += '<div onclick="openDutyDetail(this.getAttribute(\'data-date\'), this.getAttribute(\'data-role\'))" data-date="' + date + '" data-role="' + role + '" style="background:' + (isPast ? '#1a2332' : '#1E293B') + ';border-radius:10px;padding:14px;margin-bottom:10px;cursor:pointer;border:1px solid #334155;border-left:4px solid #3B82F6;' + (isPast ? 'opacity:0.85;' : '') + '">';
+            var points = duty.points != null ? duty.points : '—';
+            html += '<div onclick="openDutyDetail(this.getAttribute(\'data-date\'), this.getAttribute(\'data-role\'), false)" data-date="' + date + '" data-role="' + role + '" style="background:' + (completed ? '#1a2332' : '#1E293B') + ';border-radius:10px;padding:14px;margin-bottom:10px;cursor:pointer;border:1px solid #334155;border-left:4px solid #3B82F6;' + (completed ? 'opacity:0.85;' : '') + '">';
             html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px;">';
             html += '<div><span style="color:#93C5FD;font-size:15px;font-weight:600;">' + formatDate(date) + '</span>';
             html += ' <span style="color:#94A3B8;font-size:13px;">' + getDayOfWeek(date) + '</span></div>';
             html += '<span style="color:#CBD5E1;font-weight:500;">' + (duty.role_full || duty.role) + '</span>';
             html += '</div>';
+            html += '<p style="color:#64748B;font-size:12px;margin:6px 0 0 0;">Очки: <strong style="color:#60A5FA;">' + points + '</strong></p>';
             var pCount = duty.partners ? duty.partners.length : 0;
-            if (pCount > 0) html += '<p style="color:#64748B;font-size:12px;margin:6px 0 0 0;">' + pCount + ' чел. в бригаде</p>';
+            if (pCount > 0) html += '<p style="color:#64748B;font-size:12px;margin:2px 0 0 0;">' + pCount + ' чел. в бригаде</p>';
             html += '</div>';
         });
         container.innerHTML = html;
@@ -2438,7 +2615,8 @@ async function loadDutiesForMonth() {
 }
 
 /**
- * Изменяет месяц для просмотра нарядов
+ * Изменяет месяц для просмотра нарядов.
+ * Если есть загруженные месяцы — листаем только по ним. Иначе — по календарю (1–12).
  */
 function changeMonth(delta) {
     if (dutyAvailableMonths.length > 0) {
@@ -2449,19 +2627,17 @@ function changeMonth(delta) {
             var parts = dutyAvailableMonths[next].split('-');
             currentYear = parseInt(parts[0]);
             currentMonth = parseInt(parts[1]);
-        } else if (delta > 0) {
-            currentMonth += delta;
-            if (currentMonth > 12) { currentMonth = 1; currentYear++; }
-        } else {
-            currentMonth += delta;
-            if (currentMonth < 1) { currentMonth = 12; currentYear--; }
         }
+        // иначе остаёмся на текущем месяце (не выходим за границы загруженных)
     } else {
         currentMonth += delta;
         if (currentMonth > 12) { currentMonth = 1; currentYear++; }
         else if (currentMonth < 1) { currentMonth = 12; currentYear--; }
     }
+    calM = currentMonth;
+    calY = currentYear;
     loadDutiesForMonth();
+    renderDutyCalendar();
 }
 
 /**
@@ -2498,7 +2674,7 @@ async function searchDutyByDate(dateStr) {
             var roleFull = get_full_role(role) || role;
             var participants = data.by_role[role];
             
-            html += '<div onclick="openDutyDetail(\'' + dateStr + '\',\'' + role + '\')" style="background:#1E293B;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;border-left:4px solid #3B82F6;">';
+            html += '<div onclick="openDutyDetail(\'' + dateStr + '\',\'' + role + '\', true)" style="background:#1E293B;border-radius:8px;padding:12px;margin-bottom:8px;cursor:pointer;border-left:4px solid #3B82F6;">';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
             html += '<span style="color:#CBD5E1;font-weight:600;">' + roleFull + '</span>';
             html += '<span style="color:#94A3B8;font-size:13px;">' + participants.length + ' чел. →</span>';

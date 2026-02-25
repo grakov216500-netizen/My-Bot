@@ -20,17 +20,12 @@
     <p style="color: #64748B; font-size: 14px;">Сначала пройдите регистрацию в боте (кнопка «Начать регистрацию» или команда /start), затем снова откройте панель управления.</p>
   </div>
 
-  <!-- Шапка: клик по аватару/ФИО/группе → Мой профиль -->
+  <!-- Шапка: клик по аватару → Мой профиль -->
   <header class="header" id="main-header">
-    <div class="user-section clickable-profile" id="open-profile-btn" role="button" tabindex="0" onclick="openProfileScreen(); return false;" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+    <div class="user-section clickable-profile" id="open-profile-btn" role="button" tabindex="0" onclick="openProfileScreen(); return false;" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
       <img src="https://ui-avatars.com/api/?name=Загрузка...&background=3B82F6&color=fff" 
-           alt="Аватар" class="avatar" />
-      <div class="profile-info">
-        <p id="userName">Загрузка...</p>
-        <p id="userCourse">Курс: —</p>
-        <p id="userGroup">Группа: —</p>
-        <p id="userRole" style="color: #94A3B8; font-size: 12px;">Роль: —</p>
-      </div>
+           alt="Аватар" class="avatar" style="width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;" />
+      <span id="header-profile-label" style="color: #94A3B8; font-size: 13px;">Профиль</span>
     </div>
     <div class="header-icons">
       <button class="icon-btn" onclick="openNotifications()">🔔</button>
@@ -56,7 +51,7 @@
         </div>
         <div style="margin-bottom: 12px;">
           <label style="color: #94A3B8; font-size: 12px;">Курс (год набора)</label>
-          <p id="profile-course" style="color: #CBD5E1; margin: 4px 0 0 0;">—</p>
+          <select id="profile-course" style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0; box-sizing: border-box;"></select>
         </div>
         <div style="margin-bottom: 16px;">
           <label style="color: #94A3B8; font-size: 12px;">Группа</label>
@@ -118,6 +113,10 @@
       <h3>🎖️ Ближайший наряд</h3>
       <p>Загрузка данных...</p>
     </div>
+    <div class="widget" id="rating-widget">
+      <h3>🏆 Рейтинг</h3>
+      <p style="color: #94A3B8; font-size: 14px;">Скоро: топ по очкам за месяц и за всё время (по курсу / по институту).</p>
+    </div>
     <div class="widget">
       <h3>🔔 Уведомления</h3>
       <ul class="notification-list" style="list-style: none; padding: 0; margin: 0;">
@@ -160,10 +159,14 @@
       <!-- ===== ВИД 1: МОИ НАРЯДЫ ===== -->
       <div id="duty-view-my">
         <!-- Навигация по месяцам (только загруженные) -->
-        <div id="duty-month-nav" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div id="duty-month-nav" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
           <button id="prev-month-btn" onclick="changeMonth(-1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">←</button>
           <h3 id="current-month" style="color: #93C5FD; margin: 0; font-size: 18px;">—</h3>
           <button id="next-month-btn" onclick="changeMonth(1)" style="background: #1E293B; border: none; color: #CBD5E1; padding: 8px 16px; border-radius: 8px; cursor: pointer;">→</button>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <select id="duty-filter-year" style="padding: 6px 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0; font-size: 13px;"></select>
+            <select id="duty-filter-month" style="padding: 6px 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0; font-size: 13px;"></select>
+          </div>
         </div>
         <p id="duties-month-stats" style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0; display: none;"></p>
         <!-- Вкладки Ожидается / Завершённые -->
@@ -210,11 +213,17 @@
             <div id="duty-edit-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; padding: 16px;">
               <div style="background: #1E293B; border-radius: 12px; padding: 20px; max-width: 400px; width: 100%; border: 1px solid #334155;">
                 <p style="color: #93C5FD; font-weight: 600; margin: 0 0 12px 0;">Правка графика <span id="duty-edit-modal-ym"></span></p>
-                <div style="display: flex; gap: 8px; margin-bottom: 16px;">
-                  <button type="button" id="duty-edit-btn-remove" style="flex:1; padding: 10px; background: #7F1D1D; color: #FCA5A5; border: none; border-radius: 8px; cursor: pointer;">Удалить наряд</button>
-                  <button type="button" id="duty-edit-btn-add" style="flex:1; padding: 10px; background: #166534; color: #BBF7D0; border: none; border-radius: 8px; cursor: pointer;">Добавить наряд</button>
+                <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+                  <button type="button" id="duty-edit-btn-remove" style="flex:1; min-width: 100px; padding: 10px; background: #7F1D1D; color: #FCA5A5; border: 2px solid transparent; border-radius: 8px; cursor: pointer;">Замена</button>
+                  <button type="button" id="duty-edit-btn-add" style="flex:1; min-width: 100px; padding: 10px; background: #166534; color: #BBF7D0; border: 2px solid transparent; border-radius: 8px; cursor: pointer;">Добавить</button>
+                  <button type="button" id="duty-edit-btn-remove-only" style="flex:1; min-width: 100px; padding: 10px; background: #450A0A; color: #FECACA; border: 2px solid transparent; border-radius: 8px; cursor: pointer;">Удалить</button>
+                  <button type="button" id="duty-edit-btn-change-role" style="flex:1; min-width: 100px; padding: 10px; background: #1E3A5F; color: #93C5FD; border: 2px solid transparent; border-radius: 8px; cursor: pointer;">Изм. роль</button>
                 </div>
+                <style>
+                  #duty-edit-modal .duty-edit-btn-active { border-color: #93C5FD !important; box-shadow: 0 0 0 1px #93C5FD; }
+                </style>
                 <div id="duty-edit-form-remove" style="display: none;">
+                  <p style="color: #94A3B8; font-size: 12px; margin-bottom: 8px;">Снять с наряда и указать замену</p>
                   <label style="color: #94A3B8; font-size: 12px;">Кого снять</label>
                   <select id="duty-edit-remove-fio" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#E2E8F0; margin-bottom:8px;"></select>
                   <label style="color: #94A3B8; font-size: 12px;">Дата (ГГГГ-ММ-ДД)</label>
@@ -237,6 +246,26 @@
                   <label style="color: #94A3B8; font-size: 12px;">Замена больному (ФИО кого заменяем, если не замена — оставьте пустым)</label>
                   <input type="text" id="duty-edit-add-fio-replaced" placeholder="Опционально" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#E2E8F0; margin-bottom:12px; box-sizing:border-box;" />
                   <button type="button" id="duty-edit-submit-add" style="padding:10px 16px; background: #166534; color: #BBF7D0; border: none; border-radius: 8px; cursor: pointer;">Добавить наряд</button>
+                </div>
+                <div id="duty-edit-form-remove-only" style="display: none;">
+                  <p style="color: #94A3B8; font-size: 12px; margin-bottom: 8px;">Удалить наряд без замены</p>
+                  <label style="color: #94A3B8; font-size: 12px;">Кого снять</label>
+                  <select id="duty-edit-remove-only-fio" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#E2E8F0; margin-bottom:8px;"></select>
+                  <label style="color: #94A3B8; font-size: 12px;">Дата (ГГГГ-ММ-ДД)</label>
+                  <input type="text" id="duty-edit-remove-only-date" placeholder="2026-02-15" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#E2E8F0; margin-bottom:8px; box-sizing:border-box;" />
+                  <label style="color: #94A3B8; font-size: 12px;">Роль</label>
+                  <select id="duty-edit-remove-only-role" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#E2E8F0; margin-bottom:12px;"></select>
+                  <button type="button" id="duty-edit-submit-remove-only" style="padding:10px 16px; background:#7F1D1D; color:#FCA5A5; border:none; border-radius:8px; cursor:pointer;">Удалить</button>
+                </div>
+                <div id="duty-edit-form-change-role" style="display: none;">
+                  <p style="color: #94A3B8; font-size: 12px; margin-bottom: 8px;">Изменить роль на дату</p>
+                  <label style="color: #94A3B8; font-size: 12px;">Курсант</label>
+                  <select id="duty-edit-change-fio" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#E2E8F0; margin-bottom:8px;"></select>
+                  <label style="color: #94A3B8; font-size: 12px;">Дата (ГГГГ-ММ-ДД)</label>
+                  <input type="text" id="duty-edit-change-date" placeholder="2026-02-15" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#E2E8F0; margin-bottom:8px; box-sizing:border-box;" />
+                  <label style="color: #94A3B8; font-size: 12px;">Новая роль</label>
+                  <select id="duty-edit-change-new-role" style="width:100%; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#E2E8F0; margin-bottom:12px;"></select>
+                  <button type="button" id="duty-edit-submit-change-role" style="padding:10px 16px; background:#1E3A5F; color:#93C5FD; border:none; border-radius:8px; cursor:pointer;">Изменить</button>
                 </div>
                 <button type="button" id="duty-edit-close" style="margin-top: 12px; padding: 8px 16px; background: #334155; color: #E2E8F0; border: none; border-radius: 8px; cursor: pointer;">Закрыть</button>
               </div>
@@ -303,7 +332,7 @@
       <div id="survey-list-block" class="survey-list-block">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
           <h2 style="color: #93C5FD; margin: 0;">📊 Опросы</h2>
-          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
+          <button type="button" onclick="showSurveyList()" class="survey-close-btn" title="К списку">✕</button>
         </div>
         <p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Системные опросы (сложность нарядов)</p>
         <div id="survey-system-cards" style="display: flex; flex-direction: column; gap: 10px;"></div>
@@ -312,7 +341,7 @@
           <button type="button" id="survey-finalize-in-list-btn" style="padding: 10px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Завершить опрос</button>
         </div>
         <div id="survey-custom-section" style="margin-top: 20px; display: none;">
-          <p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Опросы вашей группы / курса</p>
+          <p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Опросы группы и курса</p>
           <div id="survey-custom-cards" style="display: flex; flex-direction: column; gap: 10px;"></div>
         </div>
         <div id="survey-create-wrap" style="margin-top: 20px; display: none;">
@@ -323,7 +352,7 @@
       <div id="survey-already-passed" class="survey-intro-block" style="display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="color: #93C5FD; margin: 0;">📊 Опрос сложности нарядов</h2>
-          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
+          <button type="button" onclick="showSurveyList()" class="survey-close-btn" title="К списку">✕</button>
         </div>
         <p style="color: #10B981; font-size: 16px; font-weight: 600; margin-bottom: 12px;">✅ Вы уже прошли опрос.</p>
         <p id="survey-already-text" style="color: #94A3B8; font-size: 14px;">Веса объектов и результаты можно посмотреть в списке опросов.</p>
@@ -334,7 +363,7 @@
       <div id="survey-intro" class="survey-intro-block" style="display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="color: #93C5FD; margin: 0;">📊 Опрос сложности нарядов</h2>
-          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
+          <button type="button" onclick="showSurveyList()" class="survey-close-btn" title="К списку">✕</button>
         </div>
         <div class="survey-intro-cards">
           <div class="survey-intro-card active" data-card="0">
@@ -371,7 +400,7 @@
       <div id="survey-content" class="survey-content-block" style="display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="color: #93C5FD; margin: 0;">📊 Опрос сложности нарядов</h2>
-          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
+          <button type="button" onclick="showSurveyList()" class="survey-close-btn" title="К списку">✕</button>
         </div>
         <p style="color: #CBD5E1; margin-bottom: 16px;" id="survey-description">Какой наряд сложнее морально/физически? Выберите один вариант.</p>
         <div id="survey-stage-indicator" style="color: #93C5FD; font-size: 14px; margin-bottom: 12px;"></div>
@@ -385,7 +414,7 @@
       <div id="survey-custom-block" style="display: none;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="color: #93C5FD; margin: 0;" id="survey-custom-title">Опрос</h2>
-          <button type="button" onclick="switchTab('home')" class="survey-close-btn">✕</button>
+          <button type="button" onclick="showSurveyList()" class="survey-close-btn" title="К списку">✕</button>
         </div>
         <div id="survey-custom-options" style="display: flex; flex-direction: column; gap: 8px;"></div>
         <div id="survey-custom-complete-wrap" style="margin-top: 16px; display: none;">
@@ -412,7 +441,7 @@
   </div>
 
   <!-- Модальное окно: создание опроса (сержант/помощник/админ) -->
-  <div id="create-survey-modal" class="modal modal-center" style="display: none;">
+  <div id="create-survey-modal" class="modal modal-center" style="display: none; z-index: 1100;">
     <div class="modal-content" style="max-width: 420px; padding: 20px; border-radius: 12px; max-height: 90vh; overflow-y: auto;">
       <p style="color: #E2E8F0; margin-bottom: 12px; font-weight: 600;">Создать опрос</p>
       <label style="color: #94A3B8; font-size: 12px;">Уровень</label>

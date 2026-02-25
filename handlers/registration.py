@@ -25,23 +25,20 @@ def get_dynamic_enrollment_years() -> list[int]:
     """
     Динамически формирует список годов набора для регистрации.
 
-    Логика:
-    - опираемся на учебный год, где перевод на следующий курс происходит 15 августа;
-    - показываем только актуальные 5 наборов (1–5 курс);
-    - будущий набор (ещё не начавшийся 1 курс) не показываем;
-    - самые старые выпускники (6+ курс) исчезают из кнопок, но остаются в БД.
+    - Учебный год: перевод 15 августа.
+    - Показываем только наборы с курсом 1–5 (не показываем 6 курс — выпускники уже выбывают).
+    - Новый набор (например 2026) появляется после 15 августа соответствующего года.
     """
     today = date.today()
-    # Такой же расчёт учебного года, как в get_current_course
     if today.month < 8 or (today.month == 8 and today.day < 15):
         academic_year = today.year - 1
     else:
         academic_year = today.year
 
+    from utils.course_calculator import get_current_course
     years: list[int] = []
-    # Последние 5 наборов: с academic_year-4 по academic_year
     for y in range(academic_year - 4, academic_year + 1):
-        if y >= 2020:  # нижняя граница «здравого смысла»
+        if y >= 2020 and get_current_course(y) <= 5:
             years.append(y)
     return years
 GENDER_CHOICES = [
@@ -64,20 +61,20 @@ ROLE_TITLES = {
 
 # ===== КЛАВИАТУРЫ =====
 def get_year_keyboard():
-    """Клавиатура: год поступления + курс"""
+    """Клавиатура: год поступления + курс (только курсы 1–5, без 6-го)."""
     years = get_dynamic_enrollment_years()
     keyboard = []
     row = []
     for year in years:
         course_info = get_course_info(year)
-        btn_text = f"📅 {year} ({course_info['current']} курс)"
-        row.append(InlineKeyboardButton(btn_text, callback_data=f"year_{year}"))
+        course = course_info['current']
+        label = f"🎓 {year} (выпускник)" if course >= 5 else f"📅 {year} ({course} курс)"
+        row.append(InlineKeyboardButton(label, callback_data=f"year_{year}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
     if row:
         keyboard.append(row)
-    # Дополнительная кнопка — ручной ввод года набора
     keyboard.append([
         InlineKeyboardButton("✏️ Ввести год вручную", callback_data="year_manual")
     ])
