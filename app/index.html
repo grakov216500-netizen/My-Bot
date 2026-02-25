@@ -184,14 +184,10 @@
         <div id="duties-list-container">
           <p style="color: #64748B; text-align: center;">Загрузка нарядов...</p>
         </div>
-        <!-- Календарь поиска по дате для всего курса (бывший «Архив») -->
+        <!-- Календарь поиска по дате для всего курса (зависит от месяца сверху, без своей навигации) -->
         <div style="margin-top:16px;padding-top:12px;border-top:1px dashed #334155;">
           <p style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0;">Календарь показывает наряды всего курса за выбранный месяц.</p>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <button type="button" onclick="calMonth(-1)" style="background:#1E293B;border:none;color:#CBD5E1;padding:8px 16px;border-radius:8px;cursor:pointer;">←</button>
-          <h3 id="cal-month-label" style="color:#93C5FD;margin:0;font-size:16px;">Месяц</h3>
-          <button type="button" onclick="calMonth(1)" style="background:#1E293B;border:none;color:#CBD5E1;padding:8px 16px;border-radius:8px;cursor:pointer;">→</button>
-          </div>
+          <p id="cal-month-label" style="color:#93C5FD;font-size:14px;margin:0 0 8px 0;">—</p>
           <div id="duty-calendar-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:12px;"></div>
           <div id="duty-day-detail" style="display:none;padding:12px;background:#1E293B;border-radius:8px;"></div>
         </div>

@@ -1911,24 +1911,12 @@ function fillDutyYearMonthFilter() {
     };
 }
 
-function calMonth(delta) {
-    calM += delta;
-    if (calM > 12) { calM = 1; calY++; }
-    if (calM < 1) { calM = 12; calY--; }
-    currentMonth = calM;
-    currentYear = calY;
-    var yearSel = document.getElementById('duty-filter-year');
-    var monthSel = document.getElementById('duty-filter-month');
-    if (yearSel) yearSel.value = calY;
-    if (monthSel) monthSel.value = calM;
-    loadDutiesForMonth();
-    renderDutyCalendar();
-}
-
 function renderDutyCalendar() {
     var grid = document.getElementById('duty-calendar-grid');
     var label = document.getElementById('cal-month-label');
     if (!grid || !label) return;
+    calM = currentMonth;
+    calY = currentYear;
     var mn = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
     label.textContent = mn[calM - 1] + ' ' + calY;
     var ym = calY + '-' + String(calM).padStart(2, '0');
@@ -2216,6 +2204,7 @@ function bindDutyUploadOnce() {
                     calM = currentMonth;
                 }
                 fillDutyYearMonthFilter();
+                dutySetView('my');
                 loadDutiesForMonth();
                 renderDutyCalendar();
                 loadDuties(userId);

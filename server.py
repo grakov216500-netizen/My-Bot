@@ -1365,7 +1365,7 @@ async def upload_schedule(
             """DELETE FROM duty_schedule
                WHERE group_name = ? AND enrollment_year = ?
                AND date >= ? AND date < ?""",
-            (group, enrollment_year, month_start[:8] + "-01", month_end_next)
+            (group, enrollment_year, month_ym + "-01", month_end_next)
         )
         for d in schedule_data:
             conn.execute(
