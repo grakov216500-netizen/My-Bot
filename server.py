@@ -19,7 +19,7 @@ import json
 
 # Импортируем функцию расчёта курса
 from utils.course_calculator import get_current_course
-from apex_parser import create_default_parser
+# apex_parser импортируем лениво в _get_apex_parser(), чтобы сервер стартовал даже без APEX_USER/PASS
 
 app = FastAPI()
 
@@ -47,34 +47,38 @@ def _is_allowed_origin(origin: str) -> bool:
 
 
 class ForceCORSHeadersMiddleware(BaseHTTPMiddleware):
-    """Добавляет CORS-заголовки ко всем ответам (в т.ч. при 4xx/5xx), чтобы браузер не блокировал из-за CORS."""
+    """Добавляет CORS-заголовки ко ВСЕМ ответам (в т.ч. 4xx/5xx и OPTIONS)."""
     async def dispatch(self, request: Request, call_next):
+        origin = (request.headers.get("origin") or "").strip().rstrip("/") or "https://grakov216500-netizen.github.io"
+        if not _is_allowed_origin(origin):
+            origin = "https://grakov216500-netizen.github.io"
+
+        def cors_headers():
+            return {
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "GET, POST, PATCH, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization, Accept",
+                "Access-Control-Max-Age": "86400",
+            }
+
+        # Preflight OPTIONS — сразу 200 с CORS, не передаём в приложение
+        if request.method == "OPTIONS":
+            from starlette.responses import Response
+            return Response(status_code=200, headers=cors_headers())
+
         try:
             response = await call_next(request)
         except Exception as e:
-            # Ответ при исключении — иначе браузер не получит CORS и покажет "blocked by CORS"
-            origin = request.headers.get("origin") or "https://grakov216500-netizen.github.io"
-            if not _is_allowed_origin(origin):
-                origin = "https://grakov216500-netizen.github.io"
             from starlette.responses import JSONResponse
             return JSONResponse(
                 status_code=500,
                 content={"detail": "Internal server error", "error": str(e)},
-                headers={
-                    "Access-Control-Allow-Origin": origin,
-                    "Access-Control-Allow-Credentials": "true",
-                    "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                },
+                headers=cors_headers(),
             )
-        origin = request.headers.get("origin")
-        if origin and _is_allowed_origin(origin):
-            response.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
-        else:
-            response.headers.setdefault("Access-Control-Allow-Origin", "https://grakov216500-netizen.github.io")
-        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
-        response.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
-        response.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+        for k, v in cors_headers().items():
+            response.headers[k] = v
         return response
 
 
@@ -101,6 +105,12 @@ APEX_PASS = os.getenv("APEX_PASS")
 
 # Глобальный парсер расписания (ленивая инициализация)
 _apex_parser = None
+
+
+@app.get("/api/health")
+async def api_health():
+    """Проверка доступности API и CORS (в ответе всегда есть CORS-заголовки)."""
+    return {"ok": True, "service": "vitechbot-api"}
 
 
 @app.on_event("startup")
@@ -1356,6 +1366,7 @@ def _get_apex_parser():
                 detail="APEX_USER / APEX_PASS не заданы на сервере"
             )
         try:
+            from apex_parser import create_default_parser
             _apex_parser = create_default_parser()
         except Exception as e:
             print(f"[ERROR] Инициализация ApexScheduleParser: {e}")
