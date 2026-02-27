@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadDuties(userId);
     await loadSurveyResults();
     loadWeather();
+    loadTodaySchedule();
 });
 
 let currentTab = 'home';
@@ -1905,6 +1906,41 @@ function getDaysLeft(dateStr) {
     const diffTime = date - today;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return diffDays > 0 ? diffDays : 0;
+}
+
+async function loadTodaySchedule() {
+    const list = document.querySelector('.schedule-list');
+    if (!list || !userId) return;
+    list.innerHTML = '<li style="color:#94A3B8;">Загрузка расписания...</li>';
+    try {
+        const res = await fetch(baseUrl + '/api/schedule/today?telegram_id=' + encodeURIComponent(userId));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const lessons = data.lessons || [];
+        if (!lessons.length) {
+            list.innerHTML = '<li style="color:#94A3B8;">На сегодня занятий нет.</li>';
+            return;
+        }
+        list.innerHTML = '';
+        lessons.forEach((lesson) => {
+            const li = document.createElement('li');
+            li.style.marginBottom = '6px';
+            const time = lesson.time || '';
+            const subj = lesson.subject || '';
+            const room = lesson.room || '';
+            const teacher = lesson.teacher || '';
+            const parts = [];
+            if (time) parts.push(time);
+            if (subj) parts.push(subj);
+            if (room) parts.push('(' + room + ')');
+            if (teacher) parts.push('— ' + teacher);
+            li.textContent = parts.join(' ');
+            list.appendChild(li);
+        });
+    } catch (e) {
+        console.warn('loadTodaySchedule error', e);
+        list.innerHTML = '<li style="color:#f97373;">Не удалось загрузить расписание.</li>';
+    }
 }
 
 function formatDate(dateStr) {

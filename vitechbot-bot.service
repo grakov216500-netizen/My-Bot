@@ -1,0 +1,23 @@
+# Копировать на сервер и включить автозапуск:
+#   sudo cp vitechbot-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable vitechbot-bot
+#   sudo systemctl start vitechbot-bot
+# После этого бот запускается при загрузке сервера и перезапускается при падении.
+# Логи: sudo journalctl -u vitechbot-bot -f
+
+[Unit]
+Description=VITECHBOT Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/VITECHBOT
+EnvironmentFile=/root/VITECHBOT/.env
+ExecStart=/usr/bin/python3 /root/VITECHBOT/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

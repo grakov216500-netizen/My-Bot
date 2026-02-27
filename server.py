@@ -19,6 +19,7 @@ import json
 
 # Импортируем функцию расчёта курса
 from utils.course_calculator import get_current_course
+from apex_parser import create_default_parser
 
 app = FastAPI()
 
@@ -93,6 +94,13 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "bot.db")
 
 # Токен бота для отправки напоминаний из серверного планировщика (тот же BOT_TOKEN, что и у бота)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Параметры доступа к Апекс-ВУЗ (используются в apex_parser.py)
+APEX_USER = os.getenv("APEX_USER")
+APEX_PASS = os.getenv("APEX_PASS")
+
+# Глобальный парсер расписания (ленивая инициализация)
+_apex_parser = None
 
 
 @app.on_event("startup")
@@ -1334,11 +1342,70 @@ async def set_reminder(data: dict):
 
 
 # ============================================
-# 4. ВСЁ РАСПИСАНИЕ (заглушка)
+# 4. РАСПИСАНИЕ (интеграция с Апекс)
 # ============================================
-@app.get("/api/schedule/all")
-async def get_full_schedule():
-    return {"info": "Модуль в разработке"}
+
+
+def _get_apex_parser():
+    """Ленивая инициализация парсера расписания Апекс-ВУЗ."""
+    global _apex_parser
+    if _apex_parser is None:
+        if not APEX_USER or not APEX_PASS:
+            raise HTTPException(
+                status_code=503,
+                detail="APEX_USER / APEX_PASS не заданы на сервере"
+            )
+        try:
+            _apex_parser = create_default_parser()
+        except Exception as e:
+            print(f"[ERROR] Инициализация ApexScheduleParser: {e}")
+            raise HTTPException(status_code=500, detail="Ошибка инициализации парсера расписания")
+    return _apex_parser
+
+
+@app.get("/api/schedule/today")
+async def get_today_schedule(telegram_id: int):
+    """
+    Расписание на сегодня для пользователя:
+    - ищем пользователя по telegram_id;
+    - используем его group_name как название группы в Апексе (Ио6-23 и т.п.);
+    - год берём из enrollment_year;
+    - обращаемся к ApexScheduleParser и возвращаем занятия на текущую дату.
+    """
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT fio, group_name, enrollment_year FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        group_name = (user["group_name"] or "").strip()
+        year = user["enrollment_year"]
+        if not group_name:
+            raise HTTPException(status_code=400, detail="У пользователя не указана группа")
+
+        parser = _get_apex_parser()
+        try:
+            lessons = parser.get_today_schedule(group_name, year)
+        except ValueError as ve:
+            # Группа не найдена в Апексе
+            raise HTTPException(status_code=404, detail=str(ve))
+        except Exception as e:
+            print(f"[ERROR] Расписание Апекс: {e}")
+            raise HTTPException(status_code=502, detail="Не удалось получить расписание из Апекс-ВУЗ")
+
+        return {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "group": group_name,
+            "year": year,
+            "lessons": lessons,
+        }
+    finally:
+        conn.close()
 
 
 @app.get("/api/schedule/check_month")
@@ -2115,41 +2182,41 @@ def _calc_weights_from_pair_votes(conn, stage_filter: str = None):
     Рассчитывает веса по формуле: S = сумма баллов объекта, avg = среднее, k = S/avg, вес = 10 × k.
     stage_filter: None = все этапы, 'main' | 'canteen' | 'female' = только этот этап.
     """
-    # Этап 1: основные наряды
+        # Этап 1: основные наряды
     if stage_filter is None or stage_filter == 'main':
-    main_ids = [r['id'] for r in conn.execute(
-        "SELECT id FROM duty_objects WHERE parent_id IS NULL ORDER BY id"
-    ).fetchall()]
+        main_ids = [r['id'] for r in conn.execute(
+            "SELECT id FROM duty_objects WHERE parent_id IS NULL ORDER BY id"
+        ).fetchall()]
 
-    # Считаем баллы: choice 'a' → object_a +2, object_b +0; 'b' → object_a +0, object_b +2; 'equal' → +1 каждому
-    scores = {oid: 0.0 for oid in main_ids}
-    votes = conn.execute(
-        "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage='main'"
-    ).fetchall()
-    for v in votes:
-        a, b = v['object_a_id'], v['object_b_id']
-        if v['choice'] == 'a':
-            scores[a] = scores.get(a, 0) + 2
-            scores[b] = scores.get(b, 0) + 0
-        elif v['choice'] == 'b':
-            scores[a] = scores.get(a, 0) + 0
-            scores[b] = scores.get(b, 0) + 2
-        else:
-            scores[a] = scores.get(a, 0) + 1
-            scores[b] = scores.get(b, 0) + 1
+        # Считаем баллы: choice 'a' → object_a +2, object_b +0; 'b' → object_a +0, object_b +2; 'equal' → +1 каждому
+        scores = {oid: 0.0 for oid in main_ids}
+        votes = conn.execute(
+            "SELECT object_a_id, object_b_id, choice FROM survey_pair_votes WHERE stage='main'"
+        ).fetchall()
+        for v in votes:
+            a, b = v['object_a_id'], v['object_b_id']
+            if v['choice'] == 'a':
+                scores[a] = scores.get(a, 0) + 2
+                scores[b] = scores.get(b, 0) + 0
+            elif v['choice'] == 'b':
+                scores[a] = scores.get(a, 0) + 0
+                scores[b] = scores.get(b, 0) + 2
+            else:
+                scores[a] = scores.get(a, 0) + 1
+                scores[b] = scores.get(b, 0) + 1
 
-    if len(main_ids) > 0:
-        total = sum(scores.get(i, 0) for i in main_ids)
-        avg = total / len(main_ids) if total > 0 else 1
-        for oid in main_ids:
-            s = scores.get(oid, 0)
-            k = (s / avg) if (avg > 0 and s > 0) else 0.8
-            k = _clamp_coef(k)
-            w = 10 * k
-            conn.execute("""
-                INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
-                ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
-            """, (oid, w))
+        if len(main_ids) > 0:
+            total = sum(scores.get(i, 0) for i in main_ids)
+            avg = total / len(main_ids) if total > 0 else 1
+            for oid in main_ids:
+                s = scores.get(oid, 0)
+                k = (s / avg) if (avg > 0 and s > 0) else 0.8
+                k = _clamp_coef(k)
+                w = 10 * k
+                conn.execute("""
+                    INSERT INTO object_weights (object_id, weight) VALUES (?, ?)
+                    ON CONFLICT(object_id) DO UPDATE SET weight=excluded.weight, calculated_at=CURRENT_TIMESTAMP
+                """, (oid, w))
 
     # Этап 2: объекты столовой — веса относительные к весу столовой
     if stage_filter is None or stage_filter == 'canteen':
