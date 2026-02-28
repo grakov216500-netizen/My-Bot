@@ -57,6 +57,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadSurveyResults();
     loadWeather();
     loadTodaySchedule();
+    loadNotifications();
+    loadRatingWidget();
+    applyQuickPanelSettings();
 });
 
 let currentTab = 'home';
@@ -93,6 +96,21 @@ function setupEventListeners() {
 
     const closeMenu = document.getElementById('close-menu');
     if (closeMenu) closeMenu.addEventListener('click', hideModal);
+
+    document.getElementById('notifications-modal-close')?.addEventListener('click', function() { document.getElementById('notifications-modal').style.display = 'none'; });
+    document.getElementById('notifications-mark-read')?.addEventListener('click', async function() {
+        try {
+            await fetch(baseUrl + '/api/notifications/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telegram_id: userId, notification_ids: 'all' }) });
+            loadNotifications();
+            loadNotificationsModal();
+        } catch (e) {}
+    });
+    document.getElementById('settings-modal-close')?.addEventListener('click', closeSettingsModal);
+    document.getElementById('rating-modal-close')?.addEventListener('click', function() { document.getElementById('rating-modal').style.display = 'none'; });
+    document.getElementById('rating-period-month')?.addEventListener('click', function() { ratingModalPeriod = 'month'; document.getElementById('rating-period-month').style.background = '#3B82F6'; document.getElementById('rating-period-month').style.color = 'white'; document.getElementById('rating-period-all').style.background = '#1E293B'; document.getElementById('rating-period-all').style.color = '#94A3B8'; loadRatingModal(); });
+    document.getElementById('rating-period-all')?.addEventListener('click', function() { ratingModalPeriod = 'all'; document.getElementById('rating-period-all').style.background = '#3B82F6'; document.getElementById('rating-period-all').style.color = 'white'; document.getElementById('rating-period-month').style.background = '#1E293B'; document.getElementById('rating-period-month').style.color = '#94A3B8'; loadRatingModal(); });
+    document.getElementById('rating-scope-course')?.addEventListener('click', function() { ratingModalScope = 'course'; document.getElementById('rating-scope-course').style.background = '#3B82F6'; document.getElementById('rating-scope-course').style.color = 'white'; document.getElementById('rating-scope-institute').style.background = '#1E293B'; document.getElementById('rating-scope-institute').style.color = '#94A3B8'; loadRatingModal(); });
+    document.getElementById('rating-scope-institute')?.addEventListener('click', function() { ratingModalScope = 'institute'; document.getElementById('rating-scope-institute').style.background = '#3B82F6'; document.getElementById('rating-scope-institute').style.color = 'white'; document.getElementById('rating-scope-course').style.background = '#1E293B'; document.getElementById('rating-scope-course').style.color = '#94A3B8'; loadRatingModal(); });
 
     const searchInput = document.getElementById('search-input');
     if (searchInput) searchInput.addEventListener('input', filterTasks);
@@ -212,6 +230,8 @@ function openProfileScreen() {
         if (sergeantBtn) sergeantBtn.style.display = userRole === 'sergeant' ? 'inline-block' : 'none';
         profileBody.style.display = 'block';
         loadProfileDutyStats();
+        loadProfileRating();
+        loadProfileAchievements();
         var icon = document.getElementById('profile-toggle-icon');
         if (icon) icon.textContent = '▼ Свернуть';
     }
@@ -469,6 +489,7 @@ function switchTab(tabName) {
         showSurveyList();
         loadSurveyList();
     } else { // home
+        if (surveyScreen) surveyScreen.style.display = 'none';
         if (mainContent) mainContent.classList.remove('hidden');
     }
 
@@ -972,11 +993,15 @@ async function loadDuties(userId) {
             const daysLeft = getDaysLeft(data.next_duty.date);
             const dateFormatted = formatDate(data.next_duty.date);
             const dayOfWeek = getDayOfWeek(data.next_duty.date);
+            const daysText = daysLeft === 0 ? 'Сегодня' : (daysLeft === 1 ? 'Завтра' : 'Через ' + daysLeft + ' дн.');
 
             widget.innerHTML = `
                 <h3>🎖️ Ближайший наряд</h3>
+                <div onclick="switchTab('duties'); return false;" style="cursor: pointer;">
                 <p>${roleFull}</p>
-                <p>Через ${daysLeft} дней — ${dateFormatted}, ${dayOfWeek}</p>
+                <p>${daysText} — ${dateFormatted}, ${dayOfWeek}</p>
+                <p style="color: #64748B; font-size: 12px; margin-top: 6px;">Нажмите, чтобы открыть «Мои наряды»</p>
+                </div>
             `;
         } else {
             // Если таблица duties существует, но записей нет — предлагаем пройти опрос
@@ -1028,6 +1053,13 @@ function showSurveyList() {
     currentCustomSurveyId = null;
 }
 
+/** Закрыть экран опросов и вернуться на главную (крестик в шапке опросов). */
+function closeSurveyScreen() {
+    var surveyScreen = document.getElementById('survey-screen');
+    if (surveyScreen) surveyScreen.style.display = 'none';
+    if (typeof switchTab === 'function') switchTab('home');
+}
+
 async function loadSurveyList() {
     const systemEl = document.getElementById('survey-system-cards');
     const customSection = document.getElementById('survey-custom-section');
@@ -1051,9 +1083,9 @@ async function loadSurveyList() {
         });
         var finalizeWrap = document.getElementById('survey-finalize-in-list');
         if (finalizeWrap) finalizeWrap.style.display = (userRole === 'admin' || userRole === 'assistant') ? 'block' : 'none';
-        ['survey-finalize-main-btn', 'survey-finalize-canteen-btn', 'survey-finalize-female-btn'].forEach(function(id, idx) {
+        ['survey-finalize-main-btn', 'survey-finalize-female-btn'].forEach(function(id, idx) {
             var btn = document.getElementById(id);
-            var stage = idx === 0 ? 'main' : (idx === 1 ? 'canteen' : 'female');
+            var stage = idx === 0 ? 'main' : 'female';
             if (btn && !btn._finalizeBound) {
                 btn._finalizeBound = true;
                 btn.addEventListener('click', function() { finalizeSurvey(stage); });
@@ -1918,7 +1950,8 @@ async function loadTodaySchedule() {
         const data = await res.json();
         const lessons = data.lessons || [];
         if (!lessons.length) {
-            list.innerHTML = '<li style="color:#94A3B8;">На сегодня занятий нет.</li>';
+            const msg = (data.message && String(data.message).trim()) || 'На сегодня занятий нет.';
+            list.innerHTML = '<li style="color:#94A3B8;">' + msg + '</li>';
             return;
         }
         list.innerHTML = '';
@@ -1955,11 +1988,132 @@ function getDayOfWeek(dateStr) {
 }
 
 function openNotifications() {
-    showToast("Уведомления (в разработке)");
+    var modal = document.getElementById('notifications-modal');
+    if (modal) modal.style.display = 'flex';
+    loadNotificationsModal();
 }
 
 function openSettings() {
-    showToast("Настройки (в разработке)");
+    var modal = document.getElementById('settings-modal');
+    if (!modal) return;
+    var notes = document.getElementById('setting-show-notes');
+    var survey = document.getElementById('setting-show-survey');
+    var duties = document.getElementById('setting-show-duties');
+    if (notes) notes.checked = localStorage.getItem('quickPanel_notes') !== '0';
+    if (survey) survey.checked = localStorage.getItem('quickPanel_survey') !== '0';
+    if (duties) duties.checked = localStorage.getItem('quickPanel_duties') !== '0';
+    modal.style.display = 'flex';
+}
+
+function closeSettingsModal() {
+    var modal = document.getElementById('settings-modal');
+    if (!modal) return;
+    var notes = document.getElementById('setting-show-notes');
+    var survey = document.getElementById('setting-show-survey');
+    var duties = document.getElementById('setting-show-duties');
+    if (notes) localStorage.setItem('quickPanel_notes', notes.checked ? '1' : '0');
+    if (survey) localStorage.setItem('quickPanel_survey', survey.checked ? '1' : '0');
+    if (duties) localStorage.setItem('quickPanel_duties', duties.checked ? '1' : '0');
+    modal.style.display = 'none';
+    applyQuickPanelSettings();
+}
+
+function applyQuickPanelSettings() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+        var tab = item.dataset.tab;
+        if (tab === 'notes') item.style.display = localStorage.getItem('quickPanel_notes') === '0' ? 'none' : '';
+        else if (tab === 'survey') item.style.display = localStorage.getItem('quickPanel_survey') === '0' ? 'none' : '';
+        else if (tab === 'duties') item.style.display = localStorage.getItem('quickPanel_duties') === '0' ? 'none' : '';
+    });
+}
+
+async function loadNotifications() {
+    var list = document.getElementById('notifications-list');
+    if (!list || !userId) return;
+    try {
+        var res = await fetch(baseUrl + '/api/notifications?telegram_id=' + userId + '&limit=5');
+        var data = res.ok ? await res.json() : { items: [] };
+        var items = data.items || [];
+        if (items.length === 0) {
+            list.innerHTML = '<li style="color: #64748B;">Нет уведомлений</li>';
+        } else {
+            list.innerHTML = items.map(function(n) {
+                return '<li style="margin-bottom: 8px; padding: 8px; background: #1E293B; border-radius: 6px;' + (n.read ? '' : ' border-left: 3px solid #3B82F6;') + '"><strong style="color: #93C5FD;">' + (n.title || '') + '</strong><br/><span style="color: #94A3B8; font-size: 13px;">' + (n.body || '') + '</span></li>';
+            }).join('');
+        }
+    } catch (e) {
+        list.innerHTML = '<li style="color: #64748B;">Не удалось загрузить</li>';
+    }
+}
+
+async function loadNotificationsModal() {
+    var list = document.getElementById('notifications-modal-list');
+    if (!list || !userId) return;
+    list.innerHTML = '<p style="color: #94A3B8;">Загрузка...</p>';
+    try {
+        var res = await fetch(baseUrl + '/api/notifications?telegram_id=' + userId + '&limit=50');
+        var data = res.ok ? await res.json() : { items: [] };
+        var items = data.items || [];
+        if (items.length === 0) {
+            list.innerHTML = '<p style="color: #64748B;">Нет уведомлений</p>';
+        } else {
+            list.innerHTML = items.map(function(n) {
+                return '<div style="margin-bottom: 10px; padding: 10px; background: #1E293B; border-radius: 8px;' + (n.read ? '' : ' border-left: 4px solid #3B82F6;') + '"><strong style="color: #93C5FD;">' + (n.title || '') + '</strong><p style="color: #94A3B8; font-size: 13px; margin: 4px 0 0 0;">' + (n.body || '') + '</p></div>';
+            }).join('');
+        }
+    } catch (e) {
+        list.innerHTML = '<p style="color: #f87171;">Ошибка загрузки</p>';
+    }
+}
+
+async function loadRatingWidget() {
+    var w = document.getElementById('rating-widget');
+    if (!w || !userId) return;
+    try {
+        var res = await fetch(baseUrl + '/api/rating/me?telegram_id=' + userId);
+        var data = res.ok ? await res.json() : {};
+        var pts = data.points != null ? data.points : 0;
+        var rc = data.rank_course;
+        var ri = data.rank_institute;
+        var rankText = [];
+        if (rc != null) rankText.push(rc + ' по курсу');
+        if (ri != null) rankText.push(ri + ' в институте');
+        w.innerHTML = '<h3>🏆 Рейтинг</h3><p style="color: #E2E8F0;">Ваши очки: <strong style="color: #3B82F6;">' + pts + '</strong></p>' +
+            (rankText.length ? '<p style="color: #94A3B8; font-size: 13px;">Место: ' + rankText.join(', ') + '</p>' : '') +
+            '<p style="margin-top: 8px;"><a href="#" onclick="openRatingModal(); return false;" style="color: #60A5FA;">Подробнее →</a></p>';
+    } catch (e) {
+        w.innerHTML = '<h3>🏆 Рейтинг</h3><p style="color: #94A3B8;">Очки за наряды. <a href="#" onclick="openRatingModal(); return false;" style="color: #60A5FA;">Подробнее</a></p>';
+    }
+}
+
+var ratingModalPeriod = 'all';
+var ratingModalScope = 'course';
+
+async function loadRatingModal() {
+    var list = document.getElementById('rating-modal-list');
+    if (!list || !userId) return;
+    list.innerHTML = '<p style="color: #94A3B8;">Загрузка...</p>';
+    try {
+        var res = await fetch(baseUrl + '/api/rating/top?telegram_id=' + userId + '&period=' + ratingModalPeriod + '&scope=' + ratingModalScope + '&limit=30');
+        var data = res.ok ? await res.json() : { top: [] };
+        var top = data.top || [];
+        if (top.length === 0) {
+            list.innerHTML = '<p style="color: #64748B;">Нет данных</p>';
+        } else {
+            list.innerHTML = top.map(function(r, i) {
+                var me = r.telegram_id === userId;
+                return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #1E293B; border-radius: 8px; margin-bottom: 6px;' + (me ? ' border-left: 4px solid #3B82F6;' : '') + '"><span style="color: #94A3B8;">' + r.rank + '</span><span style="color: #E2E8F0;">' + (r.fio || '—') + (me ? ' (вы)' : '') + '</span><span style="color: #3B82F6; font-weight: 600;">' + r.points + '</span></div>';
+            }).join('');
+        }
+    } catch (e) {
+        list.innerHTML = '<p style="color: #f87171;">Ошибка</p>';
+    }
+}
+
+function openRatingModal() {
+    var modal = document.getElementById('rating-modal');
+    if (modal) modal.style.display = 'flex';
+    loadRatingModal();
 }
 
 // === ФУНКЦИИ ДЛЯ РАБОТЫ С НАРЯДАМИ ===
@@ -2019,12 +2173,14 @@ function fillDutyYearMonthFilter() {
     yearSel.onchange = function() {
         currentYear = parseInt(yearSel.value);
         calY = currentYear;
+        window.selectedCalendarDay = '';
         loadDutiesForMonth();
         renderDutyCalendar();
     };
     monthSel.onchange = function() {
         currentMonth = parseInt(monthSel.value);
         calM = currentMonth;
+        window.selectedCalendarDay = '';
         loadDutiesForMonth();
         renderDutyCalendar();
     };
@@ -2043,6 +2199,7 @@ function renderDutyCalendar() {
     if (!hasData) {
         grid.innerHTML = '<p style="grid-column: 1/-1; color: #94A3B8; text-align: center; padding: 20px;">График на этот месяц отсутствует</p>';
         document.getElementById('duty-day-detail').style.display = 'none';
+        window.selectedCalendarDay = '';
         return;
     }
     var days = new Date(calY, calM, 0).getDate();
@@ -2051,16 +2208,22 @@ function renderDutyCalendar() {
     var html = dayNames.map(function(d) { return '<div style="text-align:center;color:#64748B;font-size:12px;padding:4px 0;">' + d + '</div>'; }).join('');
     for (var i = 0; i < firstDow; i++) html += '<div></div>';
     var todayStr = new Date().toISOString().slice(0, 10);
+    var selectedDay = window.selectedCalendarDay || '';
     for (var d = 1; d <= days; d++) {
         var ds = calY + '-' + String(calM).padStart(2, '0') + '-' + String(d).padStart(2, '0');
         var isToday = ds === todayStr;
-        html += '<div onclick="calSelectDay(\'' + ds + '\')" style="text-align:center;padding:8px 2px;border-radius:8px;cursor:pointer;background:' + (isToday ? '#3B82F6' : '#1E293B') + ';color:' + (isToday ? 'white' : '#CBD5E1') + ';font-size:14px;">' + d + '</div>';
+        var isSelected = ds === selectedDay && selectedDay !== '';
+        var bg = isSelected ? '#8B5CF6' : (isToday ? '#3B82F6' : '#1E293B');
+        var color = (isSelected || isToday) ? 'white' : '#CBD5E1';
+        html += '<div onclick="calSelectDay(\'' + ds + '\')" style="text-align:center;padding:8px 2px;border-radius:8px;cursor:pointer;background:' + bg + ';color:' + color + ';font-size:14px;">' + d + '</div>';
     }
     grid.innerHTML = html;
     document.getElementById('duty-day-detail').style.display = 'none';
 }
 
 async function calSelectDay(dateStr) {
+    window.selectedCalendarDay = dateStr;
+    renderDutyCalendar();
     var det = document.getElementById('duty-day-detail');
     if (!det) return;
     det.style.display = 'block';
@@ -2154,18 +2317,20 @@ async function openDutyDetail(dateStr, role, fromSearch) {
         }
 
         html += '<h5 style="color:#93C5FD;margin:12px 0 8px;">' + (isSearchView ? 'Участники' : 'Бригада') + '</h5>';
+        var myGroup = (window._userGroup || '').replace(/^Группа:\s*/, '').trim();
         data.participants.forEach(function(p) {
             var isMe = userFio && p.fio === userFio;
+            var sameGroup = myGroup && (p.group || p.group_name || '') === myGroup;
             var tid = p.telegram_id;
             var fioEsc = (p.fio || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
             if (tid) {
-                html += '<a href="tg://user?id=' + tid + '" target="_blank" rel="noopener" style="display:flex;justify-content:space-between;padding:10px;background:#1E293B;border-radius:8px;margin-bottom:6px;text-decoration:none;' + (isMe ? 'border-left:3px solid #3B82F6;' : '') + '">';
-                html += '<span style="color:' + (isMe ? '#3B82F6' : '#60A5FA') + ';font-size:14px;">' + fioEsc + (isMe ? ' (вы)' : '') + ' ↗</span>';
+                html += '<a href="tg://user?id=' + tid + '" target="_blank" rel="noopener" style="display:flex;justify-content:space-between;padding:10px;background:#1E293B;border-radius:8px;margin-bottom:6px;text-decoration:none;' + (isMe ? 'border-left:3px solid #3B82F6;' : '') + (sameGroup && !isMe ? 'border-left:3px solid #10B981;' : '') + '">';
+                html += '<span style="color:' + (isMe ? '#3B82F6' : sameGroup ? '#10B981' : '#60A5FA') + ';font-size:14px;">' + fioEsc + (isMe ? ' (вы)' : '') + (sameGroup && !isMe ? ' · одногруппник' : '') + ' ↗</span>';
                 html += '<span style="color:#94A3B8;font-size:13px;">' + (p.group || '') + '</span>';
                 html += '</a>';
             } else {
-                html += '<div style="display:flex;justify-content:space-between;padding:10px;background:#1E293B;border-radius:8px;margin-bottom:6px;' + (isMe ? 'border-left:3px solid #3B82F6;' : '') + '">';
-                html += '<span style="color:' + (isMe ? '#3B82F6' : '#CBD5E1') + ';font-size:14px;">' + fioEsc + (isMe ? ' (вы)' : '') + '</span>';
+                html += '<div style="display:flex;justify-content:space-between;padding:10px;background:#1E293B;border-radius:8px;margin-bottom:6px;' + (isMe ? 'border-left:3px solid #3B82F6;' : '') + (sameGroup && !isMe ? 'border-left:3px solid #10B981;' : '') + '">';
+                html += '<span style="color:' + (isMe ? '#3B82F6' : sameGroup ? '#10B981' : '#CBD5E1') + ';font-size:14px;">' + fioEsc + (isMe ? ' (вы)' : '') + (sameGroup && !isMe ? ' · одногруппник' : '') + '</span>';
                 html += '<span style="color:#94A3B8;font-size:13px;">' + (p.group || '') + '</span>';
                 html += '</div>';
             }
@@ -2268,9 +2433,7 @@ function bindDutyUploadOnce() {
     const btn = document.getElementById('duty-upload-btn');
     const fileInput = document.getElementById('duty-upload-file');
     const templateLink = document.getElementById('duty-template-link');
-    const quickTemplate = document.getElementById('duty-graph-btn-template');
     if (templateLink) templateLink.href = baseUrl + '/api/schedule/template';
-    if (quickTemplate) quickTemplate.href = baseUrl + '/api/schedule/template';
     var uploadBlock = document.getElementById('duty-graph-upload-block');
     var deleteBlock = document.getElementById('duty-graph-delete-block');
     var quickUploadBtn = document.getElementById('duty-graph-btn-upload');
@@ -2407,6 +2570,8 @@ async function openEditScheduleModal(ym) {
                     var el = document.getElementById(id);
                     if (el) el.value = dateStr;
                 });
+                var removeOnlyForm = document.getElementById('duty-edit-form-remove-only');
+                if (removeOnlyForm && removeOnlyForm.style.display !== 'none') fetchRoleByFioDateForRemoveOnly();
             });
         });
     }
@@ -2474,6 +2639,7 @@ function fillDutyEditDropdowns() {
         });
     }
     if (removeOnlyRole) removeOnlyRole.innerHTML = '<option value="">— выбрать —</option>' + DUTY_ROLE_CODES.map(function(r) { return '<option value="' + r + '">' + get_full_role(r) + '</option>'; }).join('');
+    bindRemoveOnlyRoleAuto();
     if (changeFio) {
         changeFio.innerHTML = '<option value="">— выбрать —</option>';
         dutyEditContext.cadets_in_schedule.forEach(function(c) {
@@ -2481,6 +2647,40 @@ function fillDutyEditDropdowns() {
         });
     }
     if (changeNewRole) changeNewRole.innerHTML = '<option value="">— выбрать —</option>' + DUTY_ROLE_CODES.map(function(r) { return '<option value="' + r + '">' + get_full_role(r) + '</option>'; }).join('');
+}
+
+async function fetchRoleByFioDateForRemoveOnly() {
+    var fioEl = document.getElementById('duty-edit-remove-only-fio');
+    var dateEl = document.getElementById('duty-edit-remove-only-date');
+    var roleEl = document.getElementById('duty-edit-remove-only-role');
+    if (!fioEl || !dateEl || !roleEl) return;
+    var fio = (fioEl.value || '').trim();
+    var date = (dateEl.value || '').trim();
+    if (date.length !== 10 || !fio) return;
+    try {
+        var res = await fetch(baseUrl + '/api/duties/role-by-fio-date?telegram_id=' + userId + '&fio=' + encodeURIComponent(fio) + '&date=' + encodeURIComponent(date));
+        if (res.status === 404) {
+            roleEl.value = '';
+            showToast('Нет наряда на эту дату у этого курсанта');
+            return;
+        }
+        if (!res.ok) return;
+        var data = await res.json();
+        if (data.role) {
+            roleEl.value = data.role;
+            showToast('Роль подставлена из графика');
+        }
+    } catch (e) {}
+}
+
+function bindRemoveOnlyRoleAuto() {
+    var fioEl = document.getElementById('duty-edit-remove-only-fio');
+    var dateEl = document.getElementById('duty-edit-remove-only-date');
+    if (!fioEl || !dateEl || fioEl._roleAutoBound) return;
+    fioEl._roleAutoBound = true;
+    fioEl.addEventListener('change', fetchRoleByFioDateForRemoveOnly);
+    dateEl.addEventListener('input', fetchRoleByFioDateForRemoveOnly);
+    dateEl.addEventListener('change', fetchRoleByFioDateForRemoveOnly);
 }
 
 (function initDutyEditModal() {
@@ -2647,6 +2847,41 @@ async function loadProfileDutyStats() {
         sickEl.textContent = 'Болел: ' + (data.times_sick || 0) + ' раз';
         replacedEl.textContent = 'Заменял других: ' + (data.times_replaced || 0) + ' раз';
     } catch (e) {}
+}
+
+async function loadProfileRating() {
+    var el = document.getElementById('profile-rating-text');
+    if (!el || !userId) return;
+    try {
+        var res = await fetch(baseUrl + '/api/rating/me?telegram_id=' + userId);
+        var data = res.ok ? await res.json() : {};
+        var pts = data.points != null ? data.points : 0;
+        var parts = ['Очки: ' + pts];
+        if (data.rank_course != null) parts.push('место по курсу: ' + data.rank_course);
+        if (data.rank_institute != null) parts.push('в институте: ' + data.rank_institute);
+        el.textContent = parts.join(' · ');
+    } catch (e) {
+        el.textContent = 'Очки: —';
+    }
+}
+
+async function loadProfileAchievements() {
+    var list = document.getElementById('profile-achievements-list');
+    if (!list || !userId) return;
+    try {
+        var res = await fetch(baseUrl + '/api/achievements?telegram_id=' + userId);
+        var data = res.ok ? await res.json() : { achievements: [] };
+        var arr = data.achievements || [];
+        if (arr.length === 0) {
+            list.innerHTML = '<p style="color: #64748B;">Нет достижений</p>';
+        } else {
+            list.innerHTML = arr.map(function(a) {
+                return '<div style="margin-bottom: 6px; padding: 6px; background: #0f172a; border-radius: 6px;' + (a.unlocked ? ' border-left: 3px solid #10B981;' : ' opacity: 0.8;') + '">' + (a.unlocked ? '✅ ' : '🔒 ') + (a.title || '') + (a.percent_owners != null ? ' <span style="color: #64748B;">(' + a.percent_owners + '% института)</span>' : '') + '</div>';
+            }).join('');
+        }
+    } catch (e) {
+        list.innerHTML = '<p style="color: #64748B;">Не удалось загрузить</p>';
+    }
 }
 
 (function initSickLeaveModal() {

@@ -64,12 +64,20 @@
           <label style="color: #94A3B8; font-size: 12px;">Группа</label>
           <input type="text" id="profile-group" placeholder="Группа" style="width: 100%; padding: 10px; background: #1E293B; border: 1px solid #334155; border-radius: 8px; color: #E2E8F0; box-sizing: border-box;" />
         </div>
-        <p id="profile-role" style="color: #94A3B8; font-size: 13px; margin-bottom: 16px;">Роль: —</p>
+        <p id="profile-role" style="color: #94A3B8; font-size: 13px; margin-bottom: 8px;">Роль: —</p>
+        <div id="profile-rating-block" style="margin-bottom: 16px; padding: 12px; background: #1E293B; border-radius: 8px; border: 1px solid #334155;">
+          <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">🏆 Рейтинг</p>
+          <p id="profile-rating-text" style="color: #CBD5E1; margin: 0;">Очки: — · Место: —</p>
+        </div>
         <div id="profile-duty-stats" style="margin-bottom: 16px; padding: 12px; background: #1E293B; border-radius: 8px; border: 1px solid #334155;">
           <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">📊 Моя статистика</p>
           <p id="profile-stats-sick" style="color: #CBD5E1; margin: 0 0 4px 0;">Болел: 0 раз</p>
           <p id="profile-stats-replaced" style="color: #CBD5E1; margin: 0;">Заменял других: 0 раз</p>
           <button type="button" id="profile-sick-leave-btn" style="margin-top: 10px; padding: 8px 14px; background: #475569; color: #E2E8F0; border: none; border-radius: 8px; cursor: pointer; font-size: 13px;">🩹 Указать больничный</button>
+        </div>
+        <div id="profile-achievements-block" style="margin-bottom: 16px; padding: 12px; background: #1E293B; border-radius: 8px; border: 1px solid #334155;">
+          <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">🏅 Мои награды</p>
+          <div id="profile-achievements-list" style="color: #94A3B8; font-size: 13px;">Загрузка...</div>
         </div>
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
           <button type="button" id="profile-save" style="padding: 10px 20px; background: #3B82F6; color: white; border: none; border-radius: 8px; cursor: pointer;">Сохранить</button>
@@ -124,13 +132,12 @@
       <h3>🏆 Рейтинг</h3>
       <p style="color: #94A3B8; font-size: 14px;">Скоро: топ по очкам за месяц и за всё время (по курсу / по институту).</p>
     </div>
-    <div class="widget">
+    <div class="widget" id="notifications-widget">
       <h3>🔔 Уведомления</h3>
-      <ul class="notification-list" style="list-style: none; padding: 0; margin: 0;">
-        <li style="margin-bottom: 6px;">Сержант: График изменён на 15.02</li>
-        <li style="margin-bottom: 6px;">Админ: Отмена пары по физике</li>
-        <li>Система: Напоминание: сдать форму</li>
+      <ul id="notifications-list" class="notification-list" style="list-style: none; padding: 0; margin: 0;">
+        <li style="color: #94A3B8;">Загрузка...</li>
       </ul>
+      <p style="color: #64748B; font-size: 12px;">Нажмите 🔔 в шапке для полного списка</p>
     </div>
   </main>
 
@@ -195,26 +202,26 @@
       </div>
       <!-- ===== ВИД 2: ГРАФИК (быстрые кнопки + скролл) ===== -->
       <div id="duty-view-upload" style="display: none;">
-        <div id="duty-graph-quick-btns" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
-          <button type="button" id="duty-graph-btn-upload" style="padding: 10px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 13px;">📤 Загрузить график</button>
-          <a id="duty-graph-btn-template" href="#" target="_blank" rel="noopener" style="padding: 10px 16px; background: #1E293B; color: #60A5FA; border: 1px solid #334155; border-radius: 8px; text-decoration: none; font-size: 13px;">📥 Шаблон</a>
-          <button type="button" id="duty-graph-btn-delete" style="padding: 10px 16px; background: #1E293B; color: #93C5FD; border: 1px solid #334155; border-radius: 8px; cursor: pointer; font-size: 13px;">✏️ Редактирование</button>
+        <div id="duty-graph-quick-btns" style="display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;">
+          <button type="button" id="duty-graph-btn-upload" style="padding: 14px 22px; background: #8B5CF6; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 15px;">📤 Загрузить график</button>
+          <button type="button" id="duty-graph-btn-delete" style="padding: 14px 22px; background: #1E293B; color: #93C5FD; border: 1px solid #334155; border-radius: 10px; cursor: pointer; font-size: 15px;">✏️ Редактирование</button>
         </div>
         <div id="duty-graph-content" style="display: flex; flex-direction: column; gap: 16px;">
-          <div id="duty-graph-upload-block" style="padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #8B5CF6;">
-            <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">Загрузить график</p>
-            <p style="color: #94A3B8; font-size: 12px; margin: 0 0 8px 0;">Скачайте шаблон, заполните и загрузите .xlsx</p>
-            <a id="duty-template-link" href="#" target="_blank" rel="noopener" style="display: inline-block; margin-bottom: 8px; color: #60A5FA;">Скачать шаблон .xlsx</a>
-            <input type="file" id="duty-upload-file" accept=".xlsx" style="display: block; margin-bottom: 8px; color: #CBD5E1;" />
-            <button type="button" id="duty-upload-btn" style="padding: 8px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Загрузить</button>
+          <div id="duty-graph-upload-block" style="padding: 16px; background: #1E293B; border-radius: 10px; border-left: 4px solid #8B5CF6;">
+            <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0; font-size: 15px;">Загрузить график</p>
+            <p style="color: #94A3B8; font-size: 13px; margin: 0 0 12px 0;">Скачайте шаблон, заполните и загрузите .xlsx</p>
+            <a id="duty-template-link" href="#" target="_blank" rel="noopener" style="display: inline-block; margin-bottom: 12px; color: #60A5FA; font-size: 15px;">📥 Скачать шаблон .xlsx</a>
+            <div style="margin-bottom: 12px;"></div>
+            <input type="file" id="duty-upload-file" accept=".xlsx" style="display: block; margin-bottom: 12px; color: #CBD5E1;" />
+            <button type="button" id="duty-upload-btn" style="padding: 12px 20px; background: #8B5CF6; color: white; border: none; border-radius: 10px; cursor: pointer; font-size: 15px;">Загрузить</button>
           </div>
           <div id="duty-graph-delete-block" style="display: none; padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #93C5FD;">
             <p style="color: #93C5FD; font-weight: 600; margin: 0 0 8px 0;">Редактирование графика</p>
             <p style="color: #94A3B8; font-size: 12px; margin: 0 0 12px 0;">Выберите месяц: Правка или Убрать</p>
             <div id="duty-graph-cards" style="display: flex; flex-direction: column; gap: 8px;"></div>
             <!-- Модалка правки графика за месяц -->
-            <div id="duty-edit-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; padding: 16px;">
-              <div style="background: #1E293B; border-radius: 12px; padding: 20px; max-width: 400px; width: 100%; border: 1px solid #334155;">
+            <div id="duty-edit-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; align-items: center; justify-content: center; padding: 16px; overflow-y: auto;">
+              <div style="background: #1E293B; border-radius: 12px; padding: 20px; max-width: 400px; width: 100%; border: 1px solid #334155; max-height: 85vh; overflow-y: auto;">
                 <p style="color: #93C5FD; font-weight: 600; margin: 0 0 12px 0;">Правка графика <span id="duty-edit-modal-ym"></span></p>
                 <div id="duty-edit-mini-calendar" style="display:grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 12px; font-size: 12px;"></div>
                 <p style="color: #64748B; font-size: 11px; margin: -6px 0 8px 0;">Нажмите день — подставится в поле даты</p>
@@ -341,15 +348,14 @@
       <div id="survey-list-block" class="survey-list-block">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
           <h2 style="color: #93C5FD; margin: 0;">📊 Опросы</h2>
-          <button type="button" onclick="showSurveyList()" class="survey-close-btn" title="К списку">✕</button>
+          <button type="button" onclick="closeSurveyScreen()" class="survey-close-btn" title="Закрыть">✕</button>
         </div>
         <p style="color: #94A3B8; font-size: 14px; margin-bottom: 12px;">Системные опросы (сложность нарядов)</p>
         <div id="survey-system-cards" style="display: flex; flex-direction: column; gap: 10px;"></div>
         <div id="survey-finalize-in-list" style="display: none; margin-top: 12px; padding: 12px; background: #1E293B; border-radius: 8px; border-left: 4px solid #8B5CF6;">
           <p style="color: #94A3B8; font-size: 13px; margin: 0 0 8px 0;">Подсчитать веса и завершить выбранный этап опроса.</p>
           <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-            <button type="button" id="survey-finalize-main-btn" style="padding: 10px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Завершить (основные)</button>
-            <button type="button" id="survey-finalize-canteen-btn" style="padding: 10px 16px; background: #6D28D9; color: white; border: none; border-radius: 8px; cursor: pointer;">Завершить (столовая)</button>
+            <button type="button" id="survey-finalize-main-btn" style="padding: 10px 16px; background: #8B5CF6; color: white; border: none; border-radius: 8px; cursor: pointer;">Завершить (парни)</button>
             <button type="button" id="survey-finalize-female-btn" style="padding: 10px 16px; background: #5B21B6; color: white; border: none; border-radius: 8px; cursor: pointer;">Завершить (девушки)</button>
           </div>
           <p id="survey-next-period" style="color: #64748B; font-size: 12px; margin: 8px 0 0 0;"></p>
@@ -472,6 +478,57 @@
         <button type="button" id="create-survey-cancel" style="flex: 1; padding: 12px; background: #334155; color: #E2E8F0; border: none; border-radius: 8px; cursor: pointer;">Отмена</button>
         <button type="button" id="create-survey-ok" style="flex: 1; padding: 12px; background: #3B82F6; color: white; border: none; border-radius: 8px; cursor: pointer;">Создать</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Модальное окно: уведомления (полный список) -->
+  <div id="notifications-modal" class="modal modal-center" style="display: none; z-index: 1050;">
+    <div class="modal-content" style="max-width: 420px; max-height: 80vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <span style="color: #93C5FD; font-weight: 600;">🔔 Уведомления</span>
+        <button type="button" id="notifications-modal-close" style="background: none; border: none; color: #94A3B8; cursor: pointer; font-size: 20px;">×</button>
+      </div>
+      <div id="notifications-modal-list"></div>
+      <button type="button" id="notifications-mark-read" style="margin-top: 12px; padding: 10px 16px; background: #334155; color: #E2E8F0; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">Отметить прочитанными</button>
+    </div>
+  </div>
+
+  <!-- Модальное окно: настройки (быстрая панель) -->
+  <div id="settings-modal" class="modal modal-center" style="display: none; z-index: 1050;">
+    <div class="modal-content" style="max-width: 360px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <span style="color: #93C5FD; font-weight: 600;">⚙️ Настройки</span>
+        <button type="button" id="settings-modal-close" style="background: none; border: none; color: #94A3B8; cursor: pointer; font-size: 20px;">×</button>
+      </div>
+      <p style="color: #94A3B8; font-size: 13px; margin-bottom: 12px;">Показывать в нижней панели:</p>
+      <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: pointer;">
+        <input type="checkbox" id="setting-show-notes" checked />
+        <span style="color: #E2E8F0;">📝 Заметки</span>
+      </label>
+      <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: pointer;">
+        <input type="checkbox" id="setting-show-survey" checked />
+        <span style="color: #E2E8F0;">📊 Опросы</span>
+      </label>
+      <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: pointer;">
+        <input type="checkbox" id="setting-show-duties" checked />
+        <span style="color: #E2E8F0;">🎖️ Наряды</span>
+      </label>
+    </div>
+  </div>
+
+  <div id="rating-modal" class="modal modal-center" style="display: none; z-index: 1050;">
+    <div class="modal-content" style="max-width: 420px; max-height: 85vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <span style="color: #93C5FD; font-weight: 600;">🏆 Рейтинг</span>
+        <button type="button" id="rating-modal-close" style="background: none; border: none; color: #94A3B8; cursor: pointer; font-size: 20px;">×</button>
+      </div>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+        <button type="button" id="rating-period-month" style="padding: 8px 14px; background: #1E293B; color: #94A3B8; border: 1px solid #334155; border-radius: 8px; cursor: pointer;">Месяц</button>
+        <button type="button" id="rating-period-all" style="padding: 8px 14px; background: #3B82F6; color: white; border: none; border-radius: 8px; cursor: pointer;">Всё время</button>
+        <button type="button" id="rating-scope-course" style="padding: 8px 14px; background: #3B82F6; color: white; border: none; border-radius: 8px; cursor: pointer;">Курс</button>
+        <button type="button" id="rating-scope-institute" style="padding: 8px 14px; background: #1E293B; color: #94A3B8; border: 1px solid #334155; border-radius: 8px; cursor: pointer;">Институт</button>
+      </div>
+      <div id="rating-modal-list"></div>
     </div>
   </div>
 

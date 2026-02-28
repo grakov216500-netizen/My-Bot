@@ -290,9 +290,14 @@ class ApexScheduleParser:
             year_int = today.year
 
         url = self._full_url(f"/schedule/day/{group_id}/student?set-year={year_int}")
-        resp = self.session.get(url, timeout=20)
+        try:
+            resp = self.session.get(url, timeout=20)
+        except Exception as e:
+            raise RuntimeError(f"Ошибка запроса к Апекс: {e}") from e
+
         if resp.status_code != 200:
-            raise RuntimeError(f"Не удалось загрузить расписание: HTTP {resp.status_code}")
+            # Не бросаем — возвращаем пустой список (например выходной или сайт вернул ошибку)
+            return []
 
         return self._parse_schedule_html_for_date(resp.text, today)
 

@@ -321,6 +321,72 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_duty_replacements_fio_repl ON duty_replacements (fio_replacement)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_sick_leave_telegram ON sick_leave_reports (telegram_id)')
 
+    # === 10. УВЕДОМЛЕНИЯ ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER,
+            scope TEXT NOT NULL CHECK(scope IN ('user', 'group', 'course', 'all')),
+            scope_value TEXT,
+            title TEXT NOT NULL,
+            body TEXT,
+            type TEXT DEFAULT 'info' CHECK(type IN ('schedule_change', 'reminder', 'system', 'course', 'group')),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by_telegram_id INTEGER,
+            FOREIGN KEY (telegram_id) REFERENCES users (telegram_id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_notifications_telegram ON notifications (telegram_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_notifications_scope ON notifications (scope, scope_value)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications (created_at)')
+
+    # === 11. ПРОЧИТАННЫЕ УВЕДОМЛЕНИЯ (для scope group/course/all храним кому показано) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS notification_read (
+            notification_id INTEGER NOT NULL,
+            telegram_id INTEGER NOT NULL,
+            read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (notification_id, telegram_id),
+            FOREIGN KEY (notification_id) REFERENCES notifications (id) ON DELETE CASCADE,
+            FOREIGN KEY (telegram_id) REFERENCES users (telegram_id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_notification_read_tg ON notification_read (telegram_id)')
+
+    # === 12. ДОСТИЖЕНИЯ (фиксированный набор) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS achievements (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT,
+            icon_url TEXT,
+            sort_order INTEGER DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_achievements (
+            telegram_id INTEGER NOT NULL,
+            achievement_id TEXT NOT NULL,
+            unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (telegram_id, achievement_id),
+            FOREIGN KEY (telegram_id) REFERENCES users (telegram_id),
+            FOREIGN KEY (achievement_id) REFERENCES achievements (id)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_achievements_tg ON user_achievements (telegram_id)')
+    # Сидер достижений (если пусто)
+    cursor.execute('SELECT COUNT(*) FROM achievements')
+    if cursor.fetchone()[0] == 0:
+        for row in [
+            ('first_10_duties', 'Первые 10 нарядов', 'Выполнил 10 нарядов', None, 1),
+            ('month_no_skip', 'Месяц без пропусков', 'Месяц без замен по болезни', None, 2),
+            ('top3_course', 'Топ-3 курса', 'Вошел в тройку лидеров по курсу за месяц', None, 3),
+            ('top10_institute', 'Топ-10 института', 'Вошел в десятку по институту за месяц', None, 4),
+            ('canteen_master', 'Мастер столовой', '10 нарядов в столовой', None, 5),
+            ('gbr_5', 'ГБР × 5', '5 нарядов ГБР', None, 6),
+        ]:
+            cursor.execute('INSERT OR IGNORE INTO achievements (id, title, description, icon_url, sort_order) VALUES (?, ?, ?, ?, ?)', row)
+
     conn.commit()
     conn.close()
     print("✅ База данных инициализирована с новой структурой")

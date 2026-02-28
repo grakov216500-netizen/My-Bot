@@ -198,6 +198,18 @@ def get_db():
     return conn
 
 
+def _create_schedule_notification(conn, group_name: str, enrollment_year: int, title: str, body: str, created_by_telegram_id: int):
+    """Создать уведомление об изменении графика для группы (видят все курсанты этой группы)."""
+    try:
+        conn.execute("""
+            INSERT INTO notifications (telegram_id, scope, scope_value, title, body, type, created_by_telegram_id)
+            VALUES (NULL, 'group', ?, ?, ?, 'schedule_change', ?)
+        """, (group_name or "", title, body or "", created_by_telegram_id))
+        conn.commit()
+    except Exception as e:
+        print(f"[WARN] _create_schedule_notification: {e}")
+
+
 def _send_telegram_message(chat_id: int, text: str) -> bool:
     """Отправляет сообщение в Telegram через Bot API. Возвращает True при успехе."""
     if not BOT_TOKEN:
@@ -1399,21 +1411,28 @@ async def get_today_schedule(telegram_id: int):
         if not group_name:
             raise HTTPException(status_code=400, detail="У пользователя не указана группа")
 
-        parser = _get_apex_parser()
+        lessons = []
+        message = None
         try:
+            parser = _get_apex_parser()
             lessons = parser.get_today_schedule(group_name, year)
+        except HTTPException:
+            raise
         except ValueError as ve:
-            # Группа не найдена в Апексе
-            raise HTTPException(status_code=404, detail=str(ve))
+            # Группа не найдена в Апексе — не падаем, отдаём пустое расписание
+            print(f"[WARN] Расписание Апекс (группа не найдена): {ve}")
+            message = "Группа не найдена в Апексе"
         except Exception as e:
-            print(f"[ERROR] Расписание Апекс: {e}")
-            raise HTTPException(status_code=502, detail="Не удалось получить расписание из Апекс-ВУЗ")
+            # Любая другая ошибка (сеть, выходной, нет даты в таблице и т.п.) — пустое расписание
+            print(f"[WARN] Расписание Апекс: {e}")
+            message = "Не удалось загрузить расписание (выходной или сайт недоступен)"
 
         return {
             "date": datetime.now().strftime("%Y-%m-%d"),
             "group": group_name,
             "year": year,
             "lessons": lessons,
+            "message": message,
         }
     finally:
         conn.close()
@@ -1758,6 +1777,37 @@ async def get_duty_edit_context(ym: str, telegram_id: int):
         raise HTTPException(status_code=500, detail="Ошибка загрузки контекста")
 
 
+@app.get("/api/duties/role-by-fio-date")
+async def get_role_by_fio_date(telegram_id: int, fio: str, date: str):
+    """Для формы «Убрать наряд»: по выбранным ФИО и дате вернуть роль из графика (автоподстановка)."""
+    if not telegram_id or not fio or not date or len(date) != 10:
+        raise HTTPException(status_code=400, detail="Нужны telegram_id, fio, date (YYYY-MM-DD)")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT role, group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not user or user["role"] not in ("sergeant", "assistant", "admin"):
+            conn.close()
+            raise HTTPException(status_code=403, detail="Нет прав")
+        ey = user["enrollment_year"]
+        row = conn.execute("""
+            SELECT role FROM duty_schedule
+            WHERE date = ? AND enrollment_year = ? AND fio = ?
+        """, (date, ey, fio.strip())).fetchone()
+        conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Нет наряда на эту дату у этого курсанта")
+        return {"role": row["role"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] role-by-fio-date: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка")
+
+
 @app.post("/api/duties/remove-and-replace")
 async def duty_remove_and_replace(data: dict):
     """Удалить курсанта из наряда на дату и поставить вместо него другого. Запись в duty_replacements."""
@@ -1812,6 +1862,14 @@ async def duty_remove_and_replace(data: dict):
         except Exception:
             pass
         conn.commit()
+        editor = conn.execute("SELECT fio FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        editor_fio = (editor["fio"] or "").split()[0] if editor else "Сержант"
+        _create_schedule_notification(
+            conn, grp, ey,
+            f"График изменён {date}",
+            f"{editor_fio}: замена {fio_removed} → {fio_replacement}. Причина: {reason}.",
+            telegram_id
+        )
         conn.close()
         return {"status": "ok", "message": "Замена выполнена"}
     except HTTPException:
@@ -1859,6 +1917,14 @@ async def duty_add(data: dict):
                 VALUES (?, ?, ?, ?, ?, ?, 'заболел', ?)
             """, (date, role, group_name, ey, fio_replaced, fio, telegram_id))
         conn.commit()
+        editor = conn.execute("SELECT fio FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        editor_fio = (editor["fio"] or "").split()[0] if editor else "Сержант"
+        _create_schedule_notification(
+            conn, group_name, ey,
+            f"График изменён {date}",
+            f"{editor_fio}: добавлен наряд для {fio} ({role}).",
+            telegram_id
+        )
         conn.close()
         return {"status": "ok", "message": "Наряд добавлен"}
     except HTTPException:
@@ -1910,6 +1976,14 @@ async def duty_remove(data: dict):
         except Exception:
             pass
         conn.commit()
+        editor = conn.execute("SELECT fio FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        editor_fio = (editor["fio"] or "").split()[0] if editor else "Сержант"
+        _create_schedule_notification(
+            conn, row["group_name"], ey,
+            f"График изменён {date}",
+            f"{editor_fio}: снят с наряда {fio_removed} (роль: {role}).",
+            telegram_id
+        )
         conn.close()
         return {"status": "ok", "message": "Наряд удалён"}
     except HTTPException:
@@ -1958,6 +2032,14 @@ async def duty_change_role(data: dict):
         except Exception:
             pass
         conn.commit()
+        editor = conn.execute("SELECT fio FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        editor_fio = (editor["fio"] or "").split()[0] if editor else "Сержант"
+        _create_schedule_notification(
+            conn, row["group_name"], ey,
+            f"График изменён {date}",
+            f"{editor_fio}: у {fio} изменена роль на {new_role}.",
+            telegram_id
+        )
         conn.close()
         return {"status": "ok", "message": "Роль изменена"}
     except HTTPException:
@@ -1965,6 +2047,284 @@ async def duty_change_role(data: dict):
     except Exception as e:
         print(f"[ERROR] duty change-role: {e}")
         raise HTTPException(status_code=500, detail="Ошибка изменения")
+
+
+# ============================================
+# 2.7. УВЕДОМЛЕНИЯ
+# ============================================
+
+@app.get("/api/notifications")
+async def get_notifications(telegram_id: int, limit: int = 50):
+    """Список уведомлений для пользователя: свои + по группе + по курсу + общие. С флагом прочитано."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not user:
+            conn.close()
+            return {"items": [], "unread_count": 0}
+        grp, ey = (user["group_name"] or ""), user["enrollment_year"]
+        rows = conn.execute("""
+            SELECT n.id, n.title, n.body, n.type, n.created_at, n.scope, n.scope_value,
+                   r.telegram_id IS NOT NULL AS read
+            FROM notifications n
+            LEFT JOIN notification_read r ON r.notification_id = n.id AND r.telegram_id = ?
+            WHERE (n.telegram_id = ? OR (n.telegram_id IS NULL AND (
+                (n.scope = 'group' AND n.scope_value = ?) OR
+                (n.scope = 'course' AND n.scope_value = ?) OR
+                n.scope = 'all'
+            )))
+            ORDER BY n.created_at DESC
+            LIMIT ?
+        """, (telegram_id, telegram_id, grp, str(ey), limit)).fetchall()
+        items = []
+        unread = 0
+        for r in rows:
+            read = bool(r["read"])
+            if not read:
+                unread += 1
+            items.append({
+                "id": r["id"],
+                "title": r["title"],
+                "body": r["body"] or "",
+                "type": r["type"] or "info",
+                "created_at": r["created_at"],
+                "read": read,
+            })
+        conn.close()
+        return {"items": items, "unread_count": unread}
+    except Exception as e:
+        print(f"[ERROR] notifications: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка загрузки уведомлений")
+
+
+@app.post("/api/notifications/read")
+async def mark_notifications_read(data: dict):
+    """Отметить уведомления как прочитанные. notification_ids: список id или "all"."""
+    telegram_id = data.get("telegram_id")
+    notification_ids = data.get("notification_ids")
+    if not telegram_id:
+        raise HTTPException(status_code=400, detail="Нужен telegram_id")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        if notification_ids == "all" or (isinstance(notification_ids, list) and len(notification_ids) == 0):
+            # Получить все id уведомлений, которые пользователь видит и не прочитал
+            user = conn.execute("SELECT group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+            if not user:
+                conn.close()
+                return {"status": "ok", "marked": 0}
+            grp, ey = (user["group_name"] or ""), user["enrollment_year"]
+            ids = [row["id"] for row in conn.execute("""
+                SELECT n.id FROM notifications n
+                LEFT JOIN notification_read r ON r.notification_id = n.id AND r.telegram_id = ?
+                WHERE (n.telegram_id = ? OR (n.scope = 'group' AND n.scope_value = ?) OR (n.scope = 'course' AND n.scope_value = ?) OR n.scope = 'all')
+                  AND r.telegram_id IS NULL
+            """, (telegram_id, telegram_id, grp, str(ey))).fetchall()]
+        else:
+            ids = [int(x) for x in notification_ids] if isinstance(notification_ids, list) else []
+        for nid in ids:
+            conn.execute("INSERT OR IGNORE INTO notification_read (notification_id, telegram_id) VALUES (?, ?)", (nid, telegram_id))
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "marked": len(ids)}
+    except Exception as e:
+        print(f"[ERROR] notifications read: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка")
+
+
+# ============================================
+# 2.8. РЕЙТИНГ (очки из нарядов по весам опроса)
+# ============================================
+
+def _get_user_duty_points(conn, telegram_id: int, month_from: str = None, month_to: str = None):
+    """Сумма баллов пользователя за наряды (по duty_schedule + object_weights). Период опционально."""
+    user = conn.execute("SELECT fio, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+    if not user:
+        return 0.0
+    fio, ey = user["fio"], user["enrollment_year"]
+    extra = ""
+    params = [fio, ey]
+    if month_from:
+        extra += " AND date >= ?"
+        params.append(month_from + "-01")
+    if month_to:
+        y, m = int(month_to[:4]), int(month_to[5:7])
+        if m == 12:
+            month_end = f"{y+1}-01-01"
+        else:
+            month_end = f"{y}-{m+1:02d}-01"
+        extra += " AND date < ?"
+        params.append(month_end)
+    rows = conn.execute(f"""
+        SELECT ds.role, ds.date FROM duty_schedule ds
+        WHERE ds.fio = ? AND ds.enrollment_year = ? {extra}
+    """, params).fetchall()
+    # Веса: duty_objects (name = Курс, ГБР, Столовая, ЗУБ и дочерние для столовой) + object_weights
+    weights = {}
+    for w in conn.execute("SELECT o.name, o.parent_id, ow.weight FROM duty_objects o JOIN object_weights ow ON ow.object_id = o.id").fetchall():
+        key = (w["name"], w["parent_id"])
+        weights[key] = float(w["weight"] or 0)
+    # Роль в графике может быть кодом (к, гбр, с ...). Соответствие с duty_objects по имени
+    role_to_name = {"к": "Курс", "дк": "Дежурный по курсу", "с": "Столовая", "гбр": "ГБР", "зуб": "ЗУБ", "путсо": "ПУТСО", "м": "Медчасть"}
+    total = 0.0
+    for r in rows:
+        role_code = (r["role"] or "").lower()
+        name = role_to_name.get(role_code, role_code)
+        # Ищем вес по имени (parent_id NULL для основных)
+        for (obj_name, parent_id), w in weights.items():
+            if obj_name == name and parent_id is None:
+                total += w
+                break
+        else:
+            total += 10.0  # дефолт если нет веса
+    return round(total, 1)
+
+
+@app.get("/api/rating/me")
+async def rating_me(telegram_id: int):
+    """Очки пользователя, место в топе по курсу и по институту (за всё время)."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT enrollment_year, group_name FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not user:
+            conn.close()
+            return {"points": 0, "rank_course": None, "rank_institute": None}
+        ey = user["enrollment_year"]
+        points = _get_user_duty_points(conn, telegram_id, None, None)
+        # Ранг по курсу и институту — считаем очки для всех и ранжируем
+        all_course = []
+        for row in conn.execute("SELECT telegram_id FROM users WHERE enrollment_year = ? AND status = 'активен'", (ey,)).fetchall():
+            tid = row["telegram_id"]
+            p = _get_user_duty_points(conn, tid, None, None)
+            all_course.append((tid, p))
+        all_course.sort(key=lambda x: -x[1])
+        rank_course = next((i + 1 for i, (tid, _) in enumerate(all_course) if tid == telegram_id), None)
+        all_inst = []
+        for row in conn.execute("SELECT telegram_id FROM users WHERE status = 'активен'").fetchall():
+            p = _get_user_duty_points(conn, row["telegram_id"], None, None)
+            all_inst.append((row["telegram_id"], p))
+        all_inst.sort(key=lambda x: -x[1])
+        rank_institute = next((i + 1 for i, (tid, _) in enumerate(all_inst) if tid == telegram_id), None)
+        conn.close()
+        return {"points": points, "rank_course": rank_course, "rank_institute": rank_institute}
+    except Exception as e:
+        print(f"[ERROR] rating/me: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка рейтинга")
+
+
+@app.get("/api/rating/top")
+async def rating_top(telegram_id: int, period: str = "all", scope: str = "course", limit: int = 30):
+    """Топ по очкам. period: month | all, scope: course | institute."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute("SELECT enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if not user:
+            conn.close()
+            return {"top": []}
+        ey = user["enrollment_year"]
+        month_from = datetime.now().strftime("%Y-%m") if period == "month" else None
+        month_to = datetime.now().strftime("%Y-%m") if period == "month" else None
+        if scope == "course":
+            rows = conn.execute("SELECT telegram_id, fio, group_name FROM users WHERE enrollment_year = ? AND status = 'активен'", (ey,)).fetchall()
+        else:
+            rows = conn.execute("SELECT telegram_id, fio, group_name FROM users WHERE status = 'активен'").fetchall()
+        result = []
+        for r in rows:
+            p = _get_user_duty_points(conn, r["telegram_id"], month_from, month_to)
+            result.append({"telegram_id": r["telegram_id"], "fio": r["fio"], "group_name": r["group_name"], "points": p})
+        result.sort(key=lambda x: -x["points"])
+        result = result[:limit]
+        for i, row in enumerate(result):
+            row["rank"] = i + 1
+        conn.close()
+        return {"top": result, "period": period, "scope": scope}
+    except Exception as e:
+        print(f"[ERROR] rating/top: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка рейтинга")
+
+
+# ============================================
+# 2.9. ДОСТИЖЕНИЯ
+# ============================================
+
+def _unlock_achievements(conn, telegram_id: int):
+    """Проверяет условия достижений и добавляет в user_achievements при выполнении."""
+    try:
+        user = conn.execute("SELECT fio, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if not user:
+            return
+        fio, ey = user["fio"], user["enrollment_year"]
+        # first_10_duties
+        count_duties = conn.execute("SELECT COUNT(*) FROM duty_schedule WHERE fio = ? AND enrollment_year = ?", (fio, ey)).fetchone()[0]
+        if count_duties >= 10:
+            conn.execute("INSERT OR IGNORE INTO user_achievements (telegram_id, achievement_id) VALUES (?, 'first_10_duties')", (telegram_id,))
+        # top3_course, top10_institute — по текущим очкам
+        points = _get_user_duty_points(conn, telegram_id, None, None)
+        course_list = []
+        for row in conn.execute("SELECT telegram_id FROM users WHERE enrollment_year = ? AND status = 'активен'", (ey,)).fetchall():
+            p = _get_user_duty_points(conn, row["telegram_id"], None, None)
+            course_list.append((row["telegram_id"], p))
+        course_list.sort(key=lambda x: -x[1])
+        rank_course = next((i + 1 for i, (tid, _) in enumerate(course_list) if tid == telegram_id), None)
+        if rank_course is not None and rank_course <= 3:
+            conn.execute("INSERT OR IGNORE INTO user_achievements (telegram_id, achievement_id) VALUES (?, 'top3_course')", (telegram_id,))
+        all_inst = []
+        for row in conn.execute("SELECT telegram_id FROM users WHERE status = 'активен'").fetchall():
+            p = _get_user_duty_points(conn, row["telegram_id"], None, None)
+            all_inst.append((row["telegram_id"], p))
+        all_inst.sort(key=lambda x: -x[1])
+        rank_inst = next((i + 1 for i, (tid, _) in enumerate(all_inst) if tid == telegram_id), None)
+        if rank_inst is not None and rank_inst <= 10:
+            conn.execute("INSERT OR IGNORE INTO user_achievements (telegram_id, achievement_id) VALUES (?, 'top10_institute')", (telegram_id,))
+        conn.commit()
+    except Exception as e:
+        print(f"[WARN] _unlock_achievements: {e}")
+
+
+@app.get("/api/achievements")
+async def get_achievements(telegram_id: int):
+    """Список всех достижений с флагом получено и процентом обладателей."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        _unlock_achievements(conn, telegram_id)
+        total_users = conn.execute("SELECT COUNT(*) FROM users WHERE status = 'активен'").fetchone()[0] or 1
+        rows = conn.execute("""
+            SELECT a.id, a.title, a.description, a.icon_url, a.sort_order,
+                   ua.telegram_id IS NOT NULL AS unlocked
+            FROM achievements a
+            LEFT JOIN user_achievements ua ON ua.achievement_id = a.id AND ua.telegram_id = ?
+            ORDER BY a.sort_order, a.id
+        """, (telegram_id,)).fetchall()
+        result = []
+        for r in rows:
+            count = conn.execute("SELECT COUNT(*) FROM user_achievements WHERE achievement_id = ?", (r["id"],)).fetchone()[0]
+            pct = round(100.0 * count / total_users, 1) if total_users else 0
+            result.append({
+                "id": r["id"],
+                "title": r["title"],
+                "description": r["description"] or "",
+                "icon_url": r["icon_url"],
+                "unlocked": bool(r["unlocked"]),
+                "percent_owners": pct,
+            })
+        conn.close()
+        return {"achievements": result}
+    except Exception as e:
+        print(f"[ERROR] achievements: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка загрузки достижений")
 
 
 # ============================================
