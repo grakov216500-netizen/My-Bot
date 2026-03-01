@@ -8,7 +8,16 @@
   var STORAGE_YEAR = 'vitech_site_year';
   var isLocal = /localhost|127\.0\.0\.1/.test(window.location.hostname);
   var isUnderSitePath = window.location.pathname.indexOf('/site') !== -1;
-  var API_BASE = isUnderSitePath ? window.location.origin : (isLocal || window.location.hostname === 'vitechbot.online') ? '' : 'https://vitechbot.online';
+  // Всегда вести API на бэкенд: при /site/ — origin; при localhost — явно порт 8000 (чтобы работало при открытии с любого порта/файла).
+  var API_BASE = (function () {
+    try {
+      var override = localStorage.getItem('vitech_api_base');
+      if (override) return override.replace(/\/$/, '');
+    } catch (_) {}
+    if (isLocal) return 'http://localhost:8000';
+    if (isUnderSitePath) return window.location.origin;
+    return (window.location.hostname === 'vitechbot.online') ? '' : 'https://vitechbot.online';
+  })();
 
   var userId = null;
   var userGroup = '';
@@ -254,8 +263,13 @@
   /* ========== PROFILE load ========== */
   async function loadProfile() {
     try {
-      var data = await api('/api/profile/full');
-      if (data.error) {
+      var data = null;
+      try {
+        data = await api('/api/profile/full');
+      } catch (_) {
+        data = { error: true };
+      }
+      if (data && data.error) {
         var dataBasic = await api('/api/user');
         if (dataBasic.error) return false;
         window.__profile = {
@@ -265,7 +279,7 @@
           role: dataBasic.role || 'user',
           avatar_url: null
         };
-      } else {
+      } else if (data) {
         window.__profile = {
           full_name: data.fio,
           group: data.group,
@@ -479,21 +493,20 @@
 
     if (studySection === 'schedule') {
       if (!studyWeekStart) studyWeekStart = getMonday(new Date());
-      loadStudyWeekSchedule(studyWeekStart, container);
-
-    } else if (studySection === 'search') {
-      var html = '<div class="page-head"><h1 class="page-title">Поиск по дате</h1></div>';
-      html += '<div class="card"><div class="card-body"><input type="date" id="study-search-date" class="login-input" style="max-width:220px" /><button type="button" id="study-search-btn" class="btn-accent" style="margin-left:8px">Найти</button></div></div>';
-      html += '<div id="study-search-result"></div>';
-      container.innerHTML = html;
-      document.getElementById('study-search-btn').addEventListener('click', function () {
-        var val = document.getElementById('study-search-date').value;
-        if (!val) return;
-        var target = getMonday(new Date(val + 'T12:00:00'));
-        studyWeekStart = target;
-        loadStudyWeekSchedule(target, document.getElementById('study-search-result'));
-      });
-
+      container.innerHTML = '<p class="muted" style="margin-bottom:8px">Перейти к неделе: <input type="date" id="study-jump-date" class="input-text" style="max-width:140px;padding:4px 8px" /><button type="button" class="btn-accent" id="study-jump-btn" style="margin-left:6px">Открыть</button></p><div id="study-schedule-wrap"></div>';
+      var scheduleWrap = document.getElementById('study-schedule-wrap');
+      loadStudyWeekSchedule(studyWeekStart, scheduleWrap || container);
+      var jumpBtn = document.getElementById('study-jump-btn');
+      var jumpInput = document.getElementById('study-jump-date');
+      if (jumpBtn && jumpInput) {
+        jumpBtn.addEventListener('click', function () {
+          var val = jumpInput.value;
+          if (!val) return;
+          studyWeekStart = getMonday(new Date(val + 'T12:00:00'));
+          var wrap = document.getElementById('study-schedule-wrap');
+          if (wrap) loadStudyWeekSchedule(studyWeekStart, wrap);
+        });
+      }
     } else if (studySection === 'journal') {
       container.innerHTML = '<div class="page-head"><h1 class="page-title">Журнал</h1><p class="page-subtitle">Оценки и посещаемость</p></div><div class="card"><div class="card-body"><p class="list-placeholder">Журнал будет доступен после подключения данных Апекс ВУЗ.</p></div></div>';
 
@@ -560,7 +573,6 @@
   function openStudyModule() {
     var items = [
       { id: 'schedule', label: 'Расписание', active: studySection === 'schedule' },
-      { id: 'search', label: 'Поиск по дате', active: studySection === 'search' },
       { id: 'journal', label: 'Журнал', active: studySection === 'journal' },
       { id: 'absences', label: 'Пропуски', active: studySection === 'absences' },
       { id: 'library', label: 'Библиотека', active: studySection === 'library' },
@@ -930,6 +942,16 @@
   }
 
   function init() {
+    if (window.location.search.indexOf('reset=1') !== -1) {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_GROUP);
+        localStorage.removeItem(STORAGE_YEAR);
+      } catch (_) {}
+      window.location.replace(window.location.pathname + (window.location.hash || ''));
+      return;
+    }
+
     userId = getStoredOrUrlUserId();
     userGroup = getStoredGroup();
     userYear = getStoredYear();
@@ -951,6 +973,16 @@
         showScreen('screen-home');
         setActiveNav('home');
         loadAll();
+      });
+      var resetBtn = document.getElementById('btn-reset-login');
+      if (resetBtn) resetBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(STORAGE_GROUP);
+          localStorage.removeItem(STORAGE_YEAR);
+        } catch (_) {}
+        location.reload();
       });
       return;
     }
