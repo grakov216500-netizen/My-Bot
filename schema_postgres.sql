@@ -205,3 +205,36 @@ CREATE TABLE IF NOT EXISTS forum_reports (
     reporter_telegram_id BIGINT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Больничный: самоотчёт курсанта (дата)
+CREATE TABLE IF NOT EXISTS sick_leave_reports (
+    id SERIAL PRIMARY KEY,
+    telegram_id BIGINT NOT NULL,
+    report_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_sick_leave_telegram ON sick_leave_reports (telegram_id);
+
+-- Пользовательские опросы (сержант — группа, помощник — курс, админ — системный)
+CREATE TABLE IF NOT EXISTS custom_surveys (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    scope_type TEXT NOT NULL CHECK (scope_type IN ('group', 'course', 'system')),
+    scope_value TEXT NOT NULL,
+    created_by_telegram_id BIGINT NOT NULL,
+    ends_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS custom_survey_options (
+    id SERIAL PRIMARY KEY,
+    survey_id INTEGER NOT NULL REFERENCES custom_surveys(id) ON DELETE CASCADE,
+    option_text TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS custom_survey_votes (
+    survey_id INTEGER NOT NULL REFERENCES custom_surveys(id) ON DELETE CASCADE,
+    user_telegram_id BIGINT NOT NULL,
+    option_id INTEGER NOT NULL REFERENCES custom_survey_options(id) ON DELETE CASCADE,
+    PRIMARY KEY (survey_id, user_telegram_id)
+);

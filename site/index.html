@@ -110,38 +110,22 @@
     <main class="work-area" id="work-area"></main>
   </div>
 
-  <!-- Заглушки модулей (Учёба, Опросы, Планы, Рейтинг — только контент без своей боковой пока) -->
+  <!-- Заглушки модулей (Опросы, Рейтинг — только контент без своей боковой пока) -->
   <main id="screen-study" class="screen screen-module-only" style="display: none;">
     <div class="page-head">
       <h1 class="page-title">Учёба</h1>
-      <p class="page-subtitle">Расписание на день и неделю</p>
+      <p class="page-subtitle">Расписание по неделям (Apex ВУЗ)</p>
     </div>
-    <div class="study-tabs">
-      <button type="button" class="study-tab active" data-study-tab="day">На день</button>
-      <button type="button" class="study-tab" data-study-tab="week">На неделю</button>
-    </div>
-    <div id="study-day-wrap" class="study-content">
-      <p class="card-meta" id="study-day-meta">сегодня</p>
-      <ul class="list list-schedule" id="study-day-list">
-        <li class="list-placeholder">Загрузка…</li>
-      </ul>
-    </div>
-    <div id="study-week-wrap" class="study-content" style="display: none;">
-      <div class="study-week-nav">
-        <button type="button" class="btn-week-prev" id="study-week-prev">← Пред. неделя</button>
-        <span class="study-week-label" id="study-week-label">—</span>
-        <button type="button" class="btn-week-next" id="study-week-next">След. неделя →</button>
-      </div>
-      <div id="study-week-grid"></div>
-    </div>
+    <div id="study-work-area" class="work-area-inner"></div>
   </main>
   <main id="screen-surveys" class="screen screen-module-only" style="display: none;">
     <div class="page-head">
       <h1 class="page-title">Опросы</h1>
+      <p class="page-subtitle">Оценка сложности нарядов и другие опросы</p>
     </div>
     <div class="card">
-      <div class="card-body">
-        <p class="list-placeholder">Системный опрос о сложности нарядов и другие опросы — скоро.</p>
+      <div class="card-body" id="surveys-content">
+        <p class="list-placeholder">Загрузка…</p>
       </div>
     </div>
   </main>
@@ -184,14 +168,26 @@
     </div>
   </div>
 
-  <!-- Админ-панель: список пользователей, выдача ролей -->
+  <!-- Админ-панель: список пользователей, роли, больничный -->
   <main id="screen-admin" class="screen screen-admin" style="display: none;">
     <div class="page-head">
       <h1 class="page-title">Админ-панель</h1>
-      <p class="page-subtitle">Зарегистрированные курсанты и роли на сайте</p>
+      <p class="page-subtitle">Пользователи, роли, больничные</p>
       <p><a href="#" class="link-btn accent" id="admin-back">← Назад</a></p>
     </div>
+    <div class="card" id="admin-sick-leave-card">
+      <h2 class="card-title">Больничный</h2>
+      <div class="card-body">
+        <p class="muted">Укажите дату больничного (вам на замену поставят другого).</p>
+        <form id="admin-sick-leave-form" class="admin-form">
+          <input type="date" id="admin-sick-leave-date" required />
+          <button type="submit" class="btn-accent">Сообщить о больничном</button>
+        </form>
+        <p id="admin-sick-leave-status" class="muted"></p>
+      </div>
+    </div>
     <div class="card">
+      <h2 class="card-title">Пользователи и роли</h2>
       <div class="card-body">
         <div id="admin-users-list"></div>
       </div>

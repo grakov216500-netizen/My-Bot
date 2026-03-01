@@ -6,7 +6,7 @@
 (function () {
   const STORAGE_KEY = 'vitech_site_telegram_id';
   const isLocal = /localhost|127\.0\.0\.1/.test(window.location.hostname);
-  const API_BASE = isLocal ? '' : 'https://vitechbot.online';
+  const API_BASE = (isLocal || window.location.hostname === 'vitechbot.online') ? '' : 'https://vitechbot.online';
 
   let userId = null;
   let currentModule = 'home';
@@ -74,6 +74,27 @@
     const el = document.getElementById('screen-admin');
     if (el) el.style.display = 'block';
     loadAdminUsers();
+    var form = document.getElementById('admin-sick-leave-form');
+    var statusEl = document.getElementById('admin-sick-leave-status');
+    if (form) {
+      form.onsubmit = function (e) {
+        e.preventDefault();
+        var dateInput = document.getElementById('admin-sick-leave-date');
+        var reportDate = dateInput && dateInput.value;
+        if (!reportDate) return;
+        if (statusEl) statusEl.textContent = 'Отправка…';
+        fetch(API_BASE + '/api/sick-leave/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telegram_id: userId, report_date: reportDate })
+        }).then(function (r) { return r.json(); }).then(function (data) {
+          if (statusEl) statusEl.textContent = data.message || 'Учтено';
+          if (dateInput) dateInput.value = '';
+        }).catch(function () {
+          if (statusEl) statusEl.textContent = 'Ошибка отправки';
+        });
+      };
+    }
   }
 
   function loadAdminUsers() {
@@ -383,7 +404,7 @@
   function renderDutiesWorkArea(container) {
     container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
     if (dutiesLocalSection === 'graph') {
-      const hint = '<div class="hint-box"><strong>Как загрузить график.</strong> Скачайте шаблон (раздел «Шаблон»), заполните ФИО и наряды по дням месяца. Загрузите файл ниже (доступно сержанту своей группы, помощнику и админу).</div>';
+      const hint = '<div class="hint-box"><span class="hint-icon" title="Подсказка">ℹ</span> <strong>График нарядов.</strong> Не пропустите: укажите верные <strong>год набора и группу</strong> в профиле. Скачайте шаблон ниже, заполните ФИО и роли по дням, загрузите .xlsx (доступно сержанту своей группы, помощнику и админу).</div>';
       Promise.all([
         api('/api/duties'),
         api('/api/duties/available-months')
@@ -403,7 +424,10 @@
           const canUpload = window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0;
           html += '<section class="card"><h2 class="card-title">Загрузить график</h2><div class="card-body">';
           if (canUpload) {
+            html += '<p class="muted">Скачайте шаблон, заполните группу (E1), год (AO4), ФИО (F–H) и роли по дням (I–AM).</p>';
+            html += '<p><a href="' + API_BASE + '/api/schedule/template" download class="btn-accent">Скачать шаблон .xlsx</a></p>';
             html += '<form id="duty-upload-form" class="duty-upload-form"><input type="file" accept=".xlsx" id="duty-upload-file" /><label class="checkbox-label"><input type="checkbox" id="duty-upload-overwrite" /> Заменить существующий месяц</label><button type="submit" class="btn-accent">Загрузить .xlsx</button></form><p id="duty-upload-status" class="muted"></p>';
+            html += '<p class="muted" style="margin-top:12px">Если у вас уже готовый шаблон под свою группу, можно предложить заменить общий шаблон для своей группы — обратитесь к админу.</p>';
           } else {
             html += '<p class="list-placeholder">Загрузка графика доступна сержанту своей группы, помощнику и админу.</p>';
           }
@@ -500,10 +524,6 @@
       });
     } else if (dutiesLocalSection === 'survey') {
       container.innerHTML = '<div class="page-head"><h1 class="page-title">Опрос о нарядах</h1><p class="page-subtitle">Оцените сложность объектов для распределения</p></div><div class="card"><div class="card-body"><p class="list-placeholder">Если опрос не пройден, пройдите его в Telegram-боте. Здесь интеграция — скоро.</p><a href="#" class="link-btn accent">Открыть в боте</a></div></div>';
-    } else if (dutiesLocalSection === 'template') {
-      const templateUrl = API_BASE + '/api/schedule/template';
-      const hint = '<div class="hint-box"><strong>Наставление по шаблону.</strong> Скачайте файл ниже, заполните группу (E1), год (AO4), ФИО (колонки F–H) и роли по дням (I–AM). Сохраните и загрузите в боте или на сайте.</div>';
-      container.innerHTML = '<div class="page-head"><h1 class="page-title">Шаблон графика</h1><p class="page-subtitle">Скачайте файл, заполните и загрузите в боте или здесь (скоро)</p></div>' + hint + '<div class="card"><div class="card-body"><a href="' + templateUrl + '" download class="btn-accent">Скачать шаблон .xlsx</a></div></div>';
     } else if (dutiesLocalSection === 'edit') {
       container.innerHTML = '<div class="page-head"><h1 class="page-title">Правки и замены</h1><p class="page-subtitle">Редактирование графика после загрузки</p></div><div class="card"><div class="card-body"><p class="list-placeholder">Выбор месяца и правки — перенесём из приложения. Скоро.</p></div></div>';
     } else {
@@ -515,7 +535,6 @@
     const items = [
       { id: 'graph', label: 'График', active: dutiesLocalSection === 'graph' },
       { id: 'survey', label: 'Опрос', active: dutiesLocalSection === 'survey' },
-      { id: 'template', label: 'Шаблон', active: dutiesLocalSection === 'template' },
       { id: 'edit', label: 'Правки / замены', active: dutiesLocalSection === 'edit' }
     ];
     window.onLocalNavClick = function (id, workArea) {
@@ -599,47 +618,19 @@
     return mon.getDate() + '–' + sun.getDate() + ' ' + mon.toLocaleDateString('ru-RU', { month: 'short' });
   }
 
-  async function loadStudyDaySchedule(requestDate) {
-    const listEl = document.getElementById('study-day-list');
-    const metaEl = document.getElementById('study-day-meta');
-    if (!listEl) return;
-    const path = '/api/schedule/today' + (requestDate ? '?date=' + encodeURIComponent(requestDate) : '');
-    try {
-      const data = await api(path);
-      const lessons = data.lessons || [];
-      const dateStr = data.date;
-      const d = dateStr ? new Date(dateStr + 'T12:00:00') : new Date();
-      const day = d.getDay();
-      const isWeekend = day === 0 || day === 6;
-      if (metaEl) metaEl.textContent = isWeekend ? 'Понедельник (новая неделя)' : d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
-      if (lessons.length === 0) {
-        listEl.innerHTML = '<li class="schedule-weekend">' + (data.message || 'На выбранный день занятий нет') + '</li>';
-        return;
-      }
-      listEl.innerHTML = lessons.map(function (l) {
-        const parts = [l.time, l.subject].filter(Boolean);
-        if (l.room) parts.push('(' + l.room + ')');
-        if (l.teacher) parts.push('— ' + l.teacher);
-        return '<li>' + parts.join(' ') + '</li>';
-      }).join('');
-    } catch (e) {
-      listEl.innerHTML = '<li class="error-msg">Не удалось загрузить расписание</li>';
-      if (metaEl) metaEl.textContent = '';
-    }
-  }
-
-  async function loadStudyWeekSchedule(weekStartDate) {
-    const gridEl = document.getElementById('study-week-grid');
-    const labelEl = document.getElementById('study-week-label');
-    if (!gridEl) return;
-    gridEl.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+  async function loadStudyWeekSchedule(weekStartDate, container) {
+    const wrap = container || document.getElementById('study-week-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
     const dateStr = weekStartDate.toISOString().slice(0, 10);
     try {
       const data = await api('/api/schedule/week?date=' + encodeURIComponent(dateStr));
       const schedule = data.schedule || {};
+      const labelEl = wrap.querySelector('.study-week-label') || document.getElementById('study-week-label');
       if (labelEl) labelEl.textContent = formatWeekRange(weekStartDate) + (data.message ? ' · ' + data.message : '');
       const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт'];
-      let html = '';
+      let html = '<div class="study-week-nav"><button type="button" class="btn-week-prev">← Пред. неделя</button><span class="study-week-label">' + formatWeekRange(weekStartDate) + '</span><button type="button" class="btn-week-next">След. неделя →</button></div>';
+      html += '<div class="study-week-grid">';
       Object.keys(schedule).sort().forEach(function (dateKey, i) {
         const lessons = schedule[dateKey];
         const d = new Date(dateKey + 'T12:00:00');
@@ -657,55 +648,115 @@
         }
         html += '</ul></section>';
       });
-      gridEl.innerHTML = html || '<p class="list-placeholder">Нет данных за неделю</p>';
+      html += '</div>';
+      wrap.innerHTML = html;
+      wrap.querySelector('.btn-week-prev').addEventListener('click', function () {
+        studyWeekStart.setDate(studyWeekStart.getDate() - 7);
+        loadStudyWeekSchedule(studyWeekStart, wrap);
+      });
+      wrap.querySelector('.btn-week-next').addEventListener('click', function () {
+        studyWeekStart.setDate(studyWeekStart.getDate() + 7);
+        loadStudyWeekSchedule(studyWeekStart, wrap);
+      });
     } catch (e) {
-      gridEl.innerHTML = '<p class="error-msg">Не удалось загрузить расписание</p>';
-      if (labelEl) labelEl.textContent = '—';
+      wrap.innerHTML = '<p class="error-msg">Не удалось загрузить расписание</p>';
     }
   }
 
-  function openStudyModule() {
-    setActiveNav('study');
-    showScreen('screen-study');
-    const d = new Date();
-    const day = d.getDay();
-    let requestDate = '';
-    if (day === 0 || day === 6) {
-      const nextMon = getMonday(d);
-      nextMon.setDate(nextMon.getDate() + (day === 0 ? 1 : 2));
-      requestDate = nextMon.toISOString().slice(0, 10);
-    }
-    loadStudyDaySchedule(requestDate);
+  function renderStudyWorkArea(container) {
+    if (!container) return;
+    container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
     if (!studyWeekStart) studyWeekStart = getMonday(new Date());
-    loadStudyWeekSchedule(studyWeekStart);
-    var labelEl = document.getElementById('study-week-label');
-    if (labelEl) labelEl.textContent = formatWeekRange(studyWeekStart);
+    loadStudyWeekSchedule(studyWeekStart, container);
+  }
 
-    document.querySelectorAll('.study-tab').forEach(function (btn) {
-      btn.onclick = function () {
-        document.querySelectorAll('.study-tab').forEach(function (b) { b.classList.remove('active'); });
-        btn.classList.add('active');
-        const tab = btn.getAttribute('data-study-tab');
-        document.getElementById('study-day-wrap').style.display = tab === 'day' ? 'block' : 'none';
-        document.getElementById('study-week-wrap').style.display = tab === 'week' ? 'block' : 'none';
-      };
+  function openStudyModule() {
+    const items = [
+      { id: 'week', label: 'Расписание по неделям', active: true }
+    ];
+    window.onLocalNavClick = function (id, workArea) {
+      items.forEach(function (i) { i.active = i.id === id; });
+      renderStudyWorkArea(workArea);
+    };
+    showModuleLayout('study', items, renderStudyWorkArea);
+  }
+
+  function openSurveysModule() {
+    setActiveNav('surveys');
+    showScreen('screen-surveys');
+    const container = document.getElementById('surveys-content');
+    if (!container) return;
+    container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+    api('/api/survey/list').then(function (data) {
+      const system = data.system || [];
+      const custom = data.custom || [];
+      const gender = data.user_gender || 'male';
+      let html = '<p class="muted">Выберите опрос для прохождения.</p>';
+      if (system.length) {
+        html += '<div class="survey-list">';
+        system.forEach(function (s) {
+          if (s.for_gender && s.for_gender !== gender) return;
+          html += '<button type="button" class="card survey-card" data-stage="' + (s.id === 'female' ? 'female' : 'main') + '">' + escapeHtml(s.title) + '</button>';
+        });
+        html += '</div>';
+      }
+      if (custom.length) {
+        html += '<h3 class="card-title" style="margin-top:16px">Опросы по группе/курсу</h3><ul class="list">';
+        custom.forEach(function (s) {
+          html += '<li><button type="button" class="link-btn survey-custom-btn" data-id="' + s.id + '">' + escapeHtml(s.title) + '</button></li>';
+        });
+        html += '</ul>';
+      }
+      if (!system.length && !custom.length) html = '<p class="list-placeholder">Нет доступных опросов</p>';
+      container.innerHTML = html;
+      container.querySelectorAll('.survey-card').forEach(function (btn) {
+        btn.addEventListener('click', function () { runPairSurvey(container, btn.getAttribute('data-stage')); });
+      });
+      container.querySelectorAll('.survey-custom-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () { openCustomSurvey(container, parseInt(btn.getAttribute('data-id'), 10)); });
+      });
+    }).catch(function () {
+      container.innerHTML = '<p class="error-msg">Не удалось загрузить опросы</p>';
     });
-    var prevBtn = document.getElementById('study-week-prev');
-    var nextBtn = document.getElementById('study-week-next');
-    if (prevBtn) {
-      prevBtn.onclick = function () {
-        studyWeekStart.setDate(studyWeekStart.getDate() - 7);
-        loadStudyWeekSchedule(studyWeekStart);
-        document.getElementById('study-week-label').textContent = formatWeekRange(studyWeekStart);
-      };
-    }
-    if (nextBtn) {
-      nextBtn.onclick = function () {
-        studyWeekStart.setDate(studyWeekStart.getDate() + 7);
-        loadStudyWeekSchedule(studyWeekStart);
-        document.getElementById('study-week-label').textContent = formatWeekRange(studyWeekStart);
-      };
-    }
+  }
+
+  function runPairSurvey(container, stage) {
+    container.innerHTML = '<p class="list-placeholder">Загрузка пар…</p>';
+    api('/api/survey/pairs?stage=' + encodeURIComponent(stage)).then(function (data) {
+      const pairs = data.pairs || [];
+      if (!pairs.length) { container.innerHTML = '<p class="list-placeholder">Нет пар для голосования</p>'; return; }
+      var pairIndex = 0;
+      function showPair() {
+        if (pairIndex >= pairs.length) { container.innerHTML = '<p class="list-placeholder">Спасибо! Опрос завершён.</p>'; return; }
+        var p = pairs[pairIndex];
+        container.innerHTML = '<div class="survey-pair"><p class="muted">Кто сложнее? (' + (pairIndex + 1) + '/' + pairs.length + ')</p><div class="survey-pair-btns"><button type="button" class="btn-accent" data-choice="a">' + escapeHtml(p.object_a_name) + '</button><button type="button" class="btn-accent" data-choice="equal">Одинаково</button><button type="button" class="btn-accent" data-choice="b">' + escapeHtml(p.object_b_name) + '</button></div></div>';
+        container.querySelectorAll('[data-choice]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            fetch(API_BASE + '/api/survey/pair-vote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: userId, object_a_id: p.object_a_id, object_b_id: p.object_b_id, choice: b.getAttribute('data-choice'), stage: stage }) })
+              .then(function (r) { return r.json(); }).then(function () { pairIndex++; showPair(); }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка отправки</p>'; });
+          });
+        });
+      }
+      showPair();
+    }).catch(function () { container.innerHTML = '<p class="error-msg">Не удалось загрузить пары</p>'; });
+  }
+
+  function openCustomSurvey(container, surveyId) {
+    container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+    api('/api/survey/custom/' + surveyId).then(function (data) {
+      if (!data.options || !data.options.length) { container.innerHTML = '<p class="list-placeholder">Нет вариантов</p>'; return; }
+      var html = '<h3>' + escapeHtml(data.title || 'Опрос') + '</h3><ul class="list">';
+      data.options.forEach(function (opt) {
+        html += '<li><button type="button" class="link-btn survey-option-btn" data-option-id="' + opt.id + '">' + escapeHtml(opt.option_text) + '</button></li>';
+      });
+      container.innerHTML = html + '</ul>';
+      container.querySelectorAll('.survey-option-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          fetch(API_BASE + '/api/survey/custom/' + surveyId + '/vote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ telegram_id: userId, option_id: parseInt(btn.getAttribute('data-option-id'), 10) }) })
+            .then(function (r) { return r.json(); }).then(function () { container.innerHTML = '<p class="list-placeholder">Спасибо! Ваш голос учтён.</p>'; }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка</p>'; });
+        });
+      });
+    }).catch(function () { container.innerHTML = '<p class="error-msg">Не удалось загрузить опрос</p>'; });
   }
 
   function openPlansModule() {
@@ -783,6 +834,10 @@
     }
     if (module === 'plans') {
       openPlansModule();
+      return;
+    }
+    if (module === 'surveys') {
+      openSurveysModule();
       return;
     }
     setActiveNav(module);
