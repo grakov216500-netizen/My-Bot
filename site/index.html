@@ -23,6 +23,7 @@
         <a href="#" class="nav-link" id="nav-link-surveys" data-module="surveys">Опросы</a>
         <a href="#" class="nav-link" id="nav-link-plans" data-module="plans">Планы</a>
         <a href="#" class="nav-link" id="nav-link-rating" data-module="rating">Рейтинг</a>
+        <a href="#" class="nav-link" id="nav-link-forum" data-module="forum">Форум</a>
       </nav>
       <nav class="topbar-nav right-nav">
         <button type="button" class="topbar-btn icon-only" id="btn-notifications" title="Уведомления" aria-label="Уведомления">🔔</button>
@@ -101,7 +102,7 @@
     </section>
   </main>
 
-  <!-- Модуль с локальной боковой панелью (Наряды, Учёба, …) -->
+  <!-- Модуль с локальной боковой панелью (Наряды, Форум, …) -->
   <div id="screen-module" class="layout-with-sidebar" style="display: none;">
     <aside class="local-sidebar" id="local-sidebar">
       <nav class="local-nav" id="local-nav"></nav>
@@ -149,6 +150,37 @@
     <div class="card">
       <div class="card-body">
         <p class="list-placeholder">Полный рейтинг по курсу и институту — загрузка…</p>
+      </div>
+    </div>
+  </main>
+
+  <!-- Профиль: модальное окно (данные + ссылка в Админ-панель для админа) -->
+  <div id="modal-profile" class="modal" style="display: none;" aria-hidden="true">
+    <div class="modal-backdrop" id="profile-backdrop"></div>
+    <div class="modal-content modal-profile">
+      <div class="modal-header">
+        <h2 class="modal-title">Профиль</h2>
+        <button type="button" class="modal-close" id="profile-close" aria-label="Закрыть">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="profile-info" id="profile-info"></div>
+        <div class="profile-actions">
+          <button type="button" class="link-btn accent" id="btn-admin-panel" style="display: none;">Админ-панель</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Админ-панель: список пользователей, выдача ролей -->
+  <main id="screen-admin" class="screen screen-admin" style="display: none;">
+    <div class="page-head">
+      <h1 class="page-title">Админ-панель</h1>
+      <p class="page-subtitle">Зарегистрированные курсанты и роли на сайте</p>
+      <p><a href="#" class="link-btn accent" id="admin-back">← Назад</a></p>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <div id="admin-users-list"></div>
       </div>
     </div>
   </main>

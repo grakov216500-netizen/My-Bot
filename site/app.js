@@ -31,7 +31,7 @@
   function setActiveNav(module) {
     currentModule = module;
     document.querySelectorAll('.nav-link').forEach(function (a) {
-      a.classList.toggle('active', a.getAttribute('data-module') === module);
+      a.classList.toggle('active', module && a.getAttribute('data-module') === module);
     });
   }
 
@@ -39,8 +39,82 @@
     document.querySelectorAll('.screen, .layout-with-sidebar').forEach(function (el) {
       el.style.display = 'none';
     });
+    document.getElementById('modal-profile').style.display = 'none';
     const el = document.getElementById(screenId);
     if (el) el.style.display = 'block';
+  }
+
+  function openProfileModal() {
+    const modal = document.getElementById('modal-profile');
+    const info = document.getElementById('profile-info');
+    const btnAdmin = document.getElementById('btn-admin-panel');
+    if (!modal || !info) return;
+    const p = window.__profile || {};
+    info.innerHTML = '<p><strong>' + escapeHtml(p.full_name || '—') + '</strong></p><p class="muted">' + escapeHtml(p.group || '') + ', ' + escapeHtml(p.course_label || '') + '</p>';
+    btnAdmin.style.display = (p.role === 'admin') ? 'inline-block' : 'none';
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeProfileModal() {
+    const modal = document.getElementById('modal-profile');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function openAdminPanel() {
+    closeProfileModal();
+    setActiveNav(null);
+    document.querySelectorAll('.screen, .layout-with-sidebar').forEach(function (el) {
+      el.style.display = 'none';
+    });
+    document.getElementById('modal-profile').style.display = 'none';
+    const el = document.getElementById('screen-admin');
+    if (el) el.style.display = 'block';
+    loadAdminUsers();
+  }
+
+  function loadAdminUsers() {
+    const listEl = document.getElementById('admin-users-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+    api('/api/users?actor_telegram_id=' + userId).then(function (data) {
+      const users = data.users || [];
+      if (users.length === 0) {
+        listEl.innerHTML = '<p class="list-placeholder">Нет зарегистрированных пользователей</p>';
+        return;
+      }
+      const roleLabels = { admin: 'Администратор', assistant: 'Помощник', sergeant: 'Сержант', user: 'Курсант' };
+      listEl.innerHTML = users.map(function (u) {
+        const roleLabel = roleLabels[u.role] || u.role;
+        let btns = '';
+        if (u.role !== 'admin') {
+          if (u.role !== 'assistant') btns += '<button type="button" class="admin-set-role" data-tid="' + u.telegram_id + '" data-role="assistant">Помощник</button>';
+          if (u.role !== 'sergeant') btns += '<button type="button" class="admin-set-role" data-tid="' + u.telegram_id + '" data-role="sergeant">Сержант</button>';
+          if (u.role !== 'user') btns += '<button type="button" class="admin-set-role" data-tid="' + u.telegram_id + '" data-role="user">Снять</button>';
+        }
+        return '<div class="admin-user-row"><div class="admin-user-info"><strong>' + escapeHtml(u.fio || '—') + '</strong><br/><span class="muted">' + escapeHtml(u.group_name || '') + ', ' + (u.enrollment_year || '') + ' · ' + roleLabel + '</span></div><div class="admin-user-actions">' + btns + '</div></div>';
+      }).join('');
+      listEl.querySelectorAll('.admin-set-role').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const tid = btn.getAttribute('data-tid');
+          const role = btn.getAttribute('data-role');
+          fetch(API_BASE + '/api/users/set-role', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ actor_telegram_id: userId, target_telegram_id: parseInt(tid, 10), role: role })
+          }).then(function (r) { return r.json(); }).then(function () {
+            loadAdminUsers();
+          }).catch(function () {
+            listEl.innerHTML = '<p class="error-msg">Ошибка сохранения роли</p>';
+          });
+        });
+      });
+    }).catch(function () {
+      listEl.innerHTML = '<p class="error-msg">Ошибка загрузки списка</p>';
+    });
   }
 
   function showModuleLayout(module, localNavItems, renderWorkArea) {
@@ -220,7 +294,12 @@
     try {
       const data = await api('/api/user');
       if (data.error) return false;
-      window.__profile = { full_name: data.full_name, group: data.group, course_label: data.course_label };
+      window.__profile = {
+        full_name: data.full_name,
+        group: data.group,
+        course_label: data.course_label,
+        role: data.role || 'user'
+      };
       const headerName = document.getElementById('header-name');
       const headerAvatar = document.getElementById('header-avatar');
       if (headerName) headerName.textContent = data.full_name || 'Профиль';
@@ -252,13 +331,14 @@
   function renderDutiesWorkArea(container) {
     container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
     if (dutiesLocalSection === 'graph') {
+      const hint = '<div class="hint-box"><strong>Как загрузить график.</strong> Скачайте шаблон (раздел «Шаблон»), заполните ФИО и наряды по дням месяца. Загрузите готовый файл в боте или здесь (скоро).</div>';
       api('/api/duties').then(function (data) {
         if (data.error) {
-          container.innerHTML = '<div class="page-head"><h1 class="page-title">Мои наряды</h1></div><div class="card"><div class="card-body"><p class="list-placeholder">' + data.error + '</p></div></div>';
+          container.innerHTML = '<div class="page-head"><h1 class="page-title">Мои наряды</h1></div>' + hint + '<div class="card"><div class="card-body"><p class="list-placeholder">' + data.error + '</p></div></div>';
           return;
         }
         const next = data.next_duty;
-        let html = '<div class="page-head"><h1 class="page-title">Мои наряды</h1><p class="page-subtitle">Ближайший наряд и график по месяцам</p></div>';
+        let html = '<div class="page-head"><h1 class="page-title">Мои наряды</h1><p class="page-subtitle">Ближайший наряд и график по месяцам</p></div>' + hint;
         if (next) {
           const df = next.date ? new Date(next.date + 'T12:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' }) : '';
           html += '<section class="card"><h2 class="card-title">Ближайший наряд</h2><div class="card-body"><p class="duty-role">' + escapeHtml(next.role_full || next.role || '') + '</p><p class="duty-date">' + escapeHtml(df) + '</p></div></section>';
@@ -271,7 +351,8 @@
       container.innerHTML = '<div class="page-head"><h1 class="page-title">Опрос о нарядах</h1><p class="page-subtitle">Оцените сложность объектов для распределения</p></div><div class="card"><div class="card-body"><p class="list-placeholder">Если опрос не пройден, пройдите его в Telegram-боте. Здесь интеграция — скоро.</p><a href="#" class="link-btn accent">Открыть в боте</a></div></div>';
     } else if (dutiesLocalSection === 'template') {
       const templateUrl = API_BASE + '/api/schedule/template';
-      container.innerHTML = '<div class="page-head"><h1 class="page-title">Шаблон графика</h1><p class="page-subtitle">Скачайте файл, заполните и загрузите в боте или здесь (скоро)</p></div><div class="card"><div class="card-body"><a href="' + templateUrl + '" download class="btn-accent">Скачать шаблон .xlsx</a></div></div>';
+      const hint = '<div class="hint-box"><strong>Наставление по шаблону.</strong> Скачайте файл ниже, заполните группу (E1), год (AO4), ФИО (колонки F–H) и роли по дням (I–AM). Сохраните и загрузите в боте или на сайте.</div>';
+      container.innerHTML = '<div class="page-head"><h1 class="page-title">Шаблон графика</h1><p class="page-subtitle">Скачайте файл, заполните и загрузите в боте или здесь (скоро)</p></div>' + hint + '<div class="card"><div class="card-body"><a href="' + templateUrl + '" download class="btn-accent">Скачать шаблон .xlsx</a></div></div>';
     } else if (dutiesLocalSection === 'edit') {
       container.innerHTML = '<div class="page-head"><h1 class="page-title">Правки и замены</h1><p class="page-subtitle">Редактирование графика после загрузки</p></div><div class="card"><div class="card-body"><p class="list-placeholder">Выбор месяца и правки — перенесём из приложения. Скоро.</p></div></div>';
     } else {
@@ -308,6 +389,48 @@
     showModuleLayout('duties', items, renderDutiesWorkArea);
   }
 
+  let forumLocalSection = 'general';
+
+  const FORUM_SECTIONS = [
+    { id: 'general', label: 'Общие обсуждения', desc: 'Обмен информацией, обсуждения' },
+    { id: 'gallery', label: 'Творческая галерея', desc: 'Рисунки, стихи, фотографии' },
+    { id: 'flea', label: 'Барахолка', desc: 'Потерял/приобрёл, условия — не торговля' },
+    { id: 'board', label: 'Доска объявлений', desc: 'Объявления для курсантов' },
+    { id: 'study', label: 'Помощь по учёбе', desc: 'Вопросы по предметам, материалы' }
+  ];
+
+  function renderForumWorkArea(container) {
+    const intro = '<div class="forum-intro"><strong>Внутреннее сообщество курсантов.</strong> Доступ только для курсантов (по Apex). При создании темы можно выбрать публикацию <strong>анонимно</strong> или от своего лица — анонимность помогает преодолеть страх быть объектом обсуждения.</div>';
+    const section = FORUM_SECTIONS.find(function (s) { return s.id === forumLocalSection; }) || FORUM_SECTIONS[0];
+    container.innerHTML = '<div class="page-head"><h1 class="page-title">' + escapeHtml(section.label) + '</h1><p class="page-subtitle">' + escapeHtml(section.desc) + '</p></div>' + intro + '<div class="card"><div class="card-body"><p class="list-placeholder">Раздел в разработке. Здесь будут темы и посты; при создании темы — выбор «Опубликовать анонимно».</p></div></div>';
+  }
+
+  function openForumModule() {
+    const items = FORUM_SECTIONS.map(function (s) {
+      return { id: s.id, label: s.label, active: forumLocalSection === s.id };
+    });
+    window.onLocalNavClick = function (id, workArea) {
+      forumLocalSection = id;
+      items.forEach(function (i) { i.active = i.id === id; });
+      const nav = document.getElementById('local-nav');
+      nav.innerHTML = items.map(function (item) {
+        const cls = item.active ? ' class="active"' : '';
+        return '<a href="#" data-local="' + item.id + '"' + cls + '>' + item.label + '</a>';
+      }).join('');
+      nav.querySelectorAll('a').forEach(function (a) {
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          nav.querySelectorAll('a').forEach(function (x) { x.classList.remove('active'); });
+          a.classList.add('active');
+          forumLocalSection = a.getAttribute('data-local');
+          renderForumWorkArea(workArea);
+        });
+      });
+      renderForumWorkArea(workArea);
+    };
+    showModuleLayout('forum', items, renderForumWorkArea);
+  }
+
   function openModule(module) {
     if (module === 'home') {
       goHome();
@@ -315,6 +438,10 @@
     }
     if (module === 'duties') {
       openDutiesModule();
+      return;
+    }
+    if (module === 'forum') {
+      openForumModule();
       return;
     }
     setActiveNav(module);
@@ -375,6 +502,21 @@
         const mod = el.getAttribute('data-module');
         if (mod) openModule(mod);
       });
+    });
+
+    document.getElementById('btn-profile').addEventListener('click', function (e) {
+      e.preventDefault();
+      openProfileModal();
+    });
+    document.getElementById('profile-close').addEventListener('click', closeProfileModal);
+    document.getElementById('profile-backdrop').addEventListener('click', closeProfileModal);
+    document.getElementById('btn-admin-panel').addEventListener('click', function (e) {
+      e.preventDefault();
+      openAdminPanel();
+    });
+    document.getElementById('admin-back').addEventListener('click', function (e) {
+      e.preventDefault();
+      goHome();
     });
   }
 

@@ -595,6 +595,164 @@ body {
   background: var(--accent-hover);
 }
 
+/* --- Модальное окно (профиль) --- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: var(--border);
+  border-radius: 12px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: var(--border);
+}
+
+.modal-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.profile-info {
+  font-size: 0.875rem;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+
+.profile-info p {
+  margin-bottom: 6px;
+}
+
+.profile-info .muted {
+  color: var(--text-muted);
+}
+
+.profile-actions {
+  padding-top: 12px;
+  border-top: var(--border);
+}
+
+/* --- Админ-панель --- */
+.screen-admin {
+  max-width: 900px;
+}
+
+.admin-user-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: var(--border);
+}
+
+.admin-user-row:last-child {
+  border-bottom: none;
+}
+
+.admin-user-info {
+  flex: 1;
+  min-width: 180px;
+}
+
+.admin-user-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-user-actions button {
+  padding: 6px 12px;
+  border: var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.admin-user-actions button:hover {
+  background: var(--bg-elevated);
+}
+
+.admin-user-actions button.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* --- Подсказки в модулях --- */
+.hint-box {
+  padding: 12px 16px;
+  background: rgba(59, 130, 246, 0.08);
+  border: var(--border);
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.hint-box strong {
+  color: var(--text);
+}
+
+/* --- Форум: блок про анонимность --- */
+.forum-intro {
+  padding: 16px;
+  background: var(--bg-elevated);
+  border: var(--border);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
+.forum-intro strong {
+  color: var(--text);
+}
+
 @media (max-width: 768px) {
   .main-nav {
     display: none;
