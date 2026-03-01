@@ -121,6 +121,7 @@ async def startup_init_db():
         database.DB_NAME = DB_PATH
         database.init_db()
         database.init_survey_objects()
+        database.ensure_female_survey_objects()
     except Exception as e:
         print(f"[WARN] Инициализация БД при старте: {e}")
 
@@ -1467,7 +1468,11 @@ async def check_schedule_month(group: str, enrollment_year: int, month: str):
         conn.close()
 
 
-SCHEDULE_TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "graph_ИО6 — копия.xlsx")
+# Путь к шаблону графика: из env или файл в корне проекта
+SCHEDULE_TEMPLATE_PATH = os.environ.get(
+    "SCHEDULE_TEMPLATE_PATH",
+    os.path.join(os.path.dirname(__file__), "graph_ИО6 — копия.xlsx")
+)
 
 
 def _generate_schedule_template_bytes():
@@ -1476,8 +1481,9 @@ def _generate_schedule_template_bytes():
     В первую очередь пытаемся отдать пользовательский файл SCHEDULE_TEMPLATE_PATH,
     чтобы курсанты скачивали именно ваш актуальный шаблон.
     Если файла нет или произошла ошибка чтения — генерируем запасной шаблон
-    тем же форматом, который ожидает парсер (группа E1, год AO4, ФИО F6:H21,
-    месяц I4, дни I5:AM5, ячейки I6:AM21).
+    Если файла нет или произошла ошибка чтения — генерируем запасной шаблон
+    тем же форматом, который ожидает парсер (группа E1, год AO4, ФИО F6:H55,
+    месяц I4, дни I5:AM5, ячейки I6:AM55).
     """
     # 1. Пользовательский шаблон с диска
     try:
@@ -1511,10 +1517,10 @@ def _generate_schedule_template_bytes():
     ws.cell(6, 6, "Фамилия")
     ws.cell(6, 7, "Имя")
     ws.cell(6, 8, "Отчество")
-    for r in range(7, 22):
+    for r in range(7, 52):
         for c in range(6, 9):
             ws.cell(r, c, "")
-    ws.cell(22, 1, "Роли: к, дк, с, ад, гбр, зуб, столовая и т.д.")
+    ws.cell(52, 1, "Роли: к, дк, с, ад, гбр, зуб, столовая, ото, м, путсо и т.д.")
 
     import io
     buf = io.BytesIO()
@@ -3054,6 +3060,11 @@ async def complete_custom_survey(survey_id: int, data: dict):
 # ============================================
 # 6. СТАТИКА И ГЛАВНАЯ (исправлено: не подменяем пути)
 # ============================================
+# Сайт (главная «Мой день») — открыть по адресу /site/
+_SITE_DIR = os.path.join(os.path.dirname(__file__), "site")
+if os.path.isdir(_SITE_DIR):
+    app.mount("/site", StaticFiles(directory=_SITE_DIR, html=True), name="site")
+
 @app.get("/app", response_class=HTMLResponse)
 async def serve_app():
     file_path = os.path.join("app", "index.html")

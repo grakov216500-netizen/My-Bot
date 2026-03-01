@@ -514,7 +514,7 @@ def init_survey_objects():
         for name in canteen_objects:
             cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, canteen_id))
     
-    # Опрос для девушек: ПУТСО, Столовая, Медчасть (3 пары)
+    # Опрос для девушек: Столовая, ПУТСО, Медчасть, ОТО (4 объекта, 6 пар)
     cursor.execute("SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL")
     if not cursor.fetchone():
         cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', ('Опрос девушек', None))
@@ -523,13 +523,31 @@ def init_survey_objects():
     female_parent = cursor.fetchone()
     if female_parent:
         fid = female_parent['id']
-        for name in ('ПУТСО', 'Столовая', 'Медчасть'):
+        for name in ('Столовая', 'ПУТСО', 'Медчасть', 'ОТО'):
             cursor.execute("SELECT id FROM duty_objects WHERE name = ? AND parent_id = ?", (name, fid))
             if not cursor.fetchone():
                 cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, fid))
     conn.commit()
     conn.close()
-    print("✅ Объекты для опроса инициализированы: 4 основных наряда (6 пар), 6 объектов столовой (13 случайных пар), опрос девушек (3 пары)")
+    print("✅ Объекты для опроса инициализированы: 4 основных наряда (6 пар), 6 объектов столовой (13 случайных пар), опрос девушек (4 объекта: Столовая, ПУТСО, Медчасть, ОТО)")
+
+
+def ensure_female_survey_objects():
+    """Добавляет недостающие объекты в «Опрос девушек» (миграция: добавить ОТО в существующие БД)."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM duty_objects WHERE name = 'Опрос девушек' AND parent_id IS NULL")
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return
+    fid = row['id']
+    for name in ('Столовая', 'ПУТСО', 'Медчасть', 'ОТО'):
+        cursor.execute("SELECT id FROM duty_objects WHERE name = ? AND parent_id = ?", (name, fid))
+        if not cursor.fetchone():
+            cursor.execute('INSERT INTO duty_objects (name, parent_id) VALUES (?, ?)', (name, fid))
+    conn.commit()
+    conn.close()
 
 def get_survey_results_by_course(course_year):
     """Получает результаты опроса (веса объектов). course_year пока не фильтрует — веса глобальные."""

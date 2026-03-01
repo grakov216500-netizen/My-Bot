@@ -18,7 +18,33 @@ document.addEventListener('DOMContentLoaded', async () => {
         CURRENT_HOST === '';
     baseUrl = isLocal ? '' : 'https://vitechbot.online';
 
-    // === Определяем пользователя ТОЛЬКО из Telegram ===
+    /**
+     * fetch с повтором при таймауте/сетевой ошибке (до 2 повторов, задержка 1.5 с).
+     * При окончательной неудаче показывает "Проверьте соединение" и пробрасывает ошибку.
+     */
+    window.fetchWithRetry = async function fetchWithRetry(url, options, retries) {
+        if (retries == null) retries = 2;
+        const delay = (ms) => new Promise(r => setTimeout(r, ms));
+        let lastErr;
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const controller = new AbortController();
+                const id = setTimeout(() => controller.abort(), 15000);
+                const res = await fetch(url, { ...options, signal: controller.signal });
+                clearTimeout(id);
+                return res;
+            } catch (e) {
+                lastErr = e;
+                if (attempt < retries) await delay(1500);
+            }
+        }
+        if (typeof showConnectionError === 'function') showConnectionError();
+        throw lastErr;
+    };
+
+    function showConnectionError() {
+        showToast('Проверьте соединение с интернетом');
+    }
     if (window.Telegram && window.Telegram.WebApp) {
         window.Telegram.WebApp.expand();
         const user = window.Telegram.WebApp.initDataUnsafe.user;
@@ -504,13 +530,13 @@ function switchTab(tabName) {
  */
 async function loadTasks() {
     try {
-        const response = await fetch(`${baseUrl}/api/tasks?user_id=${userId}`);
+        const response = await (window.fetchWithRetry || fetch)(`${baseUrl}/api/tasks?user_id=${userId}`);
         tasks = await response.json();
         renderTaskList();
         console.log(`✅ Загружено ${tasks.length} задач`);
     } catch (err) {
         console.error("❌ Ошибка загрузки задач:", err);
-        document.getElementById('task-list').innerHTML = '<p style="color: #f87171;">Ошибка загрузки</p>';
+        document.getElementById('task-list').innerHTML = '<p style="color: #f87171;">Ошибка загрузки. Проверьте соединение.</p>';
     }
 }
 
@@ -885,7 +911,7 @@ function showError(message) {
 
 async function loadUserProfile(userId) {
     try {
-        const response = await fetch(`${baseUrl}/api/user?telegram_id=${userId}`);
+        const response = await (window.fetchWithRetry || fetch)(`${baseUrl}/api/user?telegram_id=${userId}`);
         const data = await response.json();
         if (!response.ok || data.error) {
             if (response.status >= 500 || response.status === 0) return 'server_error';
@@ -962,7 +988,7 @@ function showUnregisteredState() {
 
 async function loadDuties(userId) {
     try {
-        const response = await fetch(`${baseUrl}/api/duties?telegram_id=${userId}`);
+        const response = await (window.fetchWithRetry || fetch)(`${baseUrl}/api/duties?telegram_id=${userId}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
 
@@ -1020,8 +1046,8 @@ async function loadDuties(userId) {
         console.log("✅ Наряды загружены:", data.total);
     } catch (err) {
         console.error("❌ Ошибка загрузки нарядов:", err);
-        document.getElementById('next-duty-widget').innerHTML = 
-            `<h3>🎖️ Ближайший наряд</h3><p style="color: #f87171;">Не удалось загрузить данные</p>`;
+        document.getElementById('next-duty-widget').innerHTML =
+            `<h3>🎖️ Ближайший наряд</h3><p style="color: #f87171;">Не удалось загрузить данные. Проверьте соединение.</p>`;
     }
 }
 
@@ -1945,7 +1971,7 @@ async function loadTodaySchedule() {
     if (!list || !userId) return;
     list.innerHTML = '<li style="color:#94A3B8;">Загрузка расписания...</li>';
     try {
-        const res = await fetch(baseUrl + '/api/schedule/today?telegram_id=' + encodeURIComponent(userId));
+        const res = await (window.fetchWithRetry || fetch)(baseUrl + '/api/schedule/today?telegram_id=' + encodeURIComponent(userId));
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
         const lessons = data.lessons || [];
@@ -1972,7 +1998,7 @@ async function loadTodaySchedule() {
         });
     } catch (e) {
         console.warn('loadTodaySchedule error', e);
-        list.innerHTML = '<li style="color:#f97373;">Не удалось загрузить расписание.</li>';
+        list.innerHTML = '<li style="color:#f97373;">Не удалось загрузить расписание. Проверьте соединение.</li>';
     }
 }
 
@@ -2031,7 +2057,7 @@ async function loadNotifications() {
     var list = document.getElementById('notifications-list');
     if (!list || !userId) return;
     try {
-        var res = await fetch(baseUrl + '/api/notifications?telegram_id=' + userId + '&limit=5');
+        var res = await (window.fetchWithRetry || fetch)(baseUrl + '/api/notifications?telegram_id=' + userId + '&limit=5');
         var data = res.ok ? await res.json() : { items: [] };
         var items = data.items || [];
         if (items.length === 0) {

@@ -15,9 +15,10 @@ def main():
         return
 
     try:
-        from database import init_db, init_survey_objects
+        from database import init_db, init_survey_objects, ensure_female_survey_objects
         init_db()
         init_survey_objects()
+        ensure_female_survey_objects()
         print("✅ База данных инициализирована")
         print("")
         print("Следующие команды можно выполнить вручную в sqlite3:")

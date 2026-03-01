@@ -51,8 +51,8 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
             except Exception:
                 pass
 
-        # 2. ФИО — F6:H40 (до ~35 курсантов, чтобы учитывать большие группы, в т.ч. девушек)
-        fio_cells = df.iloc[5:40, 5:8]
+        # 2. ФИО — F6:H55 (до ~50 курсантов, в т.ч. большие группы и девушек)
+        fio_cells = df.iloc[5:55, 5:8]
         fio_list = []
         for idx, row in fio_cells.iterrows():
             parts = [str(x).strip() for x in row if pd.notna(x) and str(x).strip().lower() != 'nan']
@@ -76,8 +76,8 @@ def parse_excel_schedule_with_validation(file_path: str) -> dict:
             except Exception:
                 day_numbers.append(None)
 
-        # 5. Наряды — I6:AM40 (та же высота, что и для ФИО)
-        duties_matrix = df.iloc[5:40, 8:39] if 5 < len(df) else pd.DataFrame()
+        # 5. Наряды — I6:AM55 (та же высота, что и для ФИО)
+        duties_matrix = df.iloc[5:55, 8:39] if 5 < len(df) else pd.DataFrame()
 
         month_map = {
             'декабрь': 12, 'дек': 12,

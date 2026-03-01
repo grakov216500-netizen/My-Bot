@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>ВИТЕХ — Мой день</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%233B82F6' width='32' height='32' rx='6'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Верхняя панель: логотип, профиль, настройки -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a href="/" class="logo">ВИТЕХ</a>
+      <nav class="topbar-nav">
+        <button type="button" class="topbar-btn" id="btn-profile" title="Профиль" aria-label="Профиль">
+          <span class="topbar-avatar" id="header-avatar">—</span>
+          <span class="topbar-name" id="header-name">Профиль</span>
+        </button>
+        <button type="button" class="topbar-btn icon-only" id="btn-settings" title="Настройки" aria-label="Настройки">⚙</button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Экран входа (если нет telegram_id) -->
+  <main id="screen-login" class="screen screen-login" style="display: none;">
+    <div class="login-card">
+      <h1 class="login-title">Вход</h1>
+      <p class="login-desc">Сайт для курсантов: расписание, наряды, уведомления, рейтинг. Войдите по ссылке из Telegram-бота или введите ID для разработки.</p>
+      <div class="login-form">
+        <label class="login-label">Telegram ID (временно для разработки)</label>
+        <input type="text" id="input-telegram-id" class="login-input" placeholder="Например: 123456789" autocomplete="off" />
+        <button type="button" id="btn-login" class="login-btn">Войти</button>
+      </div>
+      <p class="login-hint">В боте: откройте приложение — в адресе будет <code>?telegram_id=...</code>. Скопируйте число сюда или откройте сайт по этой ссылке.</p>
+    </div>
+  </main>
+
+  <!-- Главная: Мой день -->
+  <main id="screen-home" class="screen screen-home">
+    <div class="page-head">
+      <h1 class="page-title">Мой день</h1>
+      <p class="page-subtitle" id="subtitle-date">Загрузка…</p>
+    </div>
+
+    <div class="cards-grid">
+      <!-- Карточка: Расписание на сегодня -->
+      <section class="card" aria-labelledby="card-schedule-title">
+        <h2 id="card-schedule-title" class="card-title">Расписание</h2>
+        <p class="card-meta" id="schedule-meta">сегодня</p>
+        <div class="card-body">
+          <ul class="list list-schedule" id="list-schedule">
+            <li class="list-placeholder">Загрузка…</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Карточка: Ближайший наряд -->
+      <section class="card" aria-labelledby="card-duty-title">
+        <h2 id="card-duty-title" class="card-title">Ближайший наряд</h2>
+        <p class="card-meta" id="duty-meta"></p>
+        <div class="card-body">
+          <div id="duty-content">
+            <p class="list-placeholder">Загрузка…</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Карточка: Уведомления об изменениях -->
+      <section class="card" aria-labelledby="card-notifications-title">
+        <h2 id="card-notifications-title" class="card-title">Изменения</h2>
+        <p class="card-meta">расписание и график по вашей группе</p>
+        <div class="card-body">
+          <ul class="list list-notifications" id="list-notifications">
+            <li class="list-placeholder">Загрузка…</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+
+    <!-- Рейтинг: живой блок с аватарками -->
+    <section class="card card-rating" aria-labelledby="card-rating-title">
+      <h2 id="card-rating-title" class="card-title">Рейтинг</h2>
+      <div class="rating-header">
+        <div class="rating-me" id="rating-me">
+          <span class="rating-me-avatar" id="rating-me-avatar">—</span>
+          <div class="rating-me-info">
+            <span class="rating-me-label">Ваши очки</span>
+            <span class="rating-me-value" id="rating-me-points">—</span>
+          </div>
+        </div>
+        <button type="button" class="link-btn" id="btn-rating-full">Весь рейтинг →</button>
+      </div>
+      <ul class="rating-top" id="rating-top">
+        <li class="list-placeholder">Загрузка…</li>
+      </ul>
+    </section>
+  </main>
+
+  <!-- Подвал -->
+  <footer class="footer">
+    <p>Расписание, наряды, уведомления и рейтинг — в одном месте. Минимум лишнего.</p>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
