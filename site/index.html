@@ -4,21 +4,32 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f172a" />
-  <title>ВИТЕХ — Мой день</title>
+  <title>ВИТЕХ</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect fill='%233B82F6' width='32' height='32' rx='6'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Верхняя панель: логотип, профиль, настройки -->
+  <!-- Верхняя панель: глобальная навигация (только основные модули) -->
   <header class="topbar">
     <div class="topbar-inner">
-      <a href="/" class="logo">ВИТЕХ</a>
-      <nav class="topbar-nav">
-        <button type="button" class="topbar-btn" id="btn-profile" title="Профиль" aria-label="Профиль">
+      <a href="#" class="logo" id="nav-home" data-module="home">ВИТЕХ</a>
+      <nav class="topbar-nav main-nav">
+        <a href="#" class="nav-link active" id="nav-link-home" data-module="home">Главная</a>
+        <a href="#" class="nav-link" id="nav-link-duties" data-module="duties">Наряды</a>
+        <a href="#" class="nav-link" id="nav-link-study" data-module="study">Учёба</a>
+        <a href="#" class="nav-link" id="nav-link-surveys" data-module="surveys">Опросы</a>
+        <a href="#" class="nav-link" id="nav-link-plans" data-module="plans">Планы</a>
+        <a href="#" class="nav-link" id="nav-link-rating" data-module="rating">Рейтинг</a>
+      </nav>
+      <nav class="topbar-nav right-nav">
+        <button type="button" class="topbar-btn icon-only" id="btn-notifications" title="Уведомления" aria-label="Уведомления">🔔</button>
+        <button type="button" class="topbar-btn profile-btn" id="btn-profile" title="Профиль" aria-label="Профиль">
           <span class="topbar-avatar" id="header-avatar">—</span>
           <span class="topbar-name" id="header-name">Профиль</span>
         </button>
-        <button type="button" class="topbar-btn icon-only" id="btn-settings" title="Настройки" aria-label="Настройки">⚙</button>
       </nav>
     </div>
   </header>
@@ -37,15 +48,13 @@
     </div>
   </main>
 
-  <!-- Главная: Мой день -->
+  <!-- Главная: Мой день (без боковой панели) -->
   <main id="screen-home" class="screen screen-home">
     <div class="page-head">
       <h1 class="page-title">Мой день</h1>
       <p class="page-subtitle" id="subtitle-date">Загрузка…</p>
     </div>
-
     <div class="cards-grid">
-      <!-- Карточка: Расписание на сегодня -->
       <section class="card" aria-labelledby="card-schedule-title">
         <h2 id="card-schedule-title" class="card-title">Расписание</h2>
         <p class="card-meta" id="schedule-meta">сегодня</p>
@@ -55,8 +64,6 @@
           </ul>
         </div>
       </section>
-
-      <!-- Карточка: Ближайший наряд -->
       <section class="card" aria-labelledby="card-duty-title">
         <h2 id="card-duty-title" class="card-title">Ближайший наряд</h2>
         <p class="card-meta" id="duty-meta"></p>
@@ -66,8 +73,6 @@
           </div>
         </div>
       </section>
-
-      <!-- Карточка: Уведомления об изменениях -->
       <section class="card" aria-labelledby="card-notifications-title">
         <h2 id="card-notifications-title" class="card-title">Изменения</h2>
         <p class="card-meta">расписание и график по вашей группе</p>
@@ -78,8 +83,6 @@
         </div>
       </section>
     </div>
-
-    <!-- Рейтинг: живой блок с аватарками -->
     <section class="card card-rating" aria-labelledby="card-rating-title">
       <h2 id="card-rating-title" class="card-title">Рейтинг</h2>
       <div class="rating-header">
@@ -90,7 +93,7 @@
             <span class="rating-me-value" id="rating-me-points">—</span>
           </div>
         </div>
-        <button type="button" class="link-btn" id="btn-rating-full">Весь рейтинг →</button>
+        <button type="button" class="link-btn accent" id="btn-rating-full">Весь рейтинг →</button>
       </div>
       <ul class="rating-top" id="rating-top">
         <li class="list-placeholder">Загрузка…</li>
@@ -98,7 +101,58 @@
     </section>
   </main>
 
-  <!-- Подвал -->
+  <!-- Модуль с локальной боковой панелью (Наряды, Учёба, …) -->
+  <div id="screen-module" class="layout-with-sidebar" style="display: none;">
+    <aside class="local-sidebar" id="local-sidebar">
+      <nav class="local-nav" id="local-nav"></nav>
+    </aside>
+    <main class="work-area" id="work-area"></main>
+  </div>
+
+  <!-- Заглушки модулей (Учёба, Опросы, Планы, Рейтинг — только контент без своей боковой пока) -->
+  <main id="screen-study" class="screen screen-module-only" style="display: none;">
+    <div class="page-head">
+      <h1 class="page-title">Учёба</h1>
+      <p class="page-subtitle">Расписание, пропуски, материалы</p>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <p class="list-placeholder">Модуль в разработке. Здесь будут: расписание, учёт пропусков, лекции и тестирование по предметам.</p>
+      </div>
+    </div>
+  </main>
+  <main id="screen-surveys" class="screen screen-module-only" style="display: none;">
+    <div class="page-head">
+      <h1 class="page-title">Опросы</h1>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <p class="list-placeholder">Системный опрос о сложности нарядов и другие опросы — скоро.</p>
+      </div>
+    </div>
+  </main>
+  <main id="screen-plans" class="screen screen-module-only" style="display: none;">
+    <div class="page-head">
+      <h1 class="page-title">Планы</h1>
+      <p class="page-subtitle">Задачник и заметки</p>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <p class="list-placeholder">Задачи и заметки в духе современных планировщиков — в разработке.</p>
+      </div>
+    </div>
+  </main>
+  <main id="screen-rating" class="screen screen-module-only" style="display: none;">
+    <div class="page-head">
+      <h1 class="page-title">Рейтинг</h1>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <p class="list-placeholder">Полный рейтинг по курсу и институту — загрузка…</p>
+      </div>
+    </div>
+  </main>
+
   <footer class="footer">
     <p>Расписание, наряды, уведомления и рейтинг — в одном месте. Минимум лишнего.</p>
   </footer>

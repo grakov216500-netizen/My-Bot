@@ -1,4 +1,4 @@
-/* === ВИТЕХ — сайт, тёмная тема, минимализм, тонкие границы === */
+/* === ВИТЕХ — тёмно-синяя тема, Inter / JetBrains Mono, верхняя навигация, локальная боковая === */
 *,
 *::before,
 *::after {
@@ -9,16 +9,21 @@
 
 :root {
   --bg: #0f172a;
-  --bg-card: #1e293b;
-  --border: 1px solid rgba(148, 163, 184, 0.15);
+  --bg-elevated: #1e293b;
+  --bg-card: #1a2332;
+  --border: 1px solid rgba(148, 163, 184, 0.12);
+  --border-hover: 1px solid rgba(148, 163, 184, 0.28);
   --text: #e2e8f0;
   --text-muted: #94a3b8;
+  /* Акцент только для интерактива: кнопки, ссылки, активный пункт навигации */
   --accent: #3b82f6;
   --accent-hover: #2563eb;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 body {
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
@@ -26,7 +31,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* --- Верхняя панель --- */
+/* --- Верхняя панель: глобальная навигация (как Liquid Bounce) --- */
 .topbar {
   position: sticky;
   top: 0;
@@ -36,12 +41,13 @@ body {
 }
 
 .topbar-inner {
-  max-width: 900px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 12px 20px;
+  padding: 10px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 24px;
 }
 
 .logo {
@@ -50,9 +56,37 @@ body {
   color: var(--text);
   text-decoration: none;
   letter-spacing: 0.02em;
+  flex-shrink: 0;
 }
 
-.topbar-nav {
+.main-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.nav-link.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.right-nav {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -73,8 +107,8 @@ body {
 }
 
 .topbar-btn:hover {
-  background: var(--bg-card);
-  border-color: rgba(148, 163, 184, 0.25);
+  background: var(--bg-elevated);
+  border-color: var(--border-hover);
 }
 
 .topbar-avatar {
@@ -101,14 +135,15 @@ body {
   font-size: 1rem;
 }
 
-/* --- Экраны --- */
+/* --- Экраны без боковой панели --- */
 .screen {
   max-width: 900px;
   margin: 0 auto;
   padding: 24px 20px 48px;
 }
 
-.screen-home {
+.screen-home,
+.screen-module-only {
   padding-top: 20px;
 }
 
@@ -129,7 +164,7 @@ body {
   color: var(--text-muted);
 }
 
-/* --- Сетка карточек (Notion-стиль: тонкие границы) --- */
+/* --- Карточки: тонкие границы, при наведении — лёгкий подъём и подсветка рамки --- */
 .cards-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -154,11 +189,13 @@ body {
   border: var(--border);
   border-radius: 10px;
   overflow: hidden;
-  transition: border-color 0.15s;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .card:hover {
-  border-color: rgba(148, 163, 184, 0.25);
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .card-title {
@@ -180,7 +217,6 @@ body {
   padding: 0 16px 16px;
 }
 
-/* --- Списки в карточках --- */
 .list {
   list-style: none;
 }
@@ -223,7 +259,6 @@ body {
   margin-top: 2px;
 }
 
-/* --- Рейтинг (живой блок с аватарками) --- */
 .card-rating {
   grid-column: 1 / -1;
 }
@@ -277,18 +312,29 @@ body {
   font-size: 1rem;
   font-weight: 600;
   color: var(--text);
+  font-family: var(--font-mono);
 }
 
 .link-btn {
   background: none;
   border: none;
-  color: var(--accent);
+  color: var(--text-muted);
   font-size: 0.875rem;
   cursor: pointer;
   padding: 4px 0;
+  font-family: var(--font-sans);
 }
 
 .link-btn:hover {
+  color: var(--text);
+}
+
+.link-btn.accent {
+  color: var(--accent);
+}
+
+.link-btn.accent:hover {
+  color: var(--accent-hover);
   text-decoration: underline;
 }
 
@@ -315,6 +361,7 @@ body {
 .rating-top .rank {
   color: var(--text-muted);
   min-width: 1.2em;
+  font-family: var(--font-mono);
 }
 
 .rating-top .avatar-wrap {
@@ -343,6 +390,60 @@ body {
 .rating-top .points {
   color: var(--accent);
   font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+/* --- Layout с локальной боковой панелью (только внутри модуля) --- */
+.layout-with-sidebar {
+  display: flex;
+  min-height: calc(100vh - 52px);
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.local-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border-right: var(--border);
+  padding: 16px 0;
+}
+
+.local-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.local-nav a {
+  padding: 8px 16px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: color 0.15s, background 0.15s;
+}
+
+.local-nav a:hover {
+  color: var(--text);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.local-nav a.active {
+  color: var(--accent);
+  background: rgba(59, 130, 246, 0.1);
+  border-left: 2px solid var(--accent);
+  margin-left: -2px;
+  padding-left: 18px;
+}
+
+.work-area {
+  flex: 1;
+  padding: 24px 24px 48px;
+  overflow-y: auto;
+}
+
+.work-area .page-head {
+  margin-bottom: 20px;
 }
 
 /* --- Экран входа --- */
@@ -396,6 +497,7 @@ body {
   color: var(--text);
   font-size: 1rem;
   margin-bottom: 12px;
+  font-family: var(--font-sans);
 }
 
 .login-input::placeholder {
@@ -434,11 +536,12 @@ body {
   background: rgba(148, 163, 184, 0.2);
   padding: 2px 6px;
   border-radius: 4px;
+  font-family: var(--font-mono);
 }
 
 /* --- Подвал --- */
 .footer {
-  max-width: 900px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 24px 20px;
   border-top: var(--border);
@@ -470,4 +573,50 @@ body {
 .error-msg {
   color: #f87171;
   font-size: 0.875rem;
+}
+
+/* Кнопка-акцент (скачать, перейти и т.д.) */
+.btn-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-accent:hover {
+  background: var(--accent-hover);
+}
+
+@media (max-width: 768px) {
+  .main-nav {
+    display: none;
+  }
+  .layout-with-sidebar {
+    flex-direction: column;
+  }
+  .local-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: var(--border);
+    padding: 8px 0;
+  }
+  .local-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 0 12px;
+  }
+  .local-nav a.active {
+    border-left: none;
+    border-bottom: 2px solid var(--accent);
+    margin-left: 0;
+    padding-left: 16px;
+  }
 }
