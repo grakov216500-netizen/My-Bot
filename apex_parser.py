@@ -339,7 +339,7 @@ class ApexScheduleParser:
         return result
 
 
-def create_default_parser(): -> ApexScheduleParser:
+def create_default_parser() -> ApexScheduleParser:
     """
     Утилита для server.py: создаёт парсер из переменных окружения.
     Требуются:

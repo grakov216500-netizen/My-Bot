@@ -1417,8 +1417,11 @@ async def get_today_schedule(telegram_id: int, date: str = None):
         try:
             parser = _get_apex_parser()
             lessons = parser.get_schedule_for_date(group_name, year, target_date)
-        except HTTPException:
-            raise
+        except HTTPException as he:
+            if he.status_code == 503:
+                message = "Сервис расписания временно недоступен (APEX не настроен)"
+            else:
+                raise
         except ValueError as ve:
             print(f"[WARN] Расписание Апекс (группа не найдена): {ve}")
             message = "Группа не найдена в Апексе"
@@ -1475,8 +1478,11 @@ async def get_week_schedule(telegram_id: int, date: str = None):
         try:
             parser = _get_apex_parser()
             week_schedule = parser.get_schedule_for_week(group_name, year, week_start)
-        except HTTPException:
-            raise
+        except HTTPException as he:
+            if he.status_code == 503:
+                message = "Сервис расписания временно недоступен (APEX не настроен)"
+            else:
+                raise
         except ValueError as ve:
             print(f"[WARN] Расписание Апекс (группа не найдена): {ve}")
             message = "Группа не найдена в Апексе"
@@ -1586,8 +1592,34 @@ def _generate_schedule_template_bytes():
 
 
 @app.get("/api/schedule/template")
-async def get_schedule_template():
-    """Скачать шаблон .xlsx для графика нарядов."""
+async def get_schedule_template(telegram_id: int = None):
+    """Скачать шаблон .xlsx. Если передан telegram_id и есть шаблон для группы пользователя — отдаём его."""
+    group_template_path = None
+    if telegram_id:
+        conn = get_db()
+        if conn:
+            try:
+                row = execute(conn, "SELECT group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+                if row:
+                    safe_group = (row["group_name"] or "").replace("/", "_").strip() or "group"
+                    year = row["enrollment_year"] or ""
+                    templates_dir = os.path.join(os.path.dirname(__file__), "group_templates")
+                    group_template_path = os.path.join(templates_dir, f"{safe_group}_{year}.xlsx")
+                    if not os.path.isfile(group_template_path):
+                        group_template_path = None
+            finally:
+                conn.close()
+    if group_template_path:
+        try:
+            with open(group_template_path, "rb") as f:
+                data = f.read()
+            return Response(
+                content=data,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": "attachment; filename=schedule_template.xlsx"}
+            )
+        except Exception as e:
+            print(f"[WARN] Шаблон группы не прочитан: {e}")
     data = _generate_schedule_template_bytes()
     if not data:
         raise HTTPException(status_code=500, detail="openpyxl не установлен")
@@ -1596,6 +1628,38 @@ async def get_schedule_template():
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=schedule_template.xlsx"}
     )
+
+
+@app.post("/api/schedule/upload-template")
+async def upload_group_template(
+    file: UploadFile = File(...),
+    telegram_id: int = Form(...),
+):
+    """Сержант/помощник/админ загружает шаблон для своей группы. Подменяет общий шаблон при скачивании для этой группы."""
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Нужен файл .xlsx")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        row = execute(conn, "SELECT group_name, enrollment_year, role FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if not row or row["role"] not in ("sergeant", "assistant", "admin"):
+            raise HTTPException(status_code=403, detail="Только сержант своей группы, помощник или админ могут загрузить шаблон для группы")
+        safe_group = (row["group_name"] or "").replace("/", "_").strip() or "group"
+        year = row["enrollment_year"] or ""
+        templates_dir = os.path.join(os.path.dirname(__file__), "group_templates")
+        os.makedirs(templates_dir, exist_ok=True)
+        path = os.path.join(templates_dir, f"{safe_group}_{year}.xlsx")
+        contents = await file.read()
+        with open(path, "wb") as f:
+            f.write(contents)
+        conn.close()
+        return {"status": "ok", "message": "Шаблон для группы сохранён. При скачивании шаблона курсанты вашей группы получат этот файл."}
+    except HTTPException:
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.post("/api/schedule/upload")
@@ -3114,8 +3178,318 @@ async def complete_custom_survey(survey_id: int, data: dict):
 
 
 # ============================================
+# 7. ПРОФИЛЬ, АВАТАР, МАТЕРИАЛЫ
+# ============================================
+
+# Папка для аватаров
+AVATARS_DIR = os.path.join(os.path.dirname(__file__), "uploads", "avatars")
+os.makedirs(AVATARS_DIR, exist_ok=True)
+
+# Папка для материалов занятий
+MATERIALS_DIR = os.path.join(os.path.dirname(__file__), "uploads", "materials")
+os.makedirs(MATERIALS_DIR, exist_ok=True)
+
+
+@app.post("/api/profile/avatar")
+async def upload_avatar(file: UploadFile = File(...), telegram_id: int = Form(...)):
+    """Загрузить аватар пользователя."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Нужен файл изображения")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        raise HTTPException(status_code=400, detail="Допустимые форматы: jpg, png, webp, gif")
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Файл слишком большой (макс 5МБ)")
+    filename = f"{telegram_id}{ext}"
+    path = os.path.join(AVATARS_DIR, filename)
+    # Remove old avatars for this user
+    for old in os.listdir(AVATARS_DIR):
+        if old.startswith(str(telegram_id) + "."):
+            try:
+                os.remove(os.path.join(AVATARS_DIR, old))
+            except Exception:
+                pass
+    with open(path, "wb") as f:
+        f.write(contents)
+    return {"status": "ok", "avatar_url": f"/uploads/avatars/{filename}"}
+
+
+@app.get("/api/profile/avatar/{telegram_id}")
+async def get_avatar(telegram_id: int):
+    """Получить аватар пользователя."""
+    for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        path = os.path.join(AVATARS_DIR, f"{telegram_id}{ext}")
+        if os.path.isfile(path):
+            return FileResponse(path)
+    raise HTTPException(status_code=404, detail="Аватар не найден")
+
+
+@app.get("/api/profile/full")
+async def get_full_profile(telegram_id: int):
+    """Полная информация для страницы профиля."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        cursor = execute(conn, "PRAGMA table_info(users)")
+        cols = [r['name'] for r in cursor.fetchall()]
+        name_col = 'fio' if 'fio' in cols else 'full_name'
+        group_col = 'group_name' if 'group_name' in cols else None
+        
+        row = execute(conn,
+            f"SELECT telegram_id, {name_col} as fio, enrollment_year, role, status{', ' + group_col + ' as group_name' if group_col else ''} FROM users WHERE telegram_id = ?",
+            (telegram_id,)
+        ).fetchone()
+        if not row:
+            return {"error": "Пользователь не найден"}
+        
+        fio = row['fio'] or ''
+        ey = row['enrollment_year']
+        group = row['group_name'] if group_col else ''
+        role = row.get('role', 'user') or 'user'
+        
+        try:
+            course = get_current_course(int(ey)) if ey else 1
+        except Exception:
+            course = 1
+        
+        # Avatar URL
+        avatar_url = None
+        for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+            if os.path.isfile(os.path.join(AVATARS_DIR, f"{telegram_id}{ext}")):
+                avatar_url = f"/uploads/avatars/{telegram_id}{ext}"
+                break
+        
+        # Duty stats
+        points = _get_user_duty_points(conn, telegram_id, None, None)
+        fio_variants = _fio_match_variants(fio) or [fio or ""]
+        placeholders = ",".join(["?"] * len(fio_variants))
+        try:
+            duty_count = execute(conn,
+                f"SELECT COUNT(*) as cnt FROM duty_schedule WHERE fio IN ({placeholders})",
+                tuple(fio_variants)
+            ).fetchone()
+            total_duties = duty_count['cnt'] if duty_count else 0
+        except Exception:
+            total_duties = 0
+        
+        # Achievements
+        try:
+            _unlock_achievements(conn, telegram_id)
+            achs = execute(conn, """
+                SELECT a.id, a.title, a.description, a.icon_url,
+                       ua.telegram_id IS NOT NULL AS unlocked
+                FROM achievements a
+                LEFT JOIN user_achievements ua ON ua.achievement_id = a.id AND ua.telegram_id = ?
+                ORDER BY a.sort_order
+            """, (telegram_id,)).fetchall()
+            achievements = [{"id": a['id'], "title": a['title'], "description": a['description'],
+                           "icon_url": a.get('icon_url', ''), "unlocked": bool(a['unlocked'])} for a in achs]
+        except Exception:
+            achievements = []
+        
+        # Sick leave
+        sick_leaves = []
+        try:
+            if 'sick_leave' in [r['name'] for r in execute(conn, "PRAGMA table_info(sick_leave)").fetchall()]:
+                pass
+        except Exception:
+            pass
+        try:
+            sl_rows = execute(conn,
+                "SELECT id, report_date, created_at FROM sick_leave WHERE telegram_id = ? ORDER BY report_date DESC LIMIT 20",
+                (telegram_id,)
+            ).fetchall()
+            sick_leaves = [{"date": r['report_date'], "created_at": r.get('created_at', '')} for r in sl_rows]
+        except Exception:
+            sick_leaves = []
+        
+        return {
+            "telegram_id": telegram_id,
+            "fio": fio,
+            "group": group,
+            "enrollment_year": ey,
+            "course": course,
+            "course_label": "Выпускник" if course >= 5 else str(course),
+            "role": role,
+            "avatar_url": avatar_url,
+            "points": points,
+            "total_duties": total_duties,
+            "achievements": achievements,
+            "sick_leaves": sick_leaves,
+        }
+    finally:
+        conn.close()
+
+
+@app.post("/api/profile/sick-leave")
+async def add_sick_leave(data: dict):
+    """Добавить/указать больничный с-по."""
+    telegram_id = data.get("telegram_id")
+    date_from = data.get("date_from")
+    date_to = data.get("date_to")
+    if not telegram_id or not date_from:
+        raise HTTPException(status_code=400, detail="Нужны telegram_id и date_from")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        if date_to:
+            from datetime import date as _date
+            d_from = datetime.strptime(date_from, "%Y-%m-%d").date()
+            d_to = datetime.strptime(date_to, "%Y-%m-%d").date()
+            delta = (d_to - d_from).days
+            if delta < 0 or delta > 60:
+                raise HTTPException(status_code=400, detail="Некорректный период")
+            current = d_from
+            while current <= d_to:
+                try:
+                    execute(conn,
+                        "INSERT INTO sick_leave (telegram_id, report_date) VALUES (?, ?)",
+                        (telegram_id, current.strftime("%Y-%m-%d"))
+                    )
+                except Exception:
+                    pass
+                current += timedelta(days=1)
+        else:
+            execute(conn,
+                "INSERT INTO sick_leave (telegram_id, report_date) VALUES (?, ?)",
+                (telegram_id, date_from)
+            )
+        conn.commit()
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+@app.get("/api/groups/list")
+async def list_groups():
+    """Список доступных групп из Апекс-кэша или из БД."""
+    groups = {}
+    # Try Apex cache first
+    cache_path = os.path.join(os.path.dirname(__file__), "apex_cache", "apex_groups.json")
+    if os.path.isfile(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                groups = json.load(f)
+        except Exception:
+            pass
+    if not groups:
+        conn = get_db()
+        if conn:
+            try:
+                rows = execute(conn,
+                    "SELECT DISTINCT group_name FROM users WHERE group_name IS NOT NULL AND group_name != '' ORDER BY group_name"
+                ).fetchall()
+                groups = {r['group_name']: 0 for r in rows}
+            finally:
+                conn.close()
+    return {"groups": sorted(groups.keys()) if groups else []}
+
+
+@app.get("/api/schedule/today-by-group")
+async def get_today_schedule_by_group(group: str, year: int, date: str = None):
+    """Расписание на день по группе (без требования telegram_id / зарегистрированного пользователя)."""
+    target_date = datetime.now().date()
+    if date:
+        try:
+            target_date = datetime.strptime(date.strip()[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    lessons = []
+    message = None
+    try:
+        parser = _get_apex_parser()
+        lessons = parser.get_schedule_for_date(group, year, target_date)
+    except HTTPException:
+        message = "Сервис расписания временно недоступен"
+    except ValueError as ve:
+        message = f"Группа не найдена: {ve}"
+    except Exception as e:
+        print(f"[WARN] schedule by group: {e}")
+        message = "Не удалось загрузить расписание"
+    return {"date": target_date.strftime("%Y-%m-%d"), "group": group, "year": year, "lessons": lessons, "message": message}
+
+
+@app.get("/api/schedule/week-by-group")
+async def get_week_schedule_by_group(group: str, year: int, date: str = None):
+    """Расписание на неделю по группе (без требования telegram_id)."""
+    target = datetime.now().date()
+    if date:
+        try:
+            target = datetime.strptime(date.strip()[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    weekday = target.weekday()
+    monday = target - timedelta(days=weekday)
+    week_schedule = {}
+    message = None
+    try:
+        parser = _get_apex_parser()
+        week_schedule = parser.get_schedule_for_week(group, year, monday)
+    except HTTPException:
+        message = "Сервис расписания временно недоступен"
+    except ValueError as ve:
+        message = f"Группа не найдена: {ve}"
+    except Exception as e:
+        print(f"[WARN] week schedule by group: {e}")
+        message = "Не удалось загрузить расписание"
+    return {"week_start": monday.strftime("%Y-%m-%d"), "group": group, "year": year, "schedule": week_schedule, "message": message}
+
+
+@app.get("/api/rating/top-enhanced")
+async def rating_top_enhanced(telegram_id: int, period: str = "all", scope: str = "course", limit: int = 30):
+    """Расширенный топ рейтинга с аватарами и изменением за сегодня."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = execute(conn, "SELECT enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if not user:
+            return {"top": []}
+        ey = user["enrollment_year"]
+        month_from = datetime.now().strftime("%Y-%m") if period == "month" else None
+        month_to = datetime.now().strftime("%Y-%m") if period == "month" else None
+        if scope == "course":
+            rows = execute(conn, "SELECT telegram_id, fio, group_name FROM users WHERE enrollment_year = ? AND status = 'активен'", (ey,)).fetchall()
+        else:
+            rows = execute(conn, "SELECT telegram_id, fio, group_name FROM users WHERE status = 'активен'").fetchall()
+        result = []
+        for r in rows:
+            tid = r["telegram_id"]
+            p = _get_user_duty_points(conn, tid, month_from, month_to)
+            avatar_url = None
+            for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                if os.path.isfile(os.path.join(AVATARS_DIR, f"{tid}{ext}")):
+                    avatar_url = f"/uploads/avatars/{tid}{ext}"
+                    break
+            result.append({
+                "telegram_id": tid,
+                "fio": r["fio"],
+                "group_name": r["group_name"],
+                "points": p,
+                "avatar_url": avatar_url,
+            })
+        result.sort(key=lambda x: -x["points"])
+        result = result[:limit]
+        for i, row in enumerate(result):
+            row["rank"] = i + 1
+        return {"top": result, "period": period, "scope": scope}
+    finally:
+        conn.close()
+
+
+# ============================================
 # 6. СТАТИКА И ГЛАВНАЯ (исправлено: не подменяем пути)
 # ============================================
+
+# Статика для загруженных файлов (аватары, материалы)
+_UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(_UPLOADS_DIR, exist_ok=True)
+if os.path.isdir(_UPLOADS_DIR):
+    app.mount("/uploads", StaticFiles(directory=_UPLOADS_DIR), name="uploads")
+
 # Сайт (главная «Мой день») — открыть по адресу /site/
 _SITE_DIR = os.path.join(os.path.dirname(__file__), "site")
 if os.path.isdir(_SITE_DIR):
@@ -3135,7 +3509,7 @@ async def serve_app():
 
 
 # ============================================
-# 7. ЗАПУСК
+# 8. ЗАПУСК
 # ============================================
 if __name__ == "__main__":
     import uvicorn

@@ -12,21 +12,19 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Верхняя панель: глобальная навигация (только основные модули) -->
   <header class="topbar">
     <div class="topbar-inner">
       <a href="#" class="logo" id="nav-home" data-module="home">ВИТЕХ</a>
       <nav class="topbar-nav main-nav">
-        <a href="#" class="nav-link active" id="nav-link-home" data-module="home">Главная</a>
-        <a href="#" class="nav-link" id="nav-link-duties" data-module="duties">Наряды</a>
-        <a href="#" class="nav-link" id="nav-link-study" data-module="study">Учёба</a>
-        <a href="#" class="nav-link" id="nav-link-surveys" data-module="surveys">Опросы</a>
-        <a href="#" class="nav-link" id="nav-link-plans" data-module="plans">Планы</a>
-        <a href="#" class="nav-link" id="nav-link-rating" data-module="rating">Рейтинг</a>
-        <a href="#" class="nav-link" id="nav-link-forum" data-module="forum">Форум</a>
+        <a href="#" class="nav-link active" data-module="home">Главная</a>
+        <a href="#" class="nav-link" data-module="duties">Наряды</a>
+        <a href="#" class="nav-link" data-module="study">Учёба</a>
+        <a href="#" class="nav-link" data-module="surveys">Опросы</a>
+        <a href="#" class="nav-link" data-module="plans">Планы</a>
+        <a href="#" class="nav-link" data-module="rating">Рейтинг</a>
+        <a href="#" class="nav-link" data-module="forum">Форум</a>
       </nav>
       <nav class="topbar-nav right-nav">
-        <button type="button" class="topbar-btn icon-only" id="btn-notifications" title="Уведомления" aria-label="Уведомления">🔔</button>
         <button type="button" class="topbar-btn profile-btn" id="btn-profile" title="Профиль" aria-label="Профиль">
           <span class="topbar-avatar" id="header-avatar">—</span>
           <span class="topbar-name" id="header-name">Профиль</span>
@@ -35,43 +33,49 @@
     </div>
   </header>
 
-  <!-- Экран входа (если нет telegram_id) -->
+  <!-- Login screen -->
   <main id="screen-login" class="screen screen-login" style="display: none;">
     <div class="login-card">
-      <h1 class="login-title">Вход</h1>
-      <p class="login-desc">Сайт для курсантов: расписание, наряды, уведомления, рейтинг. Войдите по ссылке из Telegram-бота или введите ID для разработки.</p>
+      <h1 class="login-title">ВИТЕХ</h1>
+      <p class="login-desc">Единая платформа для курсантов: расписание, наряды, рейтинг, учёба.</p>
       <div class="login-form">
-        <label class="login-label">Telegram ID (временно для разработки)</label>
+        <label class="login-label">Telegram ID</label>
         <input type="text" id="input-telegram-id" class="login-input" placeholder="Например: 123456789" autocomplete="off" />
+        <label class="login-label" style="margin-top:12px">Группа</label>
+        <input type="text" id="input-group" class="login-input" placeholder="Например: Ио6-23" autocomplete="off" />
+        <label class="login-label" style="margin-top:12px">Год набора</label>
+        <input type="number" id="input-year" class="login-input" placeholder="2023" min="2020" max="2030" autocomplete="off" />
         <button type="button" id="btn-login" class="login-btn">Войти</button>
       </div>
-      <p class="login-hint">В боте: откройте приложение — в адресе будет <code>?telegram_id=...</code>. Скопируйте число сюда или откройте сайт по этой ссылке.</p>
+      <p class="login-hint">Введите свой Telegram ID, группу и год набора. Группа и год нужны для загрузки расписания с Апекс ВУЗ.</p>
     </div>
   </main>
 
-  <!-- Главная: Мой день (без боковой панели) -->
+  <!-- Home: My Day -->
   <main id="screen-home" class="screen screen-home">
     <div class="page-head">
       <h1 class="page-title">Мой день</h1>
       <p class="page-subtitle" id="subtitle-date">Загрузка…</p>
     </div>
-    <div class="cards-grid">
-      <section class="card" aria-labelledby="card-schedule-title">
-        <h2 id="card-schedule-title" class="card-title">Расписание</h2>
-        <p class="card-meta" id="schedule-meta">сегодня</p>
-        <div class="card-body">
-          <ul class="list list-schedule" id="list-schedule">
-            <li class="list-placeholder">Загрузка…</li>
-          </ul>
+
+    <section class="card card-schedule-main" id="card-schedule-main">
+      <div class="schedule-main-header">
+        <h2 class="card-title">Расписание</h2>
+        <span class="schedule-group-label" id="schedule-group-label"></span>
+      </div>
+      <div class="card-body" id="schedule-main-body">
+        <div class="schedule-compact" id="schedule-compact">
+          <p class="list-placeholder">Загрузка…</p>
         </div>
-      </section>
+      </div>
+    </section>
+
+    <div class="cards-grid home-cards">
       <section class="card" aria-labelledby="card-duty-title">
         <h2 id="card-duty-title" class="card-title">Ближайший наряд</h2>
         <p class="card-meta" id="duty-meta"></p>
-        <div class="card-body">
-          <div id="duty-content">
-            <p class="list-placeholder">Загрузка…</p>
-          </div>
+        <div class="card-body" id="duty-content">
+          <p class="list-placeholder">Загрузка…</p>
         </div>
       </section>
       <section class="card" aria-labelledby="card-notifications-title">
@@ -83,26 +87,23 @@
           </ul>
         </div>
       </section>
-    </div>
-    <section class="card card-rating" aria-labelledby="card-rating-title">
-      <h2 id="card-rating-title" class="card-title">Рейтинг</h2>
-      <div class="rating-header">
-        <div class="rating-me" id="rating-me">
-          <span class="rating-me-avatar" id="rating-me-avatar">—</span>
-          <div class="rating-me-info">
-            <span class="rating-me-label">Ваши очки</span>
-            <span class="rating-me-value" id="rating-me-points">—</span>
+      <section class="card card-rating-mini" id="card-rating-mini">
+        <h2 class="card-title">Рейтинг</h2>
+        <div class="rating-header">
+          <div class="rating-me" id="rating-me">
+            <span class="rating-me-avatar" id="rating-me-avatar">—</span>
+            <div class="rating-me-info">
+              <span class="rating-me-label">Ваши очки</span>
+              <span class="rating-me-value" id="rating-me-points">—</span>
+            </div>
           </div>
+          <button type="button" class="link-btn accent" id="btn-rating-full" data-module="rating">Весь рейтинг →</button>
         </div>
-        <button type="button" class="link-btn accent" id="btn-rating-full">Весь рейтинг →</button>
-      </div>
-      <ul class="rating-top" id="rating-top">
-        <li class="list-placeholder">Загрузка…</li>
-      </ul>
-    </section>
+      </section>
+    </div>
   </main>
 
-  <!-- Модуль с локальной боковой панелью (Наряды, Форум, …) -->
+  <!-- Module with sidebar (Duties, Study, Forum) -->
   <div id="screen-module" class="layout-with-sidebar" style="display: none;">
     <aside class="local-sidebar" id="local-sidebar">
       <nav class="local-nav" id="local-nav"></nav>
@@ -110,65 +111,49 @@
     <main class="work-area" id="work-area"></main>
   </div>
 
-  <!-- Заглушки модулей (Опросы, Рейтинг — только контент без своей боковой пока) -->
-  <main id="screen-study" class="screen screen-module-only" style="display: none;">
-    <div class="page-head">
-      <h1 class="page-title">Учёба</h1>
-      <p class="page-subtitle">Расписание по неделям (Apex ВУЗ)</p>
-    </div>
-    <div id="study-work-area" class="work-area-inner"></div>
-  </main>
+  <!-- Surveys -->
   <main id="screen-surveys" class="screen screen-module-only" style="display: none;">
     <div class="page-head">
       <h1 class="page-title">Опросы</h1>
       <p class="page-subtitle">Оценка сложности нарядов и другие опросы</p>
     </div>
-    <div class="card">
-      <div class="card-body" id="surveys-content">
-        <p class="list-placeholder">Загрузка…</p>
-      </div>
-    </div>
+    <div class="card"><div class="card-body" id="surveys-content"><p class="list-placeholder">Загрузка…</p></div></div>
   </main>
+
+  <!-- Plans -->
   <main id="screen-plans" class="screen screen-module-only" style="display: none;">
     <div class="page-head">
       <h1 class="page-title">Планы</h1>
       <p class="page-subtitle">Задачник и заметки</p>
     </div>
-    <div class="card">
-      <div class="card-body">
-        <p class="list-placeholder">Задачи и заметки в духе современных планировщиков — в разработке.</p>
-      </div>
-    </div>
+    <div class="card"><div class="card-body" id="plans-content"><p class="list-placeholder">Загрузка…</p></div></div>
   </main>
+
+  <!-- Rating (full page) -->
   <main id="screen-rating" class="screen screen-module-only" style="display: none;">
     <div class="page-head">
       <h1 class="page-title">Рейтинг</h1>
+      <p class="page-subtitle">Рейтинг курсантов по активности</p>
     </div>
-    <div class="card">
-      <div class="card-body">
-        <p class="list-placeholder">Полный рейтинг по курсу и институту — загрузка…</p>
-      </div>
+    <div class="rating-filters" id="rating-filters">
+      <button type="button" class="filter-btn active" data-scope="course">Курс</button>
+      <button type="button" class="filter-btn" data-scope="institute">Институт</button>
+      <span class="filter-sep">|</span>
+      <button type="button" class="filter-btn active" data-period="all">Всё время</button>
+      <button type="button" class="filter-btn" data-period="month">Месяц</button>
     </div>
+    <div class="card"><div class="card-body" id="rating-full-content"><p class="list-placeholder">Загрузка…</p></div></div>
   </main>
 
-  <!-- Профиль: модальное окно (данные + ссылка в Админ-панель для админа) -->
-  <div id="modal-profile" class="modal" style="display: none;" aria-hidden="true">
-    <div class="modal-backdrop" id="profile-backdrop"></div>
-    <div class="modal-content modal-profile">
-      <div class="modal-header">
-        <h2 class="modal-title">Профиль</h2>
-        <button type="button" class="modal-close" id="profile-close" aria-label="Закрыть">×</button>
-      </div>
-      <div class="modal-body">
-        <div class="profile-info" id="profile-info"></div>
-        <div class="profile-actions">
-          <button type="button" class="link-btn accent" id="btn-admin-panel" style="display: none;">Админ-панель</button>
-        </div>
-      </div>
+  <!-- Profile (full page) -->
+  <main id="screen-profile" class="screen screen-module-only" style="display: none;">
+    <div class="page-head">
+      <h1 class="page-title">Профиль</h1>
     </div>
-  </div>
+    <div id="profile-page-content"><p class="list-placeholder">Загрузка…</p></div>
+  </main>
 
-  <!-- Админ-панель: список пользователей, роли, больничный -->
+  <!-- Admin panel -->
   <main id="screen-admin" class="screen screen-admin" style="display: none;">
     <div class="page-head">
       <h1 class="page-title">Админ-панель</h1>
@@ -178,7 +163,7 @@
     <div class="card" id="admin-sick-leave-card">
       <h2 class="card-title">Больничный</h2>
       <div class="card-body">
-        <p class="muted">Укажите дату больничного (вам на замену поставят другого).</p>
+        <p class="muted">Укажите дату больничного.</p>
         <form id="admin-sick-leave-form" class="admin-form">
           <input type="date" id="admin-sick-leave-date" required />
           <button type="submit" class="btn-accent">Сообщить о больничном</button>
@@ -188,14 +173,12 @@
     </div>
     <div class="card">
       <h2 class="card-title">Пользователи и роли</h2>
-      <div class="card-body">
-        <div id="admin-users-list"></div>
-      </div>
+      <div class="card-body"><div id="admin-users-list"></div></div>
     </div>
   </main>
 
   <footer class="footer">
-    <p>Расписание, наряды, уведомления и рейтинг — в одном месте. Минимум лишнего.</p>
+    <p>ВИТЕХ — расписание, наряды, рейтинг и учёба в одном месте.</p>
   </footer>
 
   <script src="app.js" defer></script>
