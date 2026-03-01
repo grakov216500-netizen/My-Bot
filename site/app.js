@@ -178,12 +178,20 @@
     const metaEl = document.getElementById('schedule-meta');
     if (!listEl) return;
     const d = new Date();
-    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    const day = d.getDay();
+    const isWeekend = day === 0 || day === 6;
+    let requestDate = '';
+    if (isWeekend) {
+      const nextMonday = new Date(d);
+      nextMonday.setDate(d.getDate() + (day === 0 ? 1 : 2));
+      requestDate = nextMonday.toISOString().slice(0, 10);
+    }
     try {
-      const data = await api('/api/schedule/today');
+      const path = '/api/schedule/today' + (requestDate ? '?date=' + encodeURIComponent(requestDate) : '');
+      const data = await api(path);
       const lessons = data.lessons || [];
       const message = data.message;
-      if (metaEl) metaEl.textContent = isWeekend ? 'Выходной — с понедельника новая учебная неделя' : 'сегодня';
+      if (metaEl) metaEl.textContent = isWeekend ? 'Понедельник (новая неделя)' : 'сегодня';
       if (lessons.length === 0) {
         if (message) listEl.innerHTML = '<li class="schedule-weekend">' + message + '</li>';
         else if (isWeekend) listEl.innerHTML = '<li class="schedule-weekend">Выходной. В понедельник начнётся новая учебная неделя.</li>';
@@ -327,23 +335,166 @@
   }
 
   let dutiesLocalSection = 'graph';
+  let dutiesSelectedMonth = '';
+  let dutiesSelectedDate = '';
+
+  function renderDutyDayDetail(container, dateStr) {
+    if (!dateStr) return;
+    var datesEl = document.getElementById('duty-month-dates');
+    var target = datesEl || container;
+    if (datesEl) datesEl.innerHTML = '<p class="muted">Загрузка бригады…</p>';
+    else { var wrap = document.createElement('div'); wrap.className = 'duty-day-detail'; wrap.innerHTML = '<p class="muted">Загрузка бригады…</p>'; container.appendChild(wrap); target = wrap; }
+    api('/api/duties/by-date?date=' + encodeURIComponent(dateStr)).then(function (data) {
+      if (data.error) {
+        target.innerHTML = '<p class="error-msg">' + escapeHtml(data.error) + '</p>';
+        return;
+      }
+      const byRole = data.by_role || {};
+      const total = data.total || 0;
+      const dateFormatted = new Date(dateStr + 'T12:00:00').toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+      let html = '<p><a href="#" class="link-btn duty-back-dates">← К датам месяца</a></p>';
+      html += '<h3 class="card-title">Бригада на ' + escapeHtml(dateFormatted) + '</h3><p class="muted">Всего: ' + total + ' человек</p>';
+      const roleLabels = { 'к': 'Командир', 'гбр': 'ГБР', 'с': 'Столовая', 'п': 'ПУТСО', 'м': 'Медчасть', 'о': 'ОТО' };
+      Object.keys(byRole).sort().forEach(function (role) {
+        const label = roleLabels[role] || role;
+        const list = byRole[role];
+        html += '<section class="card" style="margin-top:12px"><h4 class="card-title">' + escapeHtml(label) + '</h4><ul class="list">';
+        list.forEach(function (p) {
+          html += '<li>' + escapeHtml(p.fio) + (p.group ? ' <span class="muted">' + escapeHtml(p.group) + '</span>' : '') + '</li>';
+        });
+        html += '</ul></section>';
+      });
+      target.innerHTML = html;
+      const backBtn = target.querySelector('.duty-back-dates');
+      if (backBtn) {
+        backBtn.addEventListener('click', function (e) {
+          e.preventDefault();
+          dutiesSelectedDate = '';
+          var sel = document.getElementById('duty-month-select');
+          if (sel && sel.value) sel.dispatchEvent(new Event('change'));
+          else renderDutiesWorkArea(container);
+        });
+      }
+    }).catch(function () {
+      target.innerHTML = '<p class="error-msg">Ошибка загрузки</p>';
+    });
+  }
 
   function renderDutiesWorkArea(container) {
     container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
     if (dutiesLocalSection === 'graph') {
-      const hint = '<div class="hint-box"><strong>Как загрузить график.</strong> Скачайте шаблон (раздел «Шаблон»), заполните ФИО и наряды по дням месяца. Загрузите готовый файл в боте или здесь (скоро).</div>';
-      api('/api/duties').then(function (data) {
+      const hint = '<div class="hint-box"><strong>Как загрузить график.</strong> Скачайте шаблон (раздел «Шаблон»), заполните ФИО и наряды по дням месяца. Загрузите файл ниже (доступно сержанту своей группы, помощнику и админу).</div>';
+      Promise.all([
+        api('/api/duties'),
+        api('/api/duties/available-months')
+      ]).then(function (res) {
+        const data = res[0];
+        const monthsData = res[1];
+        const months = monthsData.months || [];
+        let html = '<div class="page-head"><h1 class="page-title">Мои наряды</h1><p class="page-subtitle">Ближайший наряд, график по месяцам, бригада</p></div>' + hint;
         if (data.error) {
-          container.innerHTML = '<div class="page-head"><h1 class="page-title">Мои наряды</h1></div>' + hint + '<div class="card"><div class="card-body"><p class="list-placeholder">' + data.error + '</p></div></div>';
-          return;
+          html += '<div class="card"><div class="card-body"><p class="list-placeholder">' + data.error + '</p></div></div>';
+        } else {
+          const next = data.next_duty;
+          if (next) {
+            const df = next.date ? new Date(next.date + 'T12:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' }) : '';
+            html += '<section class="card"><h2 class="card-title">Ближайший наряд</h2><div class="card-body"><p class="duty-role">' + escapeHtml(next.role_full || next.role || '') + '</p><p class="duty-date">' + escapeHtml(df) + '</p></div></section>';
+          }
+          const canUpload = window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0;
+          html += '<section class="card"><h2 class="card-title">Загрузить график</h2><div class="card-body">';
+          if (canUpload) {
+            html += '<form id="duty-upload-form" class="duty-upload-form"><input type="file" accept=".xlsx" id="duty-upload-file" /><label class="checkbox-label"><input type="checkbox" id="duty-upload-overwrite" /> Заменить существующий месяц</label><button type="submit" class="btn-accent">Загрузить .xlsx</button></form><p id="duty-upload-status" class="muted"></p>';
+          } else {
+            html += '<p class="list-placeholder">Загрузка графика доступна сержанту своей группы, помощнику и админу.</p>';
+          }
+          html += '</div></section>';
+          html += '<section class="card"><h2 class="card-title">По месяцам</h2><div class="card-body">';
+          if (months.length === 0) {
+            html += '<p class="list-placeholder">Нет загруженных месяцев. Загрузите график выше.</p>';
+          } else {
+            html += '<p class="muted">Выберите месяц:</p><select id="duty-month-select" class="input-select"><option value="">—</option>' + months.map(function (m) {
+              const parts = m.split('-');
+              const name = parts.length === 2 ? (parts[1] + '.' + parts[0]) : m;
+              return '<option value="' + m + '">' + name + '</option>';
+            }).join('') + '</select><div id="duty-month-dates"></div>';
+          }
+          html += '</div></section>';
         }
-        const next = data.next_duty;
-        let html = '<div class="page-head"><h1 class="page-title">Мои наряды</h1><p class="page-subtitle">Ближайший наряд и график по месяцам</p></div>' + hint;
-        if (next) {
-          const df = next.date ? new Date(next.date + 'T12:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' }) : '';
-          html += '<section class="card"><h2 class="card-title">Ближайший наряд</h2><div class="card-body"><p class="duty-role">' + escapeHtml(next.role_full || next.role || '') + '</p><p class="duty-date">' + escapeHtml(df) + '</p></div></section>';
+        container.innerHTML = html;
+        if (container.querySelector('#duty-upload-form')) {
+          container.querySelector('#duty-upload-form').addEventListener('submit', function (e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('duty-upload-file');
+            const overwrite = document.getElementById('duty-upload-overwrite').checked;
+            const statusEl = document.getElementById('duty-upload-status');
+            if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+              statusEl.textContent = 'Выберите файл .xlsx';
+              return;
+            }
+            statusEl.textContent = 'Загрузка…';
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('telegram_id', userId);
+            formData.append('overwrite', overwrite ? '1' : '0');
+            fetch(API_BASE + '/api/schedule/upload', { method: 'POST', body: formData })
+              .then(function (r) { return r.json().catch(function () { return { detail: r.statusText }; }); })
+              .then(function (data) {
+                if (data.detail) {
+                  statusEl.textContent = data.detail;
+                  statusEl.classList.add('error-msg');
+                } else {
+                  statusEl.textContent = 'Загружено. Обновите список месяцев.';
+                  statusEl.classList.remove('error-msg');
+                  dutiesSelectedMonth = '';
+                  renderDutiesWorkArea(container);
+                }
+              })
+              .catch(function () {
+                statusEl.textContent = 'Ошибка загрузки';
+                statusEl.classList.add('error-msg');
+              });
+          });
         }
-        container.innerHTML = html + '<section class="card"><h2 class="card-title">По месяцам</h2><div class="card-body"><p class="list-placeholder">Выберите месяц в боковой панели или загрузите график (шаблон — в разделе «Шаблон»).</p></div></section>';
+        const monthSelect = document.getElementById('duty-month-select');
+        if (monthSelect) {
+          monthSelect.addEventListener('change', function () {
+            const ym = monthSelect.value;
+            dutiesSelectedMonth = ym;
+            dutiesSelectedDate = '';
+            const datesEl = document.getElementById('duty-month-dates');
+            if (!datesEl) return;
+            if (!ym) {
+              datesEl.innerHTML = '';
+              return;
+            }
+            const parts = ym.split('-');
+            const y = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            api('/api/duties?month=' + m + '&year=' + y).then(function (monthData) {
+              const duties = monthData.duties || [];
+              if (duties.length === 0) {
+                datesEl.innerHTML = '<p class="list-placeholder">Нет ваших нарядов за этот месяц</p>';
+                return;
+              }
+              datesEl.innerHTML = '<p class="muted" style="margin-top:8px;">Клик по дате — кто в наряде (бригада):</p><ul class="duty-dates-list">' + duties.map(function (d) {
+                const dateStr = d.date;
+                const label = d.role_full || d.role;
+                const day = new Date(dateStr + 'T12:00:00');
+                const dayLabel = day.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+                return '<li><a href="#" class="duty-date-link" data-date="' + dateStr + '">' + dayLabel + '</a> <span class="muted">' + escapeHtml(label) + '</span></li>';
+              }).join('') + '</ul>';
+              datesEl.querySelectorAll('.duty-date-link').forEach(function (a) {
+                a.addEventListener('click', function (e) {
+                  e.preventDefault();
+                  dutiesSelectedDate = a.getAttribute('data-date');
+                  renderDutyDayDetail(container, a.getAttribute('data-date'));
+                });
+              });
+            }).catch(function () {
+              datesEl.innerHTML = '<p class="error-msg">Ошибка загрузки</p>';
+            });
+          });
+        }
       }).catch(function () {
         container.innerHTML = '<div class="page-head"><h1 class="page-title">Мои наряды</h1></div><div class="card"><div class="card-body"><p class="error-msg">Ошибка загрузки</p></div></div>';
       });
@@ -431,6 +582,188 @@
     showModuleLayout('forum', items, renderForumWorkArea);
   }
 
+  let studyWeekStart = null;
+
+  function getMonday(d) {
+    const x = new Date(d);
+    const day = x.getDay();
+    const diff = x.getDate() - day + (day === 0 ? -6 : 1);
+    x.setDate(diff);
+    return x;
+  }
+
+  function formatWeekRange(monday) {
+    const mon = new Date(monday);
+    const sun = new Date(mon);
+    sun.setDate(sun.getDate() + 6);
+    return mon.getDate() + '–' + sun.getDate() + ' ' + mon.toLocaleDateString('ru-RU', { month: 'short' });
+  }
+
+  async function loadStudyDaySchedule(requestDate) {
+    const listEl = document.getElementById('study-day-list');
+    const metaEl = document.getElementById('study-day-meta');
+    if (!listEl) return;
+    const path = '/api/schedule/today' + (requestDate ? '?date=' + encodeURIComponent(requestDate) : '');
+    try {
+      const data = await api(path);
+      const lessons = data.lessons || [];
+      const dateStr = data.date;
+      const d = dateStr ? new Date(dateStr + 'T12:00:00') : new Date();
+      const day = d.getDay();
+      const isWeekend = day === 0 || day === 6;
+      if (metaEl) metaEl.textContent = isWeekend ? 'Понедельник (новая неделя)' : d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+      if (lessons.length === 0) {
+        listEl.innerHTML = '<li class="schedule-weekend">' + (data.message || 'На выбранный день занятий нет') + '</li>';
+        return;
+      }
+      listEl.innerHTML = lessons.map(function (l) {
+        const parts = [l.time, l.subject].filter(Boolean);
+        if (l.room) parts.push('(' + l.room + ')');
+        if (l.teacher) parts.push('— ' + l.teacher);
+        return '<li>' + parts.join(' ') + '</li>';
+      }).join('');
+    } catch (e) {
+      listEl.innerHTML = '<li class="error-msg">Не удалось загрузить расписание</li>';
+      if (metaEl) metaEl.textContent = '';
+    }
+  }
+
+  async function loadStudyWeekSchedule(weekStartDate) {
+    const gridEl = document.getElementById('study-week-grid');
+    const labelEl = document.getElementById('study-week-label');
+    if (!gridEl) return;
+    gridEl.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+    const dateStr = weekStartDate.toISOString().slice(0, 10);
+    try {
+      const data = await api('/api/schedule/week?date=' + encodeURIComponent(dateStr));
+      const schedule = data.schedule || {};
+      if (labelEl) labelEl.textContent = formatWeekRange(weekStartDate) + (data.message ? ' · ' + data.message : '');
+      const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт'];
+      let html = '';
+      Object.keys(schedule).sort().forEach(function (dateKey, i) {
+        const lessons = schedule[dateKey];
+        const d = new Date(dateKey + 'T12:00:00');
+        const dayName = dayNames[i] || d.toLocaleDateString('ru-RU', { weekday: 'short' });
+        const dateLabel = d.getDate() + ' ' + d.toLocaleDateString('ru-RU', { month: 'short' });
+        html += '<section class="card study-day-card"><h3 class="card-title">' + dayName + ', ' + dateLabel + '</h3><ul class="list">';
+        if (lessons.length === 0) {
+          html += '<li class="schedule-weekend">Нет занятий</li>';
+        } else {
+          lessons.forEach(function (l) {
+            const parts = [l.time, l.subject].filter(Boolean);
+            if (l.room) parts.push('(' + l.room + ')');
+            html += '<li>' + parts.join(' ') + '</li>';
+          });
+        }
+        html += '</ul></section>';
+      });
+      gridEl.innerHTML = html || '<p class="list-placeholder">Нет данных за неделю</p>';
+    } catch (e) {
+      gridEl.innerHTML = '<p class="error-msg">Не удалось загрузить расписание</p>';
+      if (labelEl) labelEl.textContent = '—';
+    }
+  }
+
+  function openStudyModule() {
+    setActiveNav('study');
+    showScreen('screen-study');
+    const d = new Date();
+    const day = d.getDay();
+    let requestDate = '';
+    if (day === 0 || day === 6) {
+      const nextMon = getMonday(d);
+      nextMon.setDate(nextMon.getDate() + (day === 0 ? 1 : 2));
+      requestDate = nextMon.toISOString().slice(0, 10);
+    }
+    loadStudyDaySchedule(requestDate);
+    if (!studyWeekStart) studyWeekStart = getMonday(new Date());
+    loadStudyWeekSchedule(studyWeekStart);
+    var labelEl = document.getElementById('study-week-label');
+    if (labelEl) labelEl.textContent = formatWeekRange(studyWeekStart);
+
+    document.querySelectorAll('.study-tab').forEach(function (btn) {
+      btn.onclick = function () {
+        document.querySelectorAll('.study-tab').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        const tab = btn.getAttribute('data-study-tab');
+        document.getElementById('study-day-wrap').style.display = tab === 'day' ? 'block' : 'none';
+        document.getElementById('study-week-wrap').style.display = tab === 'week' ? 'block' : 'none';
+      };
+    });
+    var prevBtn = document.getElementById('study-week-prev');
+    var nextBtn = document.getElementById('study-week-next');
+    if (prevBtn) {
+      prevBtn.onclick = function () {
+        studyWeekStart.setDate(studyWeekStart.getDate() - 7);
+        loadStudyWeekSchedule(studyWeekStart);
+        document.getElementById('study-week-label').textContent = formatWeekRange(studyWeekStart);
+      };
+    }
+    if (nextBtn) {
+      nextBtn.onclick = function () {
+        studyWeekStart.setDate(studyWeekStart.getDate() + 7);
+        loadStudyWeekSchedule(studyWeekStart);
+        document.getElementById('study-week-label').textContent = formatWeekRange(studyWeekStart);
+      };
+    }
+  }
+
+  function openPlansModule() {
+    setActiveNav('plans');
+    showScreen('screen-plans');
+    var container = document.querySelector('#screen-plans .card-body');
+    if (!container) return;
+    container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+    api('/api/tasks?user_id=' + userId).then(function (tasks) {
+      if (Array.isArray(tasks) && !tasks.error) {
+        var html = '<div class="plans-add"><form id="plans-add-form" class="plans-form"><input type="text" id="plans-add-text" class="input-text" placeholder="Что сделать?" required /><button type="submit" class="btn-accent">Добавить</button></form></div>';
+        html += '<ul class="list plans-list" id="plans-list">';
+        if (tasks.length === 0) {
+          html += '<li class="list-placeholder">Нет задач. Добавьте выше.</li>';
+        } else {
+          tasks.forEach(function (t) {
+            var done = t.done ? ' checked' : '';
+            var cls = t.done ? ' class="plan-done"' : '';
+            html += '<li' + cls + '><label class="plan-item"><input type="checkbox" class="plan-checkbox" data-id="' + t.id + '"' + done + ' /><span class="plan-text">' + escapeHtml(t.text) + '</span></label></li>';
+          });
+        }
+        html += '</ul>';
+        container.innerHTML = html;
+        document.getElementById('plans-add-form').addEventListener('submit', function (e) {
+          e.preventDefault();
+          var input = document.getElementById('plans-add-text');
+          var text = (input && input.value || '').trim();
+          if (!text) return;
+          fetch(API_BASE + '/api/add_task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, text: text })
+          }).then(function (r) { return r.json(); }).then(function () {
+            input.value = '';
+            openPlansModule();
+          }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка добавления</p>'; });
+        });
+        container.querySelectorAll('.plan-checkbox').forEach(function (cb) {
+          cb.addEventListener('change', function () {
+            var id = parseInt(cb.getAttribute('data-id'), 10);
+            var done = cb.checked;
+            fetch(API_BASE + '/api/done_task', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ task_id: id, user_id: userId, done: done })
+            }).then(function (r) { return r.json(); }).then(function () {
+              cb.closest('li').classList.toggle('plan-done', done);
+            });
+          });
+        });
+      } else {
+        container.innerHTML = '<p class="error-msg">' + (tasks.error || 'Ошибка загрузки') + '</p>';
+      }
+    }).catch(function () {
+      container.innerHTML = '<p class="error-msg">Не удалось загрузить задачи</p>';
+    });
+  }
+
   function openModule(module) {
     if (module === 'home') {
       goHome();
@@ -442,6 +775,14 @@
     }
     if (module === 'forum') {
       openForumModule();
+      return;
+    }
+    if (module === 'study') {
+      openStudyModule();
+      return;
+    }
+    if (module === 'plans') {
+      openPlansModule();
       return;
     }
     setActiveNav(module);

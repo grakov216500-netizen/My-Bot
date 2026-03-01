@@ -1388,13 +1388,11 @@ def _get_apex_parser():
 
 
 @app.get("/api/schedule/today")
-async def get_today_schedule(telegram_id: int):
+async def get_today_schedule(telegram_id: int, date: str = None):
     """
-    Расписание на сегодня для пользователя:
-    - ищем пользователя по telegram_id;
-    - используем его group_name как название группы в Апексе (Ио6-23 и т.п.);
-    - год берём из enrollment_year;
-    - обращаемся к ApexScheduleParser и возвращаем занятия на текущую дату.
+    Расписание на день для пользователя.
+    date: YYYY-MM-DD (опционально). Если не передан — текущая дата.
+    Если сегодня сб/вс, фронт может передать date следующего понедельника.
     """
     conn = get_db()
     if not conn:
@@ -1412,27 +1410,90 @@ async def get_today_schedule(telegram_id: int):
         if not group_name:
             raise HTTPException(status_code=400, detail="У пользователя не указана группа")
 
+        target_date = datetime.now().date()
+        if date:
+            try:
+                target_date = datetime.strptime(date.strip()[:10], "%Y-%m-%d").date()
+            except ValueError:
+                pass
+
         lessons = []
         message = None
         try:
             parser = _get_apex_parser()
-            lessons = parser.get_today_schedule(group_name, year)
+            lessons = parser.get_schedule_for_date(group_name, year, target_date)
         except HTTPException:
             raise
         except ValueError as ve:
-            # Группа не найдена в Апексе — не падаем, отдаём пустое расписание
             print(f"[WARN] Расписание Апекс (группа не найдена): {ve}")
             message = "Группа не найдена в Апексе"
         except Exception as e:
-            # Любая другая ошибка (сеть, выходной, нет даты в таблице и т.п.) — пустое расписание
             print(f"[WARN] Расписание Апекс: {e}")
             message = "Не удалось загрузить расписание (выходной или сайт недоступен)"
 
         return {
-            "date": datetime.now().strftime("%Y-%m-%d"),
+            "date": target_date.strftime("%Y-%m-%d"),
             "group": group_name,
             "year": year,
             "lessons": lessons,
+            "message": message,
+        }
+    finally:
+        conn.close()
+
+
+@app.get("/api/schedule/week")
+async def get_week_schedule(telegram_id: int, date: str = None):
+    """
+    Расписание на учебную неделю (Пн–Пт).
+    date: YYYY-MM-DD — любой день недели; по нему определяется понедельник.
+    Если не передан — текущая неделя (или следующая, если сейчас сб/вс).
+    """
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        user = conn.execute(
+            "SELECT fio, group_name, enrollment_year FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        ).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        group_name = (user["group_name"] or "").strip()
+        year = user["enrollment_year"]
+        if not group_name:
+            raise HTTPException(status_code=400, detail="У пользователя не указана группа")
+
+        target = datetime.now().date()
+        if date:
+            try:
+                target = datetime.strptime(date.strip()[:10], "%Y-%m-%d").date()
+            except ValueError:
+                pass
+        # Понедельник = target - (weekday-1), где weekday 0=Mon, 6=Sun
+        weekday = target.weekday()
+        monday = target - timedelta(days=weekday)
+        week_start = monday
+
+        week_schedule = {}
+        message = None
+        try:
+            parser = _get_apex_parser()
+            week_schedule = parser.get_schedule_for_week(group_name, year, week_start)
+        except HTTPException:
+            raise
+        except ValueError as ve:
+            print(f"[WARN] Расписание Апекс (группа не найдена): {ve}")
+            message = "Группа не найдена в Апексе"
+        except Exception as e:
+            print(f"[WARN] Расписание Апекс (неделя): {e}")
+            message = "Не удалось загрузить расписание"
+
+        return {
+            "week_start": week_start.strftime("%Y-%m-%d"),
+            "group": group_name,
+            "year": year,
+            "schedule": week_schedule,
             "message": message,
         }
     finally:

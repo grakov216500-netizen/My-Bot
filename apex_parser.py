@@ -301,8 +301,45 @@ class ApexScheduleParser:
 
         return self._parse_schedule_html_for_date(resp.text, today)
 
+    def get_schedule_for_date(self, group_label: str, year: int, target_date: date) -> List[Dict]:
+        """Возвращает список занятий на указанную дату для группы и года набора."""
+        self._ensure_login()
+        groups = self.load_groups()
+        group_id = self._find_group_id(group_label, groups)
+        if group_id is None:
+            raise ValueError(f"Группа '{group_label}' не найдена в Апексе")
+        try:
+            year_int = int(year)
+        except Exception:
+            year_int = target_date.year
+        url = self._full_url(f"/schedule/day/{group_id}/student?set-year={year_int}")
+        try:
+            resp = self.session.get(url, timeout=20)
+        except Exception as e:
+            raise RuntimeError(f"Ошибка запроса к Апекс: {e}") from e
+        if resp.status_code != 200:
+            return []
+        return self._parse_schedule_html_for_date(resp.text, target_date)
 
-def create_default_parser() -> ApexScheduleParser:
+    def get_schedule_for_week(
+        self, group_label: str, year: int, week_start: date
+    ) -> Dict[str, List[Dict]]:
+        """
+        Расписание на учебную неделю (Пн–Пт).
+        week_start — понедельник недели.
+        Возвращает { "YYYY-MM-DD": [уроки], ... }.
+        """
+        from datetime import timedelta
+
+        result = {}
+        for i in range(5):
+            d = week_start + timedelta(days=i)
+            lessons = self.get_schedule_for_date(group_label, year, d)
+            result[d.strftime("%Y-%m-%d")] = lessons
+        return result
+
+
+def create_default_parser(): -> ApexScheduleParser:
     """
     Утилита для server.py: создаёт парсер из переменных окружения.
     Требуются:
