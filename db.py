@@ -100,7 +100,7 @@ else:
             return None
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
-        conn._is_pg = False
+        # sqlite3.Connection не допускает произвольные атрибуты — execute() использует getattr(conn, "_is_pg", False), и без атрибута вернёт False
         return conn
 
     def _pg_execute(conn, sql, params=None):
