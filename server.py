@@ -946,17 +946,22 @@ async def get_duties_by_date(date: str, telegram_id: int = 0):
                 ORDER BY role, group_name, fio
             """
             rows = execute(conn,query, (date,)).fetchall()
-        
+        fio_to_tg = {}
+        for r in execute(conn, "SELECT fio, telegram_id FROM users WHERE status = 'активен'").fetchall():
+            for v in (_fio_match_variants(r["fio"]) if r["fio"] else []) or [r["fio"]]:
+                fio_to_tg[v] = r["telegram_id"]
         by_role = {}
         for row in rows:
             role = row['role']
             if role not in by_role:
                 by_role[role] = []
+            tid = fio_to_tg.get(row['fio'])
             by_role[role].append({
                 "fio": row['fio'],
                 "group": row['group_name'],
                 "course": row['enrollment_year'],
-                "gender": row['gender']
+                "gender": row['gender'],
+                "telegram_id": tid
             })
         
         return {
@@ -1965,8 +1970,9 @@ async def get_duty_edit_context(ym: str, telegram_id: int):
             """, (ey,)).fetchall()
         cadets_in_schedule = [{"fio": r["fio"], "group_name": r["group_name"]} for r in schedule_rows]
         group_users = [{"fio": r["fio"], "group_name": r["group_name"], "telegram_id": r["telegram_id"]} for r in users_rows]
+        roles = [{"code": k, "name": get_full_role(k)} for k in list(ROLE_NAMES.keys())]
         conn.close()
-        return {"ym": ym, "cadets_in_schedule": cadets_in_schedule, "group_users": group_users, "reasons": DUTY_REMOVAL_REASONS}
+        return {"ym": ym, "cadets_in_schedule": cadets_in_schedule, "group_users": group_users, "reasons": DUTY_REMOVAL_REASONS, "roles": roles}
     except HTTPException:
         raise
     except Exception as e:

@@ -206,9 +206,14 @@ body {
 .duty-dates-list li:last-child { border-bottom: none; }
 .duty-date-link { color: var(--accent); text-decoration: none; }
 .duty-date-link:hover { text-decoration: underline; }
+/* duty-dates-cards — альтернатива: карточки вместо списка (см. duty-date-card) */
 
-.duty-month-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
-.duty-nav-btn { padding: 6px 12px; font-size: .8125rem; }
+.duty-month-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.duty-nav-btn { padding: 10px 16px; font-size: .9375rem; min-width: 44px; }
+.duty-month-filter { display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap; }
+.duty-month-filter .input-select { padding: 8px 12px; font-size: .9375rem; min-width: 80px; }
+.duty-month-actual { padding: 8px 14px; background: rgba(59,130,246,.2); color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; font-size: .8125rem; cursor: pointer; }
+.duty-month-actual:hover { background: rgba(59,130,246,.3); }
 .duty-tabs { display: flex; gap: 0; margin-bottom: 12px; border-radius: 8px; overflow: hidden; border: var(--border); }
 .duty-tab { flex: 1; padding: 10px; background: var(--bg-elevated); color: var(--text-muted); border: none; font-size: .875rem; cursor: pointer; }
 .duty-tab:hover { color: var(--text); }
@@ -224,10 +229,34 @@ body {
 .duty-cal-day.today { background: var(--accent); color: #fff; }
 .duty-cal-day.selected { background: #8b5cf6; color: #fff; }
 .duty-cal-empty { grid-column: 1 / -1; color: var(--text-muted); text-align: center; padding: 20px; font-size: .875rem; }
-.duty-day-detail { padding: 16px; background: var(--bg-elevated); border-radius: 10px; margin-top: 12px; border: var(--border); }
-.duty-role-block { margin-top: 12px; }
+.duty-day-detail { margin-top: 16px; }
+.duty-role-block { background: var(--bg-card); border: var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; transition: border-color .15s; }
+.duty-role-block:hover { border-color: var(--border-hover); }
+.duty-role-block:last-child { margin-bottom: 0; }
+.duty-role-block .duty-detail-role { font-weight: 600; color: var(--accent); font-size: .9375rem; margin-bottom: 4px; }
 .duty-role-block strong { color: var(--accent); }
-.duty-role-block .list { margin-top: 4px; }
+.duty-role-block .list { margin-top: 8px; list-style: none; padding: 0; }
+.duty-role-block .list li { padding: 6px 0; border-bottom: var(--border); font-size: .875rem; }
+.duty-role-block .list li:last-child { border-bottom: none; }
+.duty-dates-cards { display: flex; flex-direction: column; gap: 10px; }
+.duty-date-card { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 16px; background: var(--bg-card); border: var(--border); border-radius: 10px; cursor: pointer; transition: border-color .15s, background .15s; text-decoration: none; color: inherit; }
+.duty-date-card:hover { border-color: var(--accent); background: rgba(59,130,246,.08); }
+.duty-date-card.expanded { border-color: var(--accent); background: rgba(59,130,246,.06); }
+.duty-date-card-left { flex: 1; min-width: 0; }
+.duty-date-card-date { font-weight: 600; color: var(--text); }
+.duty-date-card-weekday { font-size: .75rem; color: var(--text-muted); margin-top: 2px; }
+.duty-date-card-role { font-size: .875rem; color: var(--accent); font-weight: 500; margin-top: 4px; }
+.duty-edit-months { margin-top: 16px; }
+.duty-edit-cards { display: flex; flex-direction: column; gap: 10px; }
+.duty-edit-month-card .card-body { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.duty-edit-cal-day { padding: 6px; background: var(--bg-elevated); border: var(--border); border-radius: 6px; color: var(--text); cursor: pointer; font-size: 12px; }
+.duty-edit-cal-day:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.duty-edit-action-btn { padding: 8px 12px; background: var(--bg-elevated); border: var(--border); border-radius: 8px; color: var(--text-muted); font-size: .8125rem; cursor: pointer; }
+.duty-edit-action-btn:hover { color: var(--text); }
+.duty-edit-action-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.duty-date-card-expand { padding: 14px 16px; background: var(--bg-elevated); border: var(--border); border-top: none; border-radius: 0 0 10px 10px; margin: -10px 0 0; }
+.duty-date-card-expand .duty-role-block { margin-bottom: 12px; }
+.duty-date-card-expand .duty-role-block:last-child { margin-bottom: 0; }
 
 /* --- Study week --- */
 .study-week-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }

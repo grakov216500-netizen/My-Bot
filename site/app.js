@@ -274,7 +274,7 @@
       }
       var roleFull = next.role_full || next.role || '';
       var dateStr = next.date;
-      var dateFormatted = dateStr ? new Date(dateStr + 'T12:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' }) : '';
+      var dateFormatted = dateStr ? new Date(dateStr + 'T12:00:00').toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }) : '';
       if (metaEl) metaEl.textContent = dateFormatted;
       contentEl.innerHTML = '<p class="duty-role">' + escapeHtml(roleFull) + '</p><p class="duty-date">' + escapeHtml(dateFormatted) + '</p>';
     } catch (e) {
@@ -389,7 +389,7 @@
   var dutiesTab = 'upcoming';
   var dutyAvailableMonths = [];
   var dutySelectedDay = '';
-  var ROLE_LABELS = { 'к': 'Командир', 'гбр': 'ГБР', 'с': 'Столовая', 'п': 'ПУТСО', 'м': 'Медчасть', 'о': 'ОТО' };
+  var ROLE_LABELS = { 'к': 'Командир', 'гбр': 'ГБР', 'с': 'Столовая', 'п': 'ПУТСО', 'м': 'Медчасть', 'о': 'ОТО', 'дк': 'ГБР', 'ад': 'ГБР' };
 
   function formatDutyDate(dateStr) {
     var d = new Date(dateStr + 'T12:00:00');
@@ -412,7 +412,10 @@
         var label = roleLabels[role] || role;
         var list = byRole[role];
         html += '<section class="card" style="margin-top:12px"><h4 class="card-title">' + escapeHtml(label) + '</h4><ul class="list">';
-        list.forEach(function (p) { html += '<li>' + escapeHtml(p.fio) + (p.group ? ' <span class="muted">' + escapeHtml(p.group) + '</span>' : '') + '</li>'; });
+        list.forEach(function (p) {
+          var tg = p.telegram_id ? ' <a href="https://t.me/id' + p.telegram_id + '" target="_blank" class="link-btn" style="font-size:12px">💬</a>' : '';
+          html += '<li>' + escapeHtml(p.fio) + (p.group ? ' <span class="muted">' + escapeHtml(p.group) + '</span>' : '') + tg + '</li>';
+        });
         html += '</ul></section>';
       });
       target.innerHTML = html;
@@ -431,7 +434,7 @@
     if (label) label.textContent = monthNames[dutiesCalMonth - 1] + ' ' + dutiesCalYear;
     var hasData = dutyAvailableMonths.indexOf(ym) !== -1;
     if (!hasData) {
-      grid.innerHTML = '<p class="duty-cal-empty">График на этот месяц отсутствует</p>';
+      grid.innerHTML = '<p class="duty-cal-empty">За этот месяц наряда нет</p>';
       if (detail) { detail.style.display = 'none'; detail.innerHTML = ''; }
       dutySelectedDay = '';
       return;
@@ -463,15 +466,23 @@
             det.innerHTML = '<p class="muted">На ' + formatDutyDate(dutySelectedDay) + ' нарядов нет</p>';
             return;
           }
-          var h = '<h4 class="card-title">' + formatDutyDate(dutySelectedDay) + '</h4>';
+          var dateObj = new Date(dutySelectedDay + 'T12:00:00');
+          var dd = ('0' + dateObj.getDate()).slice(-2);
+          var mm = ('0' + (dateObj.getMonth() + 1)).slice(-2);
+          var yy = dateObj.getFullYear();
+          var weekday = dateObj.toLocaleDateString('ru-RU', { weekday: 'long' });
+          var h = '';
           Object.keys(data.by_role).sort().forEach(function (role) {
             var list = data.by_role[role];
             var lbl = ROLE_LABELS[role] || role;
-            h += '<div class="duty-role-block"><strong>' + escapeHtml(lbl) + '</strong> <span class="muted">' + list.length + ' чел.</span><ul class="list">';
-            list.forEach(function (p) { h += '<li>' + escapeHtml(p.fio) + (p.group ? ' <span class="muted">' + escapeHtml(p.group) + '</span>' : '') + '</li>'; });
+            h += '<div class="duty-role-block"><p class="duty-detail-role">' + escapeHtml(lbl) + ' — ' + dd + '.' + mm + '.' + yy + '</p><p class="muted" style="font-size:12px;margin-top:2px">' + escapeHtml(weekday) + '</p><p class="muted" style="margin-top:8px">Бригада:</p><ul class="list">';
+            list.forEach(function (p) {
+              var tg = p.telegram_id ? ' <a href="https://t.me/id' + p.telegram_id + '" target="_blank" class="link-btn" style="font-size:12px">💬</a>' : '';
+              h += '<li>' + escapeHtml(p.fio) + (p.group ? ' <span class="muted">' + escapeHtml(p.group) + '</span>' : '') + tg + '</li>';
+            });
             h += '</ul></div>';
           });
-          det.innerHTML = h;
+          det.innerHTML = '<p><a href="#" class="link-btn duty-back-dates">← К датам</a></p>' + h;
         }).catch(function () { det.innerHTML = '<p class="error-msg">Ошибка загрузки</p>'; });
       });
     });
@@ -519,33 +530,38 @@
           html += '</div></section>';
 
           html += '<section class="card"><h2 class="card-title">По месяцам</h2><div class="card-body">';
-          if (months.length === 0) {
-            html += '<p class="list-placeholder">Нет загруженных месяцев. Загрузите график выше (если вы сержант, помощник или админ).</p>';
-          } else {
-            html += '<div class="duty-month-nav">';
-            html += '<button type="button" class="btn-accent duty-nav-btn" id="duty-prev-month">← Пред.</button>';
-            html += '<select id="duty-month-select" class="input-select">' + months.map(function (m) {
-              var parts = m.split('-');
-              var sel = (parts[0] === String(dutiesCalYear) && parts[1] === String(dutiesCalMonth).padStart(2, '0')) ? ' selected' : '';
-              return '<option value="' + m + '"' + sel + '>' + parts[1] + '.' + parts[0] + '</option>';
-            }).join('') + '</select>';
-            html += '<button type="button" class="btn-accent duty-nav-btn" id="duty-next-month">След. →</button>';
-            html += '</div>';
-            html += '<div class="duty-tabs"><button type="button" class="duty-tab' + (dutiesTab === 'upcoming' ? ' active' : '') + '" data-tab="upcoming">Ожидается</button><button type="button" class="duty-tab' + (dutiesTab === 'past' ? ' active' : '') + '" data-tab="past">Завершённые</button></div>';
-            html += '<div id="duty-month-dates"></div>';
-            html += '<div class="duty-calendar-section"><p class="muted duty-cal-hint">Календарь — нажмите день, чтобы увидеть бригаду</p><p id="duty-cal-month-label" class="duty-cal-label"></p><div id="duty-calendar-grid" class="duty-calendar-grid"></div><div id="duty-day-detail" class="duty-day-detail"></div></div>';
+          var allMonths = [];
+          var now = new Date();
+          for (var y = now.getFullYear() - 1; y <= now.getFullYear() + 1; y++) {
+            for (var mo = 1; mo <= 12; mo++) {
+              allMonths.push(y + '-' + String(mo).padStart(2, '0'));
+            }
           }
+          allMonths = allMonths.filter(function (m) {
+            var p = m.split('-');
+            return parseInt(p[0], 10) >= 2024 && parseInt(p[0], 10) <= 2027;
+          });
+          html += '<div class="duty-month-nav">';
+          html += '<button type="button" class="btn-accent duty-nav-btn" id="duty-prev-month">←</button>';
+          html += '<div class="duty-month-filter"><select id="duty-month-select" class="input-select">' + allMonths.map(function (m) {
+            var parts = m.split('-');
+            var sel = (parts[0] === String(dutiesCalYear) && parts[1] === String(dutiesCalMonth).padStart(2, '0')) ? ' selected' : '';
+            return '<option value="' + m + '"' + sel + '>' + parts[1] + '.' + parts[0] + '</option>';
+          }).join('') + '</select><button type="button" class="duty-month-actual" id="duty-actual-month">Актуальный месяц</button></div>';
+          html += '<button type="button" class="btn-accent duty-nav-btn" id="duty-next-month">→</button>';
+          html += '</div>';
+          html += '<div class="duty-tabs"><button type="button" class="duty-tab' + (dutiesTab === 'upcoming' ? ' active' : '') + '" data-tab="upcoming">Ожидается</button><button type="button" class="duty-tab' + (dutiesTab === 'past' ? ' active' : '') + '" data-tab="past">Завершённые</button></div>';
+          html += '<div id="duty-month-dates"></div>';
+          html += '<div class="duty-calendar-section"><p class="muted duty-cal-hint">Календарь — поиск по нарядам всех загруженных групп курса за выбранный месяц. Нажмите день, чтобы увидеть бригаду</p><p id="duty-cal-month-label" class="duty-cal-label"></p><div id="duty-calendar-grid" class="duty-calendar-grid"></div><div id="duty-day-detail" class="duty-day-detail"></div></div>';
           html += '</div></section>';
         }
         container.innerHTML = html;
         bindDutyUpload(container);
         bindMonthSelect(container);
-        if (months.length > 0) {
-          bindDutyTabs(container);
-          bindDutyNav(container);
-          selectDutyMonthAndRender(container);
-          renderDutyCalendar(container);
-        }
+        bindDutyTabs(container);
+        bindDutyNav(container);
+        selectDutyMonthAndRender(container);
+        renderDutyCalendar(container);
       }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка загрузки</p>'; });
 
     } else if (dutiesLocalSection === 'template') {
@@ -578,8 +594,170 @@
       container.innerHTML = '<div class="page-head"><h1 class="page-title">Опрос нарядов</h1></div><div class="card"><div class="card-body"><p class="list-placeholder">Опрос о сложности объектов — пройдите во вкладке «Опросы».</p></div></div>';
 
     } else if (dutiesLocalSection === 'edit') {
-      container.innerHTML = '<div class="page-head"><h1 class="page-title">Правки / замены</h1></div><div class="card"><div class="card-body"><p class="list-placeholder">Правки и замены графика — в разработке.</p></div></div>';
+      renderDutyEditSection(container);
     }
+  }
+
+  function renderDutyEditSection(container) {
+    var canEdit = (window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0) || (Number(userId) === 1027070834);
+    if (!canEdit) {
+      container.innerHTML = '<div class="page-head"><h1 class="page-title">Правки / замены</h1></div><div class="card"><div class="card-body"><p class="list-placeholder">Правки графика доступны сержанту, помощнику и админу.</p></div></div>';
+      return;
+    }
+    container.innerHTML = '<div class="page-head"><h1 class="page-title">Правки / замены</h1><p class="page-subtitle">Выберите месяц и выполните правку графика</p></div><div id="duty-edit-months" class="duty-edit-months"><p class="muted">Загрузка месяцев…</p></div>';
+    api('/api/duties/available-months').then(function (data) {
+      var months = data.months || [];
+      var monthsEl = container.querySelector('#duty-edit-months');
+      if (months.length === 0) {
+        monthsEl.innerHTML = '<div class="card"><div class="card-body"><p class="list-placeholder">Нет загруженных графиков. Загрузите график во вкладке «График».</p></div></div>';
+        return;
+      }
+      var monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+      monthsEl.innerHTML = '<div class="duty-edit-cards">' + months.map(function (m) {
+        var p = m.split('-');
+        var label = monthNames[parseInt(p[1], 10) - 1] + ' ' + p[0];
+        return '<div class="duty-edit-month-card card"><div class="card-body"><strong>' + escapeHtml(label) + '</strong> <button type="button" class="btn-accent duty-edit-open-btn" style="margin-left:12px" data-ym="' + escapeHtml(m) + '">Правка</button></div></div>';
+      }).join('') + '</div>';
+      container.querySelectorAll('.duty-edit-open-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () { openDutyEditModal(btn.getAttribute('data-ym'), container); });
+      });
+    }).catch(function () {
+      container.querySelector('#duty-edit-months').innerHTML = '<p class="error-msg">Ошибка загрузки</p>';
+    });
+  }
+
+  function openDutyEditModal(ym, container) {
+    api('/api/duties/edit-context?ym=' + ym + '&telegram_id=' + userId).then(function (ctx) {
+      var cadets = ctx.cadets_in_schedule || [];
+      var users = ctx.group_users || [];
+      var reasons = ctx.reasons || ['заболел', 'командировка', 'рапорт', 'другое'];
+      var roles = ctx.roles || [];
+      var allFio = [];
+      cadets.forEach(function (c) { if (c.fio && allFio.indexOf(c.fio) === -1) allFio.push(c.fio); });
+      users.forEach(function (u) { if (u.fio && allFio.indexOf(u.fio) === -1) allFio.push(u.fio); });
+      allFio.sort();
+      var y = parseInt(ym.slice(0, 4), 10);
+      var m = parseInt(ym.slice(5, 7), 10);
+      var daysInMonth = new Date(y, m, 0).getDate();
+      var firstDow = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+      var calHtml = ['<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-size:12px">'];
+      for (var i = 0; i < firstDow; i++) calHtml.push('<div></div>');
+      for (var d = 1; d <= daysInMonth; d++) {
+        var ds = ym + '-' + String(d).padStart(2, '0');
+        calHtml.push('<button type="button" class="duty-edit-cal-day" data-date="' + ds + '">' + d + '</button>');
+      }
+      calHtml.push('</div>');
+      var roleOpts = roles.map(function (r) { return '<option value="' + escapeHtml(r.code) + '">' + escapeHtml(r.name) + '</option>'; }).join('');
+      var fioOpts = allFio.map(function (f) { return '<option value="' + escapeHtml(f) + '">'; }).join('');
+      var reasonOpts = reasons.map(function (r) { return '<option value="' + escapeHtml(r) + '">' + escapeHtml(r) + '</option>'; }).join('');
+      var addFioOpts = users.map(function (u) { return '<option value="' + escapeHtml(u.fio) + '" data-group="' + escapeHtml(u.group_name || '') + '">'; }).join('');
+      var modal = document.createElement('div');
+      modal.className = 'duty-edit-modal-overlay';
+      modal.id = 'duty-edit-modal';
+      modal.innerHTML = '<div class="duty-edit-modal card" style="max-width:420px;max-height:90vh;overflow-y:auto"><div class="card-body"><h3 class="card-title">Правка ' + ym + '</h3>' +
+        '<p class="muted" style="font-size:12px;margin-bottom:8px">Нажмите день — подставится в поле даты</p>' +
+        calHtml.join('') +
+        '<div style="display:flex;gap:8px;margin:12px 0;flex-wrap:wrap">' +
+        '<button type="button" class="duty-edit-action-btn active" data-form="replace">Замена</button>' +
+        '<button type="button" class="duty-edit-action-btn" data-form="add">Добавить</button>' +
+        '<button type="button" class="duty-edit-action-btn" data-form="remove">Убрать</button>' +
+        '<button type="button" class="duty-edit-action-btn" data-form="chrole">Изм. роль</button>' +
+        '</div>' +
+        '<div id="duty-edit-form-replace" class="duty-edit-form"><label class="muted" style="font-size:12px">Кого снять</label><select id="de-remove-fio" class="input-select" style="width:100%;margin-bottom:8px"></select>' +
+        '<label class="muted" style="font-size:12px">Дата</label><input type="text" id="de-remove-date" placeholder="ГГГГ-ММ-ДД" class="input-text" style="width:100%;margin-bottom:8px;box-sizing:border-box" />' +
+        '<label class="muted" style="font-size:12px">Роль</label><select id="de-remove-role" class="input-select" style="width:100%;margin-bottom:8px">' + roleOpts + '</select>' +
+        '<label class="muted" style="font-size:12px">Причина</label><select id="de-remove-reason" class="input-select" style="width:100%;margin-bottom:8px">' + reasonOpts + '</select>' +
+        '<label class="muted" style="font-size:12px">Кто заменяет (поиск по ФИО)</label><input type="text" id="de-remove-replacement" list="de-datalist" placeholder="Начните вводить..." class="input-text" style="width:100%;margin-bottom:12px;box-sizing:border-box" />' +
+        '<datalist id="de-datalist">' + allFio.map(function (f) { return '<option value="' + escapeHtml(f) + '">'; }).join('') + '</datalist>' +
+        '<button type="button" class="btn-accent" id="de-submit-replace">Выполнить замену</button></div>' +
+        '<div id="duty-edit-form-add" class="duty-edit-form" style="display:none"><label class="muted" style="font-size:12px">Курсант</label><select id="de-add-fio" class="input-select" style="width:100%;margin-bottom:8px"><option value="">—</option>' + users.map(function (u) { return '<option value="' + escapeHtml(u.fio) + '" data-group="' + escapeHtml(u.group_name || '') + '">' + escapeHtml(u.fio) + '</option>'; }).join('') + '</select>' +
+        '<label class="muted" style="font-size:12px">Дата</label><input type="text" id="de-add-date" placeholder="ГГГГ-ММ-ДД" class="input-text" style="width:100%;margin-bottom:8px;box-sizing:border-box" />' +
+        '<label class="muted" style="font-size:12px">Роль</label><select id="de-add-role" class="input-select" style="width:100%;margin-bottom:12px">' + roleOpts + '</select>' +
+        '<button type="button" class="btn-accent" style="background:#166534" id="de-submit-add">Добавить наряд</button></div>' +
+        '<div id="duty-edit-form-remove" class="duty-edit-form" style="display:none"><label class="muted" style="font-size:12px">Кого снять</label><select id="de-remove-only-fio" class="input-select" style="width:100%;margin-bottom:8px"></select>' +
+        '<label class="muted" style="font-size:12px">Дата</label><input type="text" id="de-remove-only-date" placeholder="ГГГГ-ММ-ДД" class="input-text" style="width:100%;margin-bottom:8px;box-sizing:border-box" />' +
+        '<label class="muted" style="font-size:12px">Роль</label><select id="de-remove-only-role" class="input-select" style="width:100%;margin-bottom:12px">' + roleOpts + '</select>' +
+        '<button type="button" class="btn-accent" style="background:#7F1D1D" id="de-submit-remove">Убрать</button></div>' +
+        '<div id="duty-edit-form-chrole" class="duty-edit-form" style="display:none"><label class="muted" style="font-size:12px">Курсант</label><select id="de-change-fio" class="input-select" style="width:100%;margin-bottom:8px"></select>' +
+        '<label class="muted" style="font-size:12px">Дата</label><input type="text" id="de-change-date" placeholder="ГГГГ-ММ-ДД" class="input-text" style="width:100%;margin-bottom:8px;box-sizing:border-box" />' +
+        '<label class="muted" style="font-size:12px">Новая роль</label><select id="de-change-new-role" class="input-select" style="width:100%;margin-bottom:12px">' + roleOpts + '</select>' +
+        '<button type="button" class="btn-accent" id="de-submit-chrole">Изменить</button></div>' +
+        '<button type="button" class="topbar-btn" style="margin-top:16px" id="duty-edit-close">Закрыть</button></div></div>';
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px';
+      document.body.appendChild(modal);
+      var seenFio = {};
+      var selFio = [];
+      cadets.forEach(function (c) { if (c.fio && !seenFio[c.fio]) { seenFio[c.fio] = 1; selFio.push(c.fio); } });
+      ['de-remove-fio', 'de-remove-only-fio', 'de-change-fio'].forEach(function (id) {
+        var sel = document.getElementById(id);
+        if (sel) {
+          sel.innerHTML = '<option value="">—</option>' + selFio.map(function (f) { return '<option value="' + escapeHtml(f) + '">' + escapeHtml(f) + '</option>'; }).join('');
+        }
+      });
+      modal.querySelectorAll('.duty-edit-cal-day').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var date = btn.getAttribute('data-date');
+          ['de-remove-date', 'de-add-date', 'de-remove-only-date', 'de-change-date'].forEach(function (id) {
+            var inp = document.getElementById(id);
+            if (inp) inp.value = date;
+          });
+        });
+      });
+      modal.querySelectorAll('.duty-edit-action-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          modal.querySelectorAll('.duty-edit-action-btn').forEach(function (b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          var f = btn.getAttribute('data-form');
+          modal.querySelectorAll('.duty-edit-form').forEach(function (el) { el.style.display = 'none'; });
+          var formEl = document.getElementById('duty-edit-form-' + (f === 'chrole' ? 'chrole' : f === 'replace' ? 'replace' : f === 'add' ? 'add' : 'remove'));
+          if (formEl) formEl.style.display = 'block';
+        });
+      });
+      document.getElementById('de-submit-replace').onclick = function () {
+        var fio = document.getElementById('de-remove-fio').value;
+        var date = document.getElementById('de-remove-date').value;
+        var role = document.getElementById('de-remove-role').value;
+        var reason = document.getElementById('de-remove-reason').value;
+        var repl = document.getElementById('de-remove-replacement').value.trim();
+        if (!fio || !date || !role || !repl) { alert('Заполните все поля'); return; }
+        apiPost('/api/duties/remove-and-replace', { telegram_id: userId, fio_removed: fio, date: date, role: role, reason: reason || 'заболел', fio_replacement: repl })
+          .then(function (d) { alert(d.message || 'Готово'); modal.remove(); if (container.closest('#work-area')) renderDutyEditSection(container); })
+          .catch(function (e) { alert(e.detail || e.message || 'Ошибка'); });
+      };
+      document.getElementById('de-submit-add').onclick = function () {
+        var opt = document.getElementById('de-add-fio').selectedOptions[0];
+        var fio = document.getElementById('de-add-fio').value;
+        var group = opt ? opt.getAttribute('data-group') || '' : '';
+        var date = document.getElementById('de-add-date').value;
+        var role = document.getElementById('de-add-role').value;
+        if (!fio || !date || !role || !group) { alert('Заполните все поля'); return; }
+        apiPost('/api/duties/add', { telegram_id: userId, fio: fio, group_name: group, date: date, role: role })
+          .then(function (d) { alert(d.message || 'Готово'); modal.remove(); if (container.closest('#work-area')) renderDutyEditSection(container); })
+          .catch(function (e) { alert(e.detail || e.message || 'Ошибка'); });
+      };
+      document.getElementById('de-submit-remove').onclick = function () {
+        var fio = document.getElementById('de-remove-only-fio').value;
+        var date = document.getElementById('de-remove-only-date').value;
+        var role = document.getElementById('de-remove-only-role').value;
+        if (!fio || !date || !role) { alert('Заполните все поля'); return; }
+        apiPost('/api/duties/remove', { telegram_id: userId, fio_removed: fio, date: date, role: role })
+          .then(function (d) { alert(d.message || 'Готово'); modal.remove(); if (container.closest('#work-area')) renderDutyEditSection(container); })
+          .catch(function (e) { alert(e.detail || e.message || 'Ошибка'); });
+      };
+      document.getElementById('de-submit-chrole').onclick = function () {
+        var fio = document.getElementById('de-change-fio').value;
+        var date = document.getElementById('de-change-date').value;
+        var newRole = document.getElementById('de-change-new-role').value;
+        if (!fio || !date || !newRole) { alert('Заполните все поля'); return; }
+        apiPost('/api/duties/change-role', { telegram_id: userId, fio: fio, date: date, new_role: newRole })
+          .then(function (d) { alert(d.message || 'Готово'); modal.remove(); if (container.closest('#work-area')) renderDutyEditSection(container); })
+          .catch(function (e) { alert(e.detail || e.message || 'Ошибка'); });
+      };
+      document.getElementById('duty-edit-close').onclick = function () { modal.remove(); };
+      modal.addEventListener('click', function (e) { if (e.target === modal) modal.remove(); });
+    }).catch(function (e) {
+      alert(e.detail || e.message || 'Нет прав или ошибка загрузки');
+    });
   }
 
   function bindDutyUpload(container) {
@@ -623,32 +801,53 @@
       if (filtered.length === 0) {
         datesEl.innerHTML = '<p class="list-placeholder">' + (dutiesTab === 'upcoming' ? 'Нет предстоящих нарядов' : 'Нет завершённых нарядов') + '</p>';
       } else {
-        datesEl.innerHTML = '<ul class="duty-dates-list">' + filtered.map(function (d) {
+        datesEl.innerHTML = '<div class="duty-dates-cards">' + filtered.map(function (d) {
           var dayLabel = formatDutyDate(d.date);
-          return '<li><a href="#" class="duty-date-link" data-date="' + d.date + '">' + dayLabel + '</a> <span class="muted">' + escapeHtml(d.role_full || d.role) + '</span></li>';
-        }).join('') + '</ul>';
+          var dateObj = new Date(d.date + 'T12:00:00');
+          var weekday = dateObj.toLocaleDateString('ru-RU', { weekday: 'long' });
+          return '<div class="duty-date-card-wrap"><a href="#" class="duty-date-card duty-date-link" data-date="' + d.date + '" data-role="' + escapeHtml(d.role || '') + '"><div class="duty-date-card-left"><div class="duty-date-card-date">' + escapeHtml(dayLabel) + '</div><div class="duty-date-card-weekday">' + escapeHtml(weekday) + '</div><div class="duty-date-card-role">' + escapeHtml(d.role_full || d.role) + '</div></div><span class="muted" style="font-size:12px">▼</span></a></div>';
+        }).join('') + '</div>';
         datesEl.querySelectorAll('.duty-date-link').forEach(function (a) {
           var dateKey = a.getAttribute('data-date');
+          var roleKey = a.getAttribute('data-role');
           a.addEventListener('click', function (e) {
             e.preventDefault();
-            dutySelectedDay = dateKey;
-            var det = container.querySelector('#duty-day-detail');
-            if (det) {
-              det.style.display = 'block';
-              det.innerHTML = '<p class="muted">Загрузка…</p>';
-              api('/api/duties/by-date?date=' + dutySelectedDay).then(function (data) {
-                if (!data.by_role || data.total === 0) { det.innerHTML = '<p class="muted">Нарядов нет</p>'; return; }
-                var h = '<h4 class="card-title">' + formatDutyDate(dutySelectedDay) + '</h4>';
-                Object.keys(data.by_role).sort().forEach(function (role) {
-                  var list = data.by_role[role];
-                  var lbl = ROLE_LABELS[role] || role;
-                  h += '<div class="duty-role-block"><strong>' + escapeHtml(lbl) + '</strong> <span class="muted">' + list.length + ' чел.</span><ul class="list">';
-                  list.forEach(function (p) { h += '<li>' + escapeHtml(p.fio) + (p.group ? ' <span class="muted">' + escapeHtml(p.group) + '</span>' : '') + '</li>'; });
-                  h += '</ul></div>';
-                });
-                det.innerHTML = h;
-              }).catch(function () { det.innerHTML = '<p class="error-msg">Ошибка</p>'; });
+            var wrap = a.closest('.duty-date-card-wrap');
+            var expanded = wrap.querySelector('.duty-date-card-expand');
+            if (expanded) {
+              expanded.remove();
+              a.classList.remove('expanded');
+              return;
             }
+            a.classList.add('expanded');
+            var expandDiv = document.createElement('div');
+            expandDiv.className = 'duty-date-card-expand';
+            expandDiv.innerHTML = '<p class="muted">Загрузка…</p>';
+            wrap.appendChild(expandDiv);
+            api('/api/duties/day-detail?date=' + dateKey + '&role=' + encodeURIComponent(roleKey)).then(function (data) {
+              if (data.error) { expandDiv.innerHTML = '<p class="error-msg">' + escapeHtml(data.error) + '</p>'; return; }
+              var h = '<p class="muted" style="margin-bottom:8px">Бригада:</p><ul class="list">';
+              (data.participants || []).forEach(function (p) {
+                var tg = p.telegram_id ? ' <a href="https://t.me/id' + p.telegram_id + '" target="_blank" class="link-btn" style="font-size:12px">💬</a>' : '';
+                h += '<li>' + escapeHtml(p.fio) + (p.group ? ' <span class="muted">' + escapeHtml(p.group) + '</span>' : '') + tg + '</li>';
+              });
+              h += '</ul>';
+              if (data.shifts && data.shifts.length > 0) {
+                h += '<p class="muted" style="margin-top:12px;margin-bottom:6px">Распределение по сменам:</p><ul class="list">';
+                data.shifts.forEach(function (s) {
+                  h += '<li>Смена ' + escapeHtml(String(s.shift)) + ': ' + escapeHtml(s.fio) + '</li>';
+                });
+                h += '</ul>';
+              }
+              if (data.canteen && data.canteen.length > 0) {
+                h += '<p class="muted" style="margin-top:12px;margin-bottom:6px">По объектам столовой:</p><ul class="list">';
+                data.canteen.forEach(function (c) {
+                  h += '<li>' + escapeHtml(c.object || '') + ': ' + escapeHtml(c.fio) + '</li>';
+                });
+                h += '</ul>';
+              }
+              expandDiv.innerHTML = h;
+            }).catch(function () { expandDiv.innerHTML = '<p class="error-msg">Ошибка загрузки</p>'; });
           });
         });
       }
@@ -676,24 +875,44 @@
     var prev = container.querySelector('#duty-prev-month');
     var next = container.querySelector('#duty-next-month');
     var sel = container.querySelector('#duty-month-select');
-    if (prev) prev.addEventListener('click', function () {
-      var idx = dutyAvailableMonths.indexOf(dutiesCalYear + '-' + String(dutiesCalMonth).padStart(2, '0'));
+    var actualBtn = container.querySelector('#duty-actual-month');
+    if (prev && sel) prev.addEventListener('click', function () {
+      var idx = sel.selectedIndex;
       if (idx > 0) {
-        var p = dutyAvailableMonths[idx - 1].split('-');
-        dutiesCalYear = parseInt(p[0], 10);
-        dutiesCalMonth = parseInt(p[1], 10);
-        if (sel) sel.value = dutyAvailableMonths[idx - 1];
-        selectDutyMonthAndRender(container);
+        sel.selectedIndex = idx - 1;
+        var v = sel.value;
+        if (v) {
+          var p = v.split('-');
+          dutiesCalYear = parseInt(p[0], 10);
+          dutiesCalMonth = parseInt(p[1], 10);
+          selectDutyMonthAndRender(container);
+        }
       }
     });
-    if (next) next.addEventListener('click', function () {
-      var idx = dutyAvailableMonths.indexOf(dutiesCalYear + '-' + String(dutiesCalMonth).padStart(2, '0'));
-      if (idx >= 0 && idx < dutyAvailableMonths.length - 1) {
-        var p = dutyAvailableMonths[idx + 1].split('-');
-        dutiesCalYear = parseInt(p[0], 10);
-        dutiesCalMonth = parseInt(p[1], 10);
-        if (sel) sel.value = dutyAvailableMonths[idx + 1];
-        selectDutyMonthAndRender(container);
+    if (next && sel) next.addEventListener('click', function () {
+      var idx = sel.selectedIndex;
+      if (idx >= 0 && idx < sel.options.length - 1) {
+        sel.selectedIndex = idx + 1;
+        var v = sel.value;
+        if (v) {
+          var p = v.split('-');
+          dutiesCalYear = parseInt(p[0], 10);
+          dutiesCalMonth = parseInt(p[1], 10);
+          selectDutyMonthAndRender(container);
+        }
+      }
+    });
+    if (actualBtn && sel) actualBtn.addEventListener('click', function () {
+      var now = new Date();
+      var ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === ym) {
+          sel.selectedIndex = i;
+          dutiesCalYear = now.getFullYear();
+          dutiesCalMonth = now.getMonth() + 1;
+          selectDutyMonthAndRender(container);
+          return;
+        }
       }
     });
   }
@@ -1066,18 +1285,20 @@
       var system = data.system || [];
       var custom = data.custom || [];
       var gender = data.user_gender || 'male';
+      window.userSurveyGender = gender;
       var html = '';
       if (isAdmin) {
         html += '<div class="survey-status-block card" style="margin-bottom:16px"><div class="card-body">';
         html += '<p class="muted">Проголосовало: ' + (statusData.voted || 0) + (statusData.total ? ' из ' + statusData.total : '') + '</p>';
-        html += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn-accent survey-finalize-btn" data-stage="main">Завершить (парни)</button><button type="button" class="btn-accent survey-finalize-btn" data-stage="female">Завершить (девушки)</button></div></div></div>';
+        html += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn-accent survey-finalize-btn" data-stage="main">Завершить (основные)</button><button type="button" class="btn-accent survey-finalize-btn" data-stage="canteen">Завершить (столовая)</button><button type="button" class="btn-accent survey-finalize-btn" data-stage="female">Завершить (девушки)</button></div></div></div>';
       }
       html += '<p class="muted">Выберите опрос для прохождения.</p>';
       if (system.length) {
         html += '<div class="survey-list">';
         system.forEach(function (s) {
           if (s.for_gender && s.for_gender !== gender && !isAdmin) return;
-          html += '<button type="button" class="card survey-card" data-stage="' + (s.id === 'female' ? 'female' : 'main') + '">' + (s.id === 'female' ? '👩 ' : '👨 ') + escapeHtml(s.title) + '</button>';
+          var stage = s.id === 'female' ? 'female' : 'male';
+          html += '<button type="button" class="card survey-card" data-stage="' + stage + '">' + (s.id === 'female' ? '👩 ' : '👨 ') + escapeHtml(s.title) + '</button>';
         });
         html += '</div>';
       }
@@ -1090,7 +1311,10 @@
       container.innerHTML = html;
       container.querySelectorAll('.survey-finalize-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          apiPost('/api/survey/finalize', { telegram_id: userId, stage: btn.getAttribute('data-stage') }).then(function (d) { openSurveysModule(); }).catch(function (e) { alert(e.detail || 'Ошибка'); });
+          apiPost('/api/survey/finalize', { telegram_id: userId, stage: btn.getAttribute('data-stage') }).then(function (d) {
+            if (d.next_period) { var np = d.next_period; if (np.length >= 7) np = np.slice(0,4) + '.' + np.slice(5,7); alert('Веса сохранены. До следующего периода: ' + np); }
+            openSurveysModule();
+          }).catch(function (e) { alert(e.detail || 'Ошибка'); });
         });
       });
       container.querySelectorAll('.survey-card').forEach(function (btn) {
@@ -1103,10 +1327,16 @@
   }
 
   function showSurveyIntro(container, stage) {
+    var userGender = (window.__profile && window.__profile.gender) || window.userSurveyGender || 'male';
+    if (stage === 'female' && userGender !== 'female' && !(window.__profile && ['admin', 'assistant'].indexOf(window.__profile.role) >= 0)) {
+      container.innerHTML = '<div class="card"><div class="card-body"><p class="muted">Этот опрос только для девушек.</p><p><a href="#" class="link-btn survey-back-list">← К списку опросов</a></p></div></div>';
+      container.querySelector('.survey-back-list')?.addEventListener('click', function (e) { e.preventDefault(); openSurveysModule(); });
+      return;
+    }
     var introIndex = 0;
     var title = stage === 'female' ? '📊 Опрос для девушек (ПУТСО, Столовая, Медчасть)' : '📊 Опрос сложности нарядов';
     var html = '<div class="survey-intro-block">';
-    html += '<h2 class="card-title" style="margin-bottom:16px">' + escapeHtml(title) + '</h2>';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 class="card-title" style="margin:0">' + escapeHtml(title) + '</h2><button type="button" class="link-btn survey-close-intro">✕ Закрыть</button></div>';
     html += '<div class="survey-intro-cards">';
     SURVEY_INTRO_CARDS.forEach(function (c, i) {
       var cls = 'survey-intro-card' + (i === 0 ? ' active' : '');
@@ -1145,22 +1375,34 @@
     if (prevBtn) prevBtn.addEventListener('click', function () { if (introIndex > 0) { introIndex--; setCard(introIndex); } });
     if (nextBtn) nextBtn.addEventListener('click', function () { if (introIndex < SURVEY_INTRO_CARDS.length - 1) { introIndex++; setCard(introIndex); } });
     if (startBtn) startBtn.addEventListener('click', function () { runPairSurvey(container, stage); });
+    container.querySelector('.survey-close-intro')?.addEventListener('click', function () { openSurveysModule(); });
   }
 
   function runPairSurvey(container, stage) {
+    if (stage === 'male') {
+      runPairSurveyStage(container, 'main', function () { runPairSurveyStage(container, 'canteen', function () { container.innerHTML = '<p class="list-placeholder">Спасибо! Опрос завершён.</p><p><a href="#" class="link-btn survey-back-done">← К списку опросов</a></p>'; container.querySelector('.survey-back-done')?.addEventListener('click', function (e) { e.preventDefault(); openSurveysModule(); }); }); });
+      return;
+    }
+    runPairSurveyStage(container, stage, function () {
+      container.innerHTML = '<p class="list-placeholder">Спасибо! Опрос завершён.</p><p><a href="#" class="link-btn survey-back-done">← К списку опросов</a></p>';
+      container.querySelector('.survey-back-done')?.addEventListener('click', function (e) { e.preventDefault(); openSurveysModule(); });
+    });
+  }
+
+  function runPairSurveyStage(container, stage, onComplete) {
     container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
     api('/api/survey/pairs?stage=' + encodeURIComponent(stage)).then(function (data) {
       var pairs = data.pairs || [];
-      if (!pairs.length) { container.innerHTML = '<p class="list-placeholder">Нет пар</p>'; return; }
+      if (!pairs.length) { if (onComplete) onComplete(); else container.innerHTML = '<p class="list-placeholder">Нет пар</p>'; return; }
       var idx = 0;
       function showPair() {
-        if (idx >= pairs.length) { container.innerHTML = '<p class="list-placeholder">Спасибо! Опрос завершён.</p>'; return; }
+        if (idx >= pairs.length) { if (onComplete) onComplete(); return; }
         var p = pairs[idx];
         var a = p.object_a || {}, b = p.object_b || {};
         var nameA = a.name || '—', nameB = b.name || '—';
         var idA = a.id, idB = b.id;
         if (!idA || !idB) { container.innerHTML = '<p class="error-msg">Ошибка формата пар</p>'; return; }
-        container.innerHTML = '<div class="survey-pair"><p class="muted">Оцени по сложности (' + (idx + 1) + '/' + pairs.length + ')</p><div class="survey-pair-btns"><button data-choice="a" class="btn-accent">' + escapeHtml(nameA) + '</button><button data-choice="equal" class="btn-accent">Одинаково</button><button data-choice="b" class="btn-accent">' + escapeHtml(nameB) + '</button></div></div>';
+        container.innerHTML = '<div class="survey-pair"><p class="muted">Оцени по сложности (' + (idx + 1) + '/' + pairs.length + ')</p><p class="survey-pair-names" style="font-size:12px;color:var(--text-muted);margin-bottom:12px">' + escapeHtml(nameA) + ' vs ' + escapeHtml(nameB) + '</p><div class="survey-pair-btns"><button data-choice="a" class="btn-accent">' + escapeHtml(nameA) + '</button><button data-choice="equal" class="btn-accent">Одинаково</button><button data-choice="b" class="btn-accent">' + escapeHtml(nameB) + '</button></div></div>';
         container.querySelectorAll('[data-choice]').forEach(function (btn) {
           btn.addEventListener('click', function () {
             apiPost('/api/survey/pair-vote', { user_id: userId, object_a_id: idA, object_b_id: idB, choice: btn.getAttribute('data-choice'), stage: stage })
