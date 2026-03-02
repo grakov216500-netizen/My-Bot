@@ -589,21 +589,32 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
         return {"error": "База данных не найдена"}
 
     try:
-        # --- Получаем user_id и ФИО ---
-        user = execute(conn,
-            "SELECT id, fio FROM users WHERE telegram_id = ?",
-            (telegram_id,)
+        # --- Определяем, как называется колонка с ФИО в users (fio или full_name) ---
+        cursor = execute(conn, "PRAGMA table_info(users)")
+        columns = [row["name"] for row in cursor.fetchall()]
+        if "fio" in columns:
+            name_col = "fio"
+        elif "full_name" in columns:
+            name_col = "full_name"
+        else:
+            conn.close()
+            return {"error": "В таблице users нет поля для ФИО (fio/full_name)"}
+
+        user = execute(
+            conn,
+            f"SELECT {name_col} as fio FROM users WHERE telegram_id = ?",
+            (telegram_id,),
         ).fetchone()
     except Exception as e:
-        print(f"[ERROR] Ошибка при поиске user_id: {e}")
+        print(f"[ERROR] Ошибка при поиске пользователя для нарядов: {e}")
         return {"error": f"Ошибка БД: {str(e)}"}
 
     if not user:
         conn.close()
         return {"error": "Пользователь не найден"}
 
-    user_id = user['id']
-    user_fio = user['fio']  # ФИО из users — в Excel (duty_schedule) должно быть то же написание
+    # ФИО из users — в Excel (duty_schedule) должно быть то же написание
+    user_fio = user["fio"]
 
     try:
         # Проверяем, какая таблица используется
@@ -2117,13 +2128,36 @@ async def get_notifications(telegram_id: int, limit: int = 50):
     if not conn:
         raise HTTPException(status_code=500, detail="База данных не найдена")
     try:
-        user = execute(conn,
-            "SELECT group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)
-        ).fetchone()
+        # Узнаём, как называется колонка группы в users (group_name / group_num / group)
+        cursor = execute(conn, "PRAGMA table_info(users)")
+        cols = [row["name"] for row in cursor.fetchall()]
+        if "group_name" in cols:
+            group_col = "group_name"
+        elif "group_num" in cols:
+            group_col = "group_num"
+        elif "group" in cols:
+            group_col = "group"
+        else:
+            group_col = None
+
+        if group_col:
+            user = execute(
+                conn,
+                f"SELECT {group_col} as group_name, enrollment_year FROM users WHERE telegram_id = ?",
+                (telegram_id,),
+            ).fetchone()
+        else:
+            user = execute(
+                conn,
+                "SELECT enrollment_year FROM users WHERE telegram_id = ?",
+                (telegram_id,),
+            ).fetchone()
         if not user:
             conn.close()
             return {"items": [], "unread_count": 0}
-        grp, ey = (user["group_name"] or ""), user["enrollment_year"]
+
+        grp = (user.get("group_name") or "") if isinstance(user, dict) else (user["group_name"] if "group_name" in user.keys() else "")
+        ey = user["enrollment_year"]
         rows = execute(conn, """
             SELECT n.id, n.title, n.body, n.type, n.created_at, n.scope, n.scope_value,
                    r.telegram_id IS NOT NULL AS read
@@ -2171,11 +2205,36 @@ async def mark_notifications_read(data: dict):
     try:
         if notification_ids == "all" or (isinstance(notification_ids, list) and len(notification_ids) == 0):
             # Получить все id уведомлений, которые пользователь видит и не прочитал
-            user = execute(conn,"SELECT group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+            cursor = execute(conn, "PRAGMA table_info(users)")
+            cols = [row["name"] for row in cursor.fetchall()]
+            if "group_name" in cols:
+                group_col = "group_name"
+            elif "group_num" in cols:
+                group_col = "group_num"
+            elif "group" in cols:
+                group_col = "group"
+            else:
+                group_col = None
+
+            if group_col:
+                user = execute(
+                    conn,
+                    f"SELECT {group_col} as group_name, enrollment_year FROM users WHERE telegram_id = ?",
+                    (telegram_id,),
+                ).fetchone()
+            else:
+                user = execute(
+                    conn,
+                    "SELECT enrollment_year FROM users WHERE telegram_id = ?",
+                    (telegram_id,),
+                ).fetchone()
+
             if not user:
                 conn.close()
                 return {"status": "ok", "marked": 0}
-            grp, ey = (user["group_name"] or ""), user["enrollment_year"]
+
+            grp = (user.get("group_name") or "") if isinstance(user, dict) else (user["group_name"] if "group_name" in user.keys() else "")
+            ey = user["enrollment_year"]
             ids = [row["id"] for row in execute(conn, """
                 SELECT n.id FROM notifications n
                 LEFT JOIN notification_read r ON r.notification_id = n.id AND r.telegram_id = ?
@@ -2200,9 +2259,24 @@ async def mark_notifications_read(data: dict):
 
 def _get_user_duty_points(conn, telegram_id: int, month_from: str = None, month_to: str = None):
     """Сумма баллов пользователя за наряды (по duty_schedule + object_weights). Период опционально."""
-    user = execute(conn,"SELECT fio, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+    # Определяем колонку с ФИО (fio или full_name), чтобы поддерживать старые БД
+    cursor = execute(conn, "PRAGMA table_info(users)")
+    cols = [row["name"] for row in cursor.fetchall()]
+    if "fio" in cols:
+        name_col = "fio"
+    elif "full_name" in cols:
+        name_col = "full_name"
+    else:
+        return 0.0
+
+    user = execute(
+        conn,
+        f"SELECT {name_col} as fio, enrollment_year FROM users WHERE telegram_id = ?",
+        (telegram_id,),
+    ).fetchone()
     if not user:
         return 0.0
+
     fio, ey = user["fio"], user["enrollment_year"]
     extra = ""
     params = [fio, ey]
@@ -2249,8 +2323,11 @@ async def rating_me(telegram_id: int):
     if not conn:
         raise HTTPException(status_code=500, detail="База данных не найдена")
     try:
-        user = execute(conn,
-            "SELECT enrollment_year, group_name FROM users WHERE telegram_id = ?", (telegram_id,)
+        # Для рейтинга нам нужен только год набора; поле group_name может отсутствовать в старых БД
+        user = execute(
+            conn,
+            "SELECT enrollment_year FROM users WHERE telegram_id = ?",
+            (telegram_id,),
         ).fetchone()
         if not user:
             conn.close()
