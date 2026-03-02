@@ -3371,7 +3371,7 @@ async def get_full_profile(telegram_id: int):
         fio = row['fio'] or ''
         ey = row['enrollment_year']
         group = row['group_name'] if group_col else ''
-        role = row.get('role', 'user') or 'user'
+        role = (row['role'] if 'role' in row.keys() else None) or 'user'
         
         try:
             course = get_current_course(int(ey)) if ey else 1
@@ -3409,23 +3409,18 @@ async def get_full_profile(telegram_id: int):
                 ORDER BY a.sort_order
             """, (telegram_id,)).fetchall()
             achievements = [{"id": a['id'], "title": a['title'], "description": a['description'],
-                           "icon_url": a.get('icon_url', ''), "unlocked": bool(a['unlocked'])} for a in achs]
+                           "icon_url": (a['icon_url'] if 'icon_url' in a.keys() else None) or '', "unlocked": bool(a['unlocked'])} for a in achs]
         except Exception:
             achievements = []
         
         # Sick leave
         sick_leaves = []
         try:
-            if 'sick_leave' in [r['name'] for r in execute(conn, "PRAGMA table_info(sick_leave)").fetchall()]:
-                pass
-        except Exception:
-            pass
-        try:
             sl_rows = execute(conn,
-                "SELECT id, report_date, created_at FROM sick_leave WHERE telegram_id = ? ORDER BY report_date DESC LIMIT 20",
+                "SELECT report_date, created_at FROM sick_leave_reports WHERE telegram_id = ? ORDER BY report_date DESC LIMIT 20",
                 (telegram_id,)
             ).fetchall()
-            sick_leaves = [{"date": r['report_date'], "created_at": r.get('created_at', '')} for r in sl_rows]
+            sick_leaves = [{"date": r['report_date'], "created_at": (r['created_at'] if 'created_at' in r.keys() else '')} for r in sl_rows]
         except Exception:
             sick_leaves = []
         
@@ -3470,7 +3465,7 @@ async def add_sick_leave(data: dict):
             while current <= d_to:
                 try:
                     execute(conn,
-                        "INSERT INTO sick_leave (telegram_id, report_date) VALUES (?, ?)",
+                        "INSERT INTO sick_leave_reports (telegram_id, report_date) VALUES (?, ?)",
                         (telegram_id, current.strftime("%Y-%m-%d"))
                     )
                 except Exception:
@@ -3478,7 +3473,7 @@ async def add_sick_leave(data: dict):
                 current += timedelta(days=1)
         else:
             execute(conn,
-                "INSERT INTO sick_leave (telegram_id, report_date) VALUES (?, ?)",
+                "INSERT INTO sick_leave_reports (telegram_id, report_date) VALUES (?, ?)",
                 (telegram_id, date_from)
             )
         conn.commit()

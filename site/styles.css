@@ -205,6 +205,28 @@ body {
 .duty-date-link { color: var(--accent); text-decoration: none; }
 .duty-date-link:hover { text-decoration: underline; }
 
+.duty-month-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.duty-nav-btn { padding: 6px 12px; font-size: .8125rem; }
+.duty-tabs { display: flex; gap: 0; margin-bottom: 12px; border-radius: 8px; overflow: hidden; border: var(--border); }
+.duty-tab { flex: 1; padding: 10px; background: var(--bg-elevated); color: var(--text-muted); border: none; font-size: .875rem; cursor: pointer; }
+.duty-tab:hover { color: var(--text); }
+.duty-tab.active { background: var(--accent); color: #fff; }
+
+.duty-calendar-section { margin-top: 20px; padding-top: 16px; border-top: var(--border); }
+.duty-cal-hint { font-size: .8125rem; margin-bottom: 8px; }
+.duty-cal-label { color: var(--accent); font-size: .9375rem; margin-bottom: 10px; font-weight: 500; }
+.duty-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 12px; }
+.duty-cal-head { text-align: center; color: var(--text-muted); font-size: .75rem; padding: 4px 0; }
+.duty-cal-day { text-align: center; padding: 8px 4px; border-radius: 8px; cursor: pointer; background: var(--bg-elevated); color: var(--text); font-size: .875rem; transition: background .15s, color .15s; }
+.duty-cal-day:hover { background: var(--accent); color: #fff; }
+.duty-cal-day.today { background: var(--accent); color: #fff; }
+.duty-cal-day.selected { background: #8b5cf6; color: #fff; }
+.duty-cal-empty { grid-column: 1 / -1; color: var(--text-muted); text-align: center; padding: 20px; font-size: .875rem; }
+.duty-day-detail { padding: 16px; background: var(--bg-elevated); border-radius: 10px; margin-top: 12px; border: var(--border); }
+.duty-role-block { margin-top: 12px; }
+.duty-role-block strong { color: var(--accent); }
+.duty-role-block .list { margin-top: 4px; }
+
 /* --- Study week --- */
 .study-week-nav { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .study-week-nav button { padding: 6px 12px; border: var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text); font-size: .875rem; cursor: pointer; }

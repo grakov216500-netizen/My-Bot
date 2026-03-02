@@ -365,6 +365,17 @@
 
   /* ========== DUTIES MODULE ========== */
   var dutiesLocalSection = 'graph';
+  var dutiesCalYear = new Date().getFullYear();
+  var dutiesCalMonth = new Date().getMonth() + 1;
+  var dutiesTab = 'upcoming';
+  var dutyAvailableMonths = [];
+  var dutySelectedDay = '';
+  var ROLE_LABELS = { 'к': 'Командир', 'гбр': 'ГБР', 'с': 'Столовая', 'п': 'ПУТСО', 'м': 'Медчасть', 'о': 'ОТО' };
+
+  function formatDutyDate(dateStr) {
+    var d = new Date(dateStr + 'T12:00:00');
+    return d.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+  }
 
   function renderDutyDayDetail(container, dateStr) {
     if (!dateStr) return;
@@ -391,13 +402,81 @@
     }).catch(function () { target.innerHTML = '<p class="error-msg">Ошибка загрузки</p>'; });
   }
 
+  function renderDutyCalendar(container) {
+    var grid = container.querySelector('#duty-calendar-grid');
+    var label = container.querySelector('#duty-cal-month-label');
+    var detail = container.querySelector('#duty-day-detail');
+    if (!grid) return;
+    var ym = dutiesCalYear + '-' + String(dutiesCalMonth).padStart(2, '0');
+    var monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+    if (label) label.textContent = monthNames[dutiesCalMonth - 1] + ' ' + dutiesCalYear;
+    var hasData = dutyAvailableMonths.indexOf(ym) !== -1;
+    if (!hasData) {
+      grid.innerHTML = '<p class="duty-cal-empty">График на этот месяц отсутствует</p>';
+      if (detail) { detail.style.display = 'none'; detail.innerHTML = ''; }
+      dutySelectedDay = '';
+      return;
+    }
+    var days = new Date(dutiesCalYear, dutiesCalMonth, 0).getDate();
+    var firstDow = (new Date(dutiesCalYear, dutiesCalMonth - 1, 1).getDay() + 6) % 7;
+    var dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+    var html = dayNames.map(function (d) { return '<div class="duty-cal-head">' + d + '</div>'; }).join('');
+    for (var i = 0; i < firstDow; i++) html += '<div></div>';
+    var todayStr = new Date().toISOString().slice(0, 10);
+    for (var d = 1; d <= days; d++) {
+      var ds = dutiesCalYear + '-' + String(dutiesCalMonth).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      var isToday = ds === todayStr;
+      var isSelected = ds === dutySelectedDay;
+      var cls = 'duty-cal-day' + (isSelected ? ' selected' : '') + (isToday ? ' today' : '');
+      html += '<div class="' + cls + '" data-date="' + ds + '" role="button" tabindex="0">' + d + '</div>';
+    }
+    grid.innerHTML = html;
+    grid.querySelectorAll('.duty-cal-day[data-date]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        dutySelectedDay = el.getAttribute('data-date');
+        renderDutyCalendar(container);
+        var det = container.querySelector('#duty-day-detail');
+        if (!det) return;
+        det.style.display = 'block';
+        det.innerHTML = '<p class="muted">Загрузка…</p>';
+        api('/api/duties/by-date?date=' + dutySelectedDay).then(function (data) {
+          if (!data.by_role || data.total === 0) {
+            det.innerHTML = '<p class="muted">На ' + formatDutyDate(dutySelectedDay) + ' нарядов нет</p>';
+            return;
+          }
+          var h = '<h4 class="card-title">' + formatDutyDate(dutySelectedDay) + '</h4>';
+          Object.keys(data.by_role).sort().forEach(function (role) {
+            var list = data.by_role[role];
+            var lbl = ROLE_LABELS[role] || role;
+            h += '<div class="duty-role-block"><strong>' + escapeHtml(lbl) + '</strong> <span class="muted">' + list.length + ' чел.</span><ul class="list">';
+            list.forEach(function (p) { h += '<li>' + escapeHtml(p.fio) + (p.group ? ' <span class="muted">' + escapeHtml(p.group) + '</span>' : '') + '</li>'; });
+            h += '</ul></div>';
+          });
+          det.innerHTML = h;
+        }).catch(function () { det.innerHTML = '<p class="error-msg">Ошибка загрузки</p>'; });
+      });
+    });
+    if (detail) detail.style.display = 'none';
+  }
+
   function renderDutiesWorkArea(container) {
     container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
 
     if (dutiesLocalSection === 'graph') {
       Promise.all([api('/api/duties'), api('/api/duties/available-months')]).then(function (res) {
         var data = res[0], monthsData = res[1];
-        var months = monthsData.months || [];
+        dutyAvailableMonths = monthsData.months || [];
+        var months = dutyAvailableMonths;
+        var canUpload = window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0;
+
+        if (months.length > 0) {
+          var lastYm = months[months.length - 1].split('-');
+          if (dutyAvailableMonths.indexOf(dutiesCalYear + '-' + String(dutiesCalMonth).padStart(2, '0')) === -1) {
+            dutiesCalYear = parseInt(lastYm[0], 10);
+            dutiesCalMonth = parseInt(lastYm[1], 10);
+          }
+        }
+
         var html = '<div class="page-head"><h1 class="page-title">Мои наряды</h1><p class="page-subtitle">Ближайший наряд, график по месяцам</p></div>';
 
         if (data.error) {
@@ -405,34 +484,49 @@
         } else {
           var next = data.next_duty;
           if (next) {
-            var df = next.date ? new Date(next.date + 'T12:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'short' }) : '';
+            var df = next.date ? formatDutyDate(next.date) : '';
             html += '<section class="card"><h2 class="card-title">Ближайший наряд</h2><div class="card-body"><p class="duty-role">' + escapeHtml(next.role_full || '') + '</p><p class="duty-date">' + escapeHtml(df) + '</p></div></section>';
           }
-          var canUpload = window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0;
+
           html += '<section class="card"><h2 class="card-title">Загрузить график</h2><div class="card-body">';
           if (canUpload) {
-            html += '<p class="muted">Скачайте шаблон, заполните и загрузите .xlsx.</p>';
+            html += '<p class="muted">Скачайте шаблон, заполните и загрузите .xlsx. Загрузка доступна сержанту, помощнику и админу.</p>';
             html += '<p><a href="' + API_BASE + '/api/schedule/template?telegram_id=' + userId + '" download class="btn-accent">Скачать шаблон</a></p>';
             html += '<form id="duty-upload-form" class="duty-upload-form"><input type="file" accept=".xlsx" id="duty-upload-file" /><label class="checkbox-label"><input type="checkbox" id="duty-upload-overwrite" /> Заменить существующий месяц</label><button type="submit" class="btn-accent">Загрузить .xlsx</button></form><p id="duty-upload-status" class="muted"></p>';
           } else {
-            html += '<p class="list-placeholder">Загрузка графика доступна сержанту, помощнику и админу.</p>';
+            html += '<p class="list-placeholder">Загрузка графика доступна сержанту, помощнику и админу. Скачайте шаблон и передайте его ответственному.</p>';
+            html += '<p><a href="' + API_BASE + '/api/schedule/template?telegram_id=' + userId + '" download class="btn-accent">Скачать шаблон</a></p>';
           }
           html += '</div></section>';
 
           html += '<section class="card"><h2 class="card-title">По месяцам</h2><div class="card-body">';
           if (months.length === 0) {
-            html += '<p class="list-placeholder">Нет загруженных месяцев.</p>';
+            html += '<p class="list-placeholder">Нет загруженных месяцев. Загрузите график выше (если вы сержант, помощник или админ).</p>';
           } else {
-            html += '<select id="duty-month-select" class="input-select"><option value="">— выберите —</option>' + months.map(function (m) {
+            html += '<div class="duty-month-nav">';
+            html += '<button type="button" class="btn-accent duty-nav-btn" id="duty-prev-month">← Пред.</button>';
+            html += '<select id="duty-month-select" class="input-select">' + months.map(function (m) {
               var parts = m.split('-');
-              return '<option value="' + m + '">' + parts[1] + '.' + parts[0] + '</option>';
-            }).join('') + '</select><div id="duty-month-dates"></div>';
+              var sel = (parts[0] === String(dutiesCalYear) && parts[1] === String(dutiesCalMonth).padStart(2, '0')) ? ' selected' : '';
+              return '<option value="' + m + '"' + sel + '>' + parts[1] + '.' + parts[0] + '</option>';
+            }).join('') + '</select>';
+            html += '<button type="button" class="btn-accent duty-nav-btn" id="duty-next-month">След. →</button>';
+            html += '</div>';
+            html += '<div class="duty-tabs"><button type="button" class="duty-tab' + (dutiesTab === 'upcoming' ? ' active' : '') + '" data-tab="upcoming">Ожидается</button><button type="button" class="duty-tab' + (dutiesTab === 'past' ? ' active' : '') + '" data-tab="past">Завершённые</button></div>';
+            html += '<div id="duty-month-dates"></div>';
+            html += '<div class="duty-calendar-section"><p class="muted duty-cal-hint">Календарь — нажмите день, чтобы увидеть бригаду</p><p id="duty-cal-month-label" class="duty-cal-label"></p><div id="duty-calendar-grid" class="duty-calendar-grid"></div><div id="duty-day-detail" class="duty-day-detail"></div></div>';
           }
           html += '</div></section>';
         }
         container.innerHTML = html;
         bindDutyUpload(container);
         bindMonthSelect(container);
+        if (months.length > 0) {
+          bindDutyTabs(container);
+          bindDutyNav(container);
+          selectDutyMonthAndRender(container);
+          renderDutyCalendar(container);
+        }
       }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка загрузки</p>'; });
 
     } else if (dutiesLocalSection === 'template') {
@@ -490,26 +584,98 @@
     });
   }
 
-  function bindMonthSelect(container) {
-    var sel = document.getElementById('duty-month-select');
-    if (!sel) return;
-    sel.addEventListener('change', function () {
-      var ym = sel.value;
-      var datesEl = document.getElementById('duty-month-dates');
-      if (!datesEl || !ym) { if (datesEl) datesEl.innerHTML = ''; return; }
-      var parts = ym.split('-');
-      api('/api/duties?month=' + parts[1] + '&year=' + parts[0]).then(function (md) {
-        var duties = md.duties || [];
-        if (duties.length === 0) { datesEl.innerHTML = '<p class="list-placeholder">Нет ваших нарядов за этот месяц</p>'; return; }
-        datesEl.innerHTML = '<ul class="duty-dates-list">' + duties.map(function (d) {
-          var day = new Date(d.date + 'T12:00:00');
-          var dayLabel = day.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+  function selectDutyMonthAndRender(container) {
+    var sel = container.querySelector('#duty-month-select');
+    var datesEl = container.querySelector('#duty-month-dates');
+    if (!sel || !datesEl) return;
+    var ym = sel.value;
+    if (!ym) { datesEl.innerHTML = ''; return; }
+    var parts = ym.split('-');
+    dutiesCalYear = parseInt(parts[0], 10);
+    dutiesCalMonth = parseInt(parts[1], 10);
+    dutySelectedDay = '';
+    datesEl.innerHTML = '<p class="muted">Загрузка…</p>';
+    api('/api/duties?month=' + parts[1] + '&year=' + parts[0]).then(function (md) {
+      var duties = md.duties || [];
+      var today = new Date().toISOString().slice(0, 10);
+      var filtered = duties.filter(function (d) {
+        return dutiesTab === 'upcoming' ? d.date >= today : d.date < today;
+      });
+      if (filtered.length === 0) {
+        datesEl.innerHTML = '<p class="list-placeholder">' + (dutiesTab === 'upcoming' ? 'Нет предстоящих нарядов' : 'Нет завершённых нарядов') + '</p>';
+      } else {
+        datesEl.innerHTML = '<ul class="duty-dates-list">' + filtered.map(function (d) {
+          var dayLabel = formatDutyDate(d.date);
           return '<li><a href="#" class="duty-date-link" data-date="' + d.date + '">' + dayLabel + '</a> <span class="muted">' + escapeHtml(d.role_full || d.role) + '</span></li>';
         }).join('') + '</ul>';
         datesEl.querySelectorAll('.duty-date-link').forEach(function (a) {
-          a.addEventListener('click', function (e) { e.preventDefault(); renderDutyDayDetail(datesEl, a.getAttribute('data-date')); });
+          var dateKey = a.getAttribute('data-date');
+          a.addEventListener('click', function (e) {
+            e.preventDefault();
+            dutySelectedDay = dateKey;
+            var det = container.querySelector('#duty-day-detail');
+            if (det) {
+              det.style.display = 'block';
+              det.innerHTML = '<p class="muted">Загрузка…</p>';
+              api('/api/duties/by-date?date=' + dutySelectedDay).then(function (data) {
+                if (!data.by_role || data.total === 0) { det.innerHTML = '<p class="muted">Нарядов нет</p>'; return; }
+                var h = '<h4 class="card-title">' + formatDutyDate(dutySelectedDay) + '</h4>';
+                Object.keys(data.by_role).sort().forEach(function (role) {
+                  var list = data.by_role[role];
+                  var lbl = ROLE_LABELS[role] || role;
+                  h += '<div class="duty-role-block"><strong>' + escapeHtml(lbl) + '</strong> <span class="muted">' + list.length + ' чел.</span><ul class="list">';
+                  list.forEach(function (p) { h += '<li>' + escapeHtml(p.fio) + (p.group ? ' <span class="muted">' + escapeHtml(p.group) + '</span>' : '') + '</li>'; });
+                  h += '</ul></div>';
+                });
+                det.innerHTML = h;
+              }).catch(function () { det.innerHTML = '<p class="error-msg">Ошибка</p>'; });
+            }
+          });
         });
-      }).catch(function () { datesEl.innerHTML = '<p class="error-msg">Ошибка</p>'; });
+      }
+      renderDutyCalendar(container);
+    }).catch(function () { datesEl.innerHTML = '<p class="error-msg">Ошибка</p>'; });
+  }
+
+  function bindMonthSelect(container) {
+    var sel = container.querySelector('#duty-month-select');
+    if (!sel) return;
+    sel.addEventListener('change', function () { selectDutyMonthAndRender(container); });
+  }
+
+  function bindDutyTabs(container) {
+    container.querySelectorAll('.duty-tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        dutiesTab = btn.getAttribute('data-tab');
+        container.querySelectorAll('.duty-tab').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-tab') === dutiesTab); });
+        selectDutyMonthAndRender(container);
+      });
+    });
+  }
+
+  function bindDutyNav(container) {
+    var prev = container.querySelector('#duty-prev-month');
+    var next = container.querySelector('#duty-next-month');
+    var sel = container.querySelector('#duty-month-select');
+    if (prev) prev.addEventListener('click', function () {
+      var idx = dutyAvailableMonths.indexOf(dutiesCalYear + '-' + String(dutiesCalMonth).padStart(2, '0'));
+      if (idx > 0) {
+        var p = dutyAvailableMonths[idx - 1].split('-');
+        dutiesCalYear = parseInt(p[0], 10);
+        dutiesCalMonth = parseInt(p[1], 10);
+        if (sel) sel.value = dutyAvailableMonths[idx - 1];
+        selectDutyMonthAndRender(container);
+      }
+    });
+    if (next) next.addEventListener('click', function () {
+      var idx = dutyAvailableMonths.indexOf(dutiesCalYear + '-' + String(dutiesCalMonth).padStart(2, '0'));
+      if (idx >= 0 && idx < dutyAvailableMonths.length - 1) {
+        var p = dutyAvailableMonths[idx + 1].split('-');
+        dutiesCalYear = parseInt(p[0], 10);
+        dutiesCalMonth = parseInt(p[1], 10);
+        if (sel) sel.value = dutyAvailableMonths[idx + 1];
+        selectDutyMonthAndRender(container);
+      }
     });
   }
 
