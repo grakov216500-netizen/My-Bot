@@ -1601,10 +1601,10 @@ async def check_schedule_month(group: str, enrollment_year: int, month: str):
         conn.close()
 
 
-# Путь к шаблону графика: из env или файл в корне проекта
+# Путь к шаблону графика: из env или Шаблон.xlsx в корне проекта
 SCHEDULE_TEMPLATE_PATH = os.environ.get(
     "SCHEDULE_TEMPLATE_PATH",
-    os.path.join(os.path.dirname(__file__), "graph_ИО6 — копия.xlsx")
+    os.path.join(os.path.dirname(__file__), "Шаблон.xlsx")
 )
 
 

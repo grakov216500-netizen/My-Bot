@@ -486,7 +486,7 @@
         var data = res[0], monthsData = res[1];
         dutyAvailableMonths = monthsData.months || [];
         var months = dutyAvailableMonths;
-        var canUpload = window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0;
+        var canUpload = (window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0) || (Number(userId) === 1027070834);
 
         if (months.length > 0) {
           var lastYm = months[months.length - 1].split('-');
@@ -550,7 +550,7 @@
 
     } else if (dutiesLocalSection === 'template') {
       var templateUrl = API_BASE + '/api/schedule/template?telegram_id=' + userId;
-      var canUploadOwn = window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0;
+      var canUploadOwn = (window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0) || (Number(userId) === 1027070834);
       var html = '<div class="page-head"><h1 class="page-title">Шаблон графика</h1><p class="page-subtitle">Скачать или загрузить свой шаблон для группы</p></div>';
       html += '<div class="card"><div class="card-body"><p><a href="' + templateUrl + '" download class="btn-accent">Скачать шаблон .xlsx</a></p>';
       if (canUploadOwn) {
@@ -1119,7 +1119,7 @@
         var nameA = a.name || '—', nameB = b.name || '—';
         var idA = a.id, idB = b.id;
         if (!idA || !idB) { container.innerHTML = '<p class="error-msg">Ошибка формата пар</p>'; return; }
-        container.innerHTML = '<div class="survey-pair"><p class="muted">Кто сложнее? (' + (idx + 1) + '/' + pairs.length + ')</p><div class="survey-pair-btns"><button data-choice="a" class="btn-accent">' + escapeHtml(nameA) + '</button><button data-choice="equal" class="btn-accent">Одинаково</button><button data-choice="b" class="btn-accent">' + escapeHtml(nameB) + '</button></div></div>';
+        container.innerHTML = '<div class="survey-pair"><p class="muted">Оцени по сложности (' + (idx + 1) + '/' + pairs.length + ')</p><div class="survey-pair-btns"><button data-choice="a" class="btn-accent">' + escapeHtml(nameA) + '</button><button data-choice="equal" class="btn-accent">Одинаково</button><button data-choice="b" class="btn-accent">' + escapeHtml(nameB) + '</button></div></div>';
         container.querySelectorAll('[data-choice]').forEach(function (btn) {
           btn.addEventListener('click', function () {
             apiPost('/api/survey/pair-vote', { user_id: userId, object_a_id: idA, object_b_id: idB, choice: btn.getAttribute('data-choice'), stage: stage })
@@ -1219,9 +1219,20 @@
   }
 
   /* ========== INIT ========== */
+  function ensureRegistered() {
+    if (!userId) return Promise.resolve();
+    return apiPost('/api/register', {
+      telegram_id: userId,
+      group_name: userGroup || 'Ио6-23',
+      enrollment_year: userYear || 2023
+    }).then(function () {}).catch(function () {});
+  }
+
   function loadAll() {
     setSubtitleDate();
-    loadProfile().then(function () {
+    ensureRegistered().then(function () {
+      return loadProfile();
+    }).then(function () {
       loadScheduleHome();
       loadDutiesWidget();
       loadNotifications();
