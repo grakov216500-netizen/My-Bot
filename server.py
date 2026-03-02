@@ -1385,120 +1385,51 @@ def _get_apex_parser():
 @app.get("/api/schedule/today")
 async def get_today_schedule(telegram_id: int, date: str = None):
     """
-    Расписание на день для пользователя.
-    date: YYYY-MM-DD (опционально). Если не передан — текущая дата.
-    Если сегодня сб/вс, фронт может передать date следующего понедельника.
+    ВРЕМЕННАЯ ЗАГЛУШКА ДЛЯ РАСПИСАНИЯ НА ДЕНЬ.
+    Реальная интеграция с Апекс ВУЗ будет подключена позже, сейчас возвращаем
+    предсказуемый ответ без обращения к внешнему сервису.
     """
-    conn = get_db()
-    if not conn:
-        raise HTTPException(status_code=500, detail="База данных не найдена")
-    try:
-        user = execute(conn,
-            "SELECT fio, group_name, enrollment_year FROM users WHERE telegram_id = ?",
-            (telegram_id,),
-        ).fetchone()
-        if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
-
-        group_name = (user["group_name"] or "").strip()
-        year = user["enrollment_year"]
-        if not group_name:
-            raise HTTPException(status_code=400, detail="У пользователя не указана группа")
-
-        target_date = datetime.now().date()
-        if date:
-            try:
-                target_date = datetime.strptime(date.strip()[:10], "%Y-%m-%d").date()
-            except ValueError:
-                pass
-
-        lessons = []
-        message = None
+    target_date = datetime.now().date()
+    if date:
         try:
-            parser = _get_apex_parser()
-            lessons = parser.get_schedule_for_date(group_name, year, target_date)
-        except HTTPException as he:
-            if he.status_code == 503:
-                message = "Сервис расписания временно недоступен (APEX не настроен)"
-            else:
-                raise
-        except ValueError as ve:
-            print(f"[WARN] Расписание Апекс (группа не найдена): {ve}")
-            message = "Группа не найдена в Апексе"
-        except Exception as e:
-            print(f"[WARN] Расписание Апекс: {e}")
-            message = "Не удалось загрузить расписание (выходной или сайт недоступен)"
+            target_date = datetime.strptime(date.strip()[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
 
-        return {
-            "date": target_date.strftime("%Y-%m-%d"),
-            "group": group_name,
-            "year": year,
-            "lessons": lessons,
-            "message": message,
-        }
-    finally:
-        conn.close()
+    return {
+        "date": target_date.strftime("%Y-%m-%d"),
+        "group": "",
+        "year": None,
+        "lessons": [],
+        "message": "Расписание будет подключено после интеграции с Апекс ВУЗ.",
+    }
 
 
 @app.get("/api/schedule/week")
 async def get_week_schedule(telegram_id: int, date: str = None):
     """
-    Расписание на учебную неделю (Пн–Пт).
-    date: YYYY-MM-DD — любой день недели; по нему определяется понедельник.
-    Если не передан — текущая неделя (или следующая, если сейчас сб/вс).
+    ВРЕМЕННАЯ ЗАГЛУШКА ДЛЯ РАСПИСАНИЯ НА НЕДЕЛЮ.
+    Возвращает пустое расписание, чтобы фронтенд мог корректно работать,
+    пока не реализована интеграция с Апекс ВУЗ.
     """
-    conn = get_db()
-    if not conn:
-        raise HTTPException(status_code=500, detail="База данных не найдена")
-    try:
-        user = execute(conn,
-            "SELECT fio, group_name, enrollment_year FROM users WHERE telegram_id = ?",
-            (telegram_id,),
-        ).fetchone()
-        if not user:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
-        group_name = (user["group_name"] or "").strip()
-        year = user["enrollment_year"]
-        if not group_name:
-            raise HTTPException(status_code=400, detail="У пользователя не указана группа")
-
-        target = datetime.now().date()
-        if date:
-            try:
-                target = datetime.strptime(date.strip()[:10], "%Y-%m-%d").date()
-            except ValueError:
-                pass
-        # Понедельник = target - (weekday-1), где weekday 0=Mon, 6=Sun
-        weekday = target.weekday()
-        monday = target - timedelta(days=weekday)
-        week_start = monday
-
-        week_schedule = {}
-        message = None
+    target = datetime.now().date()
+    if date:
         try:
-            parser = _get_apex_parser()
-            week_schedule = parser.get_schedule_for_week(group_name, year, week_start)
-        except HTTPException as he:
-            if he.status_code == 503:
-                message = "Сервис расписания временно недоступен (APEX не настроен)"
-            else:
-                raise
-        except ValueError as ve:
-            print(f"[WARN] Расписание Апекс (группа не найдена): {ve}")
-            message = "Группа не найдена в Апексе"
-        except Exception as e:
-            print(f"[WARN] Расписание Апекс (неделя): {e}")
-            message = "Не удалось загрузить расписание"
+            target = datetime.strptime(date.strip()[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
 
-        return {
-            "week_start": week_start.strftime("%Y-%m-%d"),
-            "group": group_name,
-            "year": year,
-            "schedule": week_schedule,
-            "message": message,
-        }
-    finally:
-        conn.close()
+    # Приводим к понедельнику той же недели
+    weekday = target.weekday()
+    monday = target - timedelta(days=weekday)
+
+    return {
+        "week_start": monday.strftime("%Y-%m-%d"),
+        "group": "",
+        "year": None,
+        "schedule": {},
+        "message": "Недельное расписание появится после подключения данных Апекс ВУЗ.",
+    }
 
 
 @app.get("/api/schedule/check_month")

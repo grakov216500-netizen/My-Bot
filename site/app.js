@@ -6,7 +6,7 @@
   var STORAGE_KEY = 'vitech_site_telegram_id';
   var STORAGE_GROUP = 'vitech_site_group';
   var STORAGE_YEAR = 'vitech_site_year';
-  var isLocal = /localhost|127\.0\.0\.1/.test(window.location.hostname);
+  var isLocal = !window.location.hostname || /localhost|127\.0\.0\.1/.test(window.location.hostname);
   var isUnderSitePath = window.location.pathname.indexOf('/site') !== -1;
   // Всегда вести API на бэкенд: при /site/ — origin; при localhost — явно порт 8000 (чтобы работало при открытии с любого порта/файла).
   var API_BASE = (function () {
@@ -36,8 +36,52 @@
     var sep = path.indexOf('?') >= 0 ? '&' : '?';
     var url = API_BASE + path + sep + 'telegram_id=' + userId;
     return fetch(url).then(function (res) {
-      if (!res.ok) throw new Error(res.status);
+      if (!res.ok) {
+        if (res.status === 404 && !window.__api_404_shown) {
+          window.__api_404_shown = true;
+          showApiErrorBanner(url, res.status);
+        }
+        throw new Error(res.status);
+      }
       return res.json();
+    });
+  }
+
+  function showApiErrorBanner(failedUrl, status) {
+    var base = API_BASE || window.location.origin;
+    var msg = 'API не найден (404). Запросы идут по адресу: ' + base + '/api/... ';
+    var hint = 'Запустите сервер в папке проекта: python server.py или uvicorn server:app --port 8000. Затем откройте сайт по адресу ' + base.replace(/\/$/, '') + '/site/';
+    var div = document.createElement('div');
+    div.id = 'api-error-banner';
+    div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:12px 16px;font-size:14px;line-height:1.4;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+    div.innerHTML = '<strong>Сайт не может загрузить данные</strong><br/>' + escapeHtml(msg) + '<br/><span style="font-size:12px;opacity:0.9">' + escapeHtml(hint) + '</span><br/>' +
+      '<button type="button" style="margin-top:8px;padding:4px 12px;background:#fff;color:#b91c1c;border:none;border-radius:6px;cursor:pointer" id="api-error-dismiss">Понятно</button> ' +
+      '<button type="button" style="margin-top:8px;padding:4px 12px;background:rgba(255,255,255,0.2);color:#fff;border:1px solid #fff;border-radius:6px;cursor:pointer" id="api-error-set-url">Указать другой адрес API</button>';
+    document.body.appendChild(div);
+    document.getElementById('api-error-dismiss').onclick = function () { div.remove(); };
+    document.getElementById('api-error-set-url').onclick = function () {
+      var url = prompt('Введите адрес сервера без слэша в конце (например http://localhost:8000 или https://vitechbot.online):', base.replace(/\/$/, ''));
+      if (url && url.trim()) {
+        try { localStorage.setItem('vitech_api_base', url.trim()); } catch (_) {}
+        location.reload();
+      }
+    };
+  }
+
+  function checkApiAndRunInit() {
+    var healthUrl = (API_BASE || '') + '/api/health';
+    if (!API_BASE) healthUrl = window.location.origin + '/api/health';
+    fetch(healthUrl, { method: 'GET' }).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    }).then(function () {
+      init();
+    }).catch(function (err) {
+      if (!window.__api_404_shown) {
+        window.__api_404_shown = true;
+        showApiErrorBanner(healthUrl, err.message || '404');
+      }
+      init();
     });
   }
 
@@ -902,7 +946,6 @@
   var FORUM_SECTIONS = [
     { id: 'general', label: 'Общие', desc: 'Обсуждения' },
     { id: 'gallery', label: 'Галерея', desc: 'Творчество' },
-    { id: 'flea', label: 'Барахолка', desc: 'Потерял/нашёл' },
     { id: 'board', label: 'Объявления', desc: 'Для курсантов' },
     { id: 'study', label: 'Учёба', desc: 'Вопросы' }
   ];
@@ -958,6 +1001,8 @@
 
     if (!userId) {
       showScreen('screen-login');
+      var apiUrlEl = document.getElementById('login-api-url');
+      if (apiUrlEl) apiUrlEl.textContent = (API_BASE || window.location.origin || '—').replace(/\/$/, '');
       document.getElementById('btn-login').addEventListener('click', function () {
         var raw = document.getElementById('input-telegram-id').value.trim();
         var id = parseInt(raw, 10);
@@ -1018,5 +1063,5 @@
     });
   }
 
-  document.addEventListener('DOMContentLoaded', init);
+  document.addEventListener('DOMContentLoaded', checkApiAndRunInit);
 })();
