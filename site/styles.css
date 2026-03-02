@@ -242,6 +242,19 @@ body {
 .survey-card { cursor: pointer; padding: 16px 20px; text-align: center; font-size: .875rem; color: var(--text); }
 .survey-pair { text-align: center; padding: 20px 0; }
 .survey-pair-btns { display: flex; gap: 12px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+/* Intro cards (swipeable) */
+.survey-intro-block { padding: 16px 0; }
+.survey-intro-cards { position: relative; min-height: 180px; margin-bottom: 20px; }
+.survey-intro-card { display: none; padding: 12px 0; }
+.survey-intro-card.active { display: block; animation: fadeIn 0.25s ease; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.survey-intro-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.survey-intro-nav button:disabled { opacity: 0.5; cursor: not-allowed; }
+.survey-intro-dots { display: flex; gap: 6px; justify-content: center; flex: 1; }
+.survey-intro-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); cursor: pointer; transition: background .2s; }
+.survey-intro-dot:hover { background: var(--text); }
+.survey-intro-dot.active { background: var(--accent); }
+.survey-intro-start { width: 100%; padding: 14px; }
 
 /* --- Plans --- */
 .plans-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }

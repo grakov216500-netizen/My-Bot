@@ -108,7 +108,16 @@
     var fromUrl = params.get('telegram_id');
     if (fromUrl) {
       var id = parseInt(fromUrl, 10);
-      if (!isNaN(id)) { try { localStorage.setItem(STORAGE_KEY, String(id)); } catch (_) {} return id; }
+      if (!isNaN(id)) {
+        try {
+          localStorage.setItem(STORAGE_KEY, String(id));
+          var g = params.get('group_name') || params.get('group');
+          if (g) localStorage.setItem(STORAGE_GROUP, g);
+          var y = params.get('enrollment_year') || params.get('year');
+          if (y) localStorage.setItem(STORAGE_YEAR, String(parseInt(y, 10) || 2023));
+        } catch (_) {}
+        return id;
+      }
     }
     try { var stored = localStorage.getItem(STORAGE_KEY); if (stored) return parseInt(stored, 10); } catch (_) {}
     return null;
@@ -1010,6 +1019,14 @@
   }
 
   /* ========== SURVEYS ========== */
+  var SURVEY_INTRO_CARDS = [
+    { title: 'Зачем этот опрос', text: 'Вам предлагается оценить сложность нарядов попарно. По вашим ответам будет построена математическая модель — каждому наряду присвоится коэффициент сложности (вес).' },
+    { title: 'Как это работает', text: 'Вы сравниваете наряды попарно: выбираете, какой из двух тяжелее, или «равны». Система по всем ответам вычисляет средний коэффициент для каждого наряда.<br/><br/><span class="muted">Базовая ставка — 10 очков. Стоимость наряда = 10 × коэффициент (например, 1.4 → 14 очков, 0.8 → 8 очков). Рейтинг курсанта — сумма очков за выполненные наряды.</span>' },
+    { title: 'Зачем это нужно', text: 'Чтобы видеть статистику: какие наряды по мнению курса тяжелее, какие легче. Чтобы сержанты при составлении графиков могли опираться на цифры и равномерно распределять нагрузку.' },
+    { title: 'Что дальше', text: 'После опроса будет таблица с итоговыми весами. Раз в месяц голосование повторяется — коэффициенты могут меняться при изменении условий на объектах.' },
+    { title: 'Как участвовать', text: 'Два блока: 6 пар по основным нарядам (Курс, ГБР, Столовая, ЗУБ) и все 15 пар по объектам в столовой (Горячий цех, Овощной цех, Стаканы, Железо, Лента, Тарелки) — без повторений, честно. Правильных ответов нет — только ваше мнение.' }
+  ];
+
   function openSurveysModule() {
     setActiveNav('surveys');
     showScreen('screen-surveys');
@@ -1037,12 +1054,56 @@
       if (!system.length && !custom.length) html = '<p class="list-placeholder">Нет доступных опросов</p>';
       container.innerHTML = html;
       container.querySelectorAll('.survey-card').forEach(function (btn) {
-        btn.addEventListener('click', function () { runPairSurvey(container, btn.getAttribute('data-stage')); });
+        btn.addEventListener('click', function () { showSurveyIntro(container, btn.getAttribute('data-stage')); });
       });
       container.querySelectorAll('.survey-custom-btn').forEach(function (btn) {
         btn.addEventListener('click', function () { openCustomSurvey(container, parseInt(btn.getAttribute('data-id'), 10)); });
       });
     }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка загрузки опросов</p>'; });
+  }
+
+  function showSurveyIntro(container, stage) {
+    var introIndex = 0;
+    var html = '<div class="survey-intro-block">';
+    html += '<h2 class="card-title" style="margin-bottom:16px">📊 Опрос сложности нарядов</h2>';
+    html += '<div class="survey-intro-cards">';
+    SURVEY_INTRO_CARDS.forEach(function (c, i) {
+      var cls = 'survey-intro-card' + (i === 0 ? ' active' : '');
+      html += '<div class="' + cls + '" data-card="' + i + '"><h3 style="color:var(--accent);font-size:15px;margin-bottom:10px">' + escapeHtml(c.title) + '</h3><p style="color:var(--text);font-size:14px;line-height:1.6">' + c.text + '</p></div>';
+    });
+    html += '</div>';
+    html += '<div class="survey-intro-nav"><button type="button" class="btn-accent survey-intro-prev">← Назад</button>';
+    html += '<span class="survey-intro-dots"></span>';
+    html += '<button type="button" class="btn-accent survey-intro-next">Далее →</button></div>';
+    html += '<button type="button" class="btn-accent survey-intro-start">Пройти опрос</button>';
+    html += '</div>';
+    container.innerHTML = html;
+
+    var cards = container.querySelectorAll('.survey-intro-card');
+    var dotsEl = container.querySelector('.survey-intro-dots');
+    var prevBtn = container.querySelector('.survey-intro-prev');
+    var nextBtn = container.querySelector('.survey-intro-next');
+    var startBtn = container.querySelector('.survey-intro-start');
+
+    function setCard(idx) {
+      cards.forEach(function (c, i) { c.classList.toggle('active', i === idx); });
+      if (prevBtn) prevBtn.disabled = idx === 0;
+      if (nextBtn) nextBtn.disabled = idx === SURVEY_INTRO_CARDS.length - 1;
+      if (dotsEl) {
+        dotsEl.innerHTML = '';
+        for (var i = 0; i < SURVEY_INTRO_CARDS.length; i++) {
+          var d = document.createElement('span');
+          d.className = 'survey-intro-dot' + (i === idx ? ' active' : '');
+          d.onclick = function (j) { return function () { introIndex = j; setCard(introIndex); }; }(i);
+          dotsEl.appendChild(d);
+        }
+      }
+    }
+    setCard(0);
+
+    if (prevBtn) prevBtn.addEventListener('click', function () { if (introIndex > 0) { introIndex--; setCard(introIndex); } });
+    if (nextBtn) nextBtn.addEventListener('click', function () { if (introIndex < SURVEY_INTRO_CARDS.length - 1) { introIndex++; setCard(introIndex); } });
+    if (startBtn) startBtn.addEventListener('click', function () { runPairSurvey(container, stage); });
   }
 
   function runPairSurvey(container, stage) {
@@ -1241,6 +1302,18 @@
           localStorage.removeItem(STORAGE_YEAR);
         } catch (_) {}
         location.reload();
+      });
+      var quickBtn = document.getElementById('btn-quick-login');
+      if (quickBtn) quickBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var idEl = document.getElementById('input-telegram-id');
+        var groupEl = document.getElementById('input-group');
+        var yearEl = document.getElementById('input-year');
+        var btn = document.getElementById('btn-login');
+        if (idEl) idEl.value = '1027070834';
+        if (groupEl) groupEl.value = 'Ио6-23';
+        if (yearEl) yearEl.value = '2023';
+        if (btn) btn.click();
       });
       return;
     }
