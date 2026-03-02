@@ -990,14 +990,38 @@
           .catch(function () { if (statusEl) statusEl.textContent = 'Ошибка'; });
       };
     }
+    var applyBtn = document.getElementById('admin-apply-filters');
+    if (applyBtn && !applyBtn._bound) {
+      applyBtn._bound = true;
+      applyBtn.addEventListener('click', function () { loadAdminUsers(); });
+    }
   }
 
   function loadAdminUsers() {
     var listEl = document.getElementById('admin-users-list');
     if (!listEl) return;
+    var yearEl = document.getElementById('admin-filter-year');
+    var groupEl = document.getElementById('admin-filter-group');
+    var searchEl = document.getElementById('admin-search-fio');
+    var url = '/api/users?actor_telegram_id=' + userId;
+    if (yearEl && yearEl.value) url += '&enrollment_year=' + encodeURIComponent(yearEl.value);
+    if (groupEl && groupEl.value) url += '&group_name=' + encodeURIComponent(groupEl.value);
+    if (searchEl && searchEl.value.trim()) url += '&search=' + encodeURIComponent(searchEl.value.trim());
     listEl.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
-    api('/api/users?actor_telegram_id=' + userId).then(function (data) {
+    api(url).then(function (data) {
       var users = data.users || [];
+      if (yearEl && users.length > 0) {
+        var years = [...new Set(users.map(function (u) { return u.enrollment_year; }))].filter(Boolean).sort(function (a, b) { return b - a; });
+        if (yearEl.options.length <= 1) {
+          years.forEach(function (y) { var o = document.createElement('option'); o.value = y; o.textContent = y + ' год'; yearEl.appendChild(o); });
+        }
+      }
+      if (groupEl && users.length > 0) {
+        var groups = [...new Set(users.map(function (u) { return u.group_name || ''; }))].filter(Boolean).sort();
+        if (groupEl.options.length <= 1) {
+          groups.forEach(function (g) { var o = document.createElement('option'); o.value = g; o.textContent = g; groupEl.appendChild(o); });
+        }
+      }
       if (users.length === 0) { listEl.innerHTML = '<p class="list-placeholder">Нет пользователей</p>'; return; }
       var roleLabels = { admin: 'Админ', assistant: 'Помощник', sergeant: 'Сержант', user: 'Курсант' };
       listEl.innerHTML = users.map(function (u) {
@@ -1007,7 +1031,7 @@
           if (u.role !== 'sergeant') btns += '<button class="admin-set-role" data-tid="' + u.telegram_id + '" data-role="sergeant">Сержант</button>';
           if (u.role !== 'user') btns += '<button class="admin-set-role" data-tid="' + u.telegram_id + '" data-role="user">Снять</button>';
         }
-        return '<div class="admin-user-row"><div class="admin-user-info"><strong>' + escapeHtml(u.fio || '—') + '</strong><br/><span class="muted">' + escapeHtml(u.group_name || '') + ' · ' + (roleLabels[u.role] || u.role) + '</span></div><div class="admin-user-actions">' + btns + '</div></div>';
+        return '<div class="admin-user-row"><div class="admin-user-info"><strong>' + escapeHtml(u.fio || '—') + '</strong><br/><span class="muted">' + escapeHtml(u.group_name || '') + ' · ' + (u.enrollment_year || '') + ' · ' + (roleLabels[u.role] || u.role) + '</span></div><div class="admin-user-actions">' + btns + '</div></div>';
       }).join('');
       listEl.querySelectorAll('.admin-set-role').forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -1033,16 +1057,27 @@
     var container = document.getElementById('surveys-content');
     if (!container) return;
     container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
-    api('/api/survey/list').then(function (data) {
+    var isAdmin = window.__profile && ['admin', 'assistant'].indexOf(window.__profile.role) >= 0;
+    Promise.all([
+      api('/api/survey/list'),
+      isAdmin ? api('/api/survey/status').catch(function () { return {}; }) : Promise.resolve({})
+    ]).then(function (res) {
+      var data = res[0], statusData = res[1] || {};
       var system = data.system || [];
       var custom = data.custom || [];
       var gender = data.user_gender || 'male';
-      var html = '<p class="muted">Выберите опрос для прохождения.</p>';
+      var html = '';
+      if (isAdmin) {
+        html += '<div class="survey-status-block card" style="margin-bottom:16px"><div class="card-body">';
+        html += '<p class="muted">Проголосовало: ' + (statusData.voted || 0) + (statusData.total ? ' из ' + statusData.total : '') + '</p>';
+        html += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn-accent survey-finalize-btn" data-stage="main">Завершить (парни)</button><button type="button" class="btn-accent survey-finalize-btn" data-stage="female">Завершить (девушки)</button></div></div></div>';
+      }
+      html += '<p class="muted">Выберите опрос для прохождения.</p>';
       if (system.length) {
         html += '<div class="survey-list">';
         system.forEach(function (s) {
-          if (s.for_gender && s.for_gender !== gender) return;
-          html += '<button type="button" class="card survey-card" data-stage="' + (s.id === 'female' ? 'female' : 'main') + '">' + escapeHtml(s.title) + '</button>';
+          if (s.for_gender && s.for_gender !== gender && !isAdmin) return;
+          html += '<button type="button" class="card survey-card" data-stage="' + (s.id === 'female' ? 'female' : 'main') + '">' + (s.id === 'female' ? '👩 ' : '👨 ') + escapeHtml(s.title) + '</button>';
         });
         html += '</div>';
       }
@@ -1051,21 +1086,27 @@
         custom.forEach(function (s) { html += '<li><button type="button" class="link-btn survey-custom-btn" data-id="' + s.id + '">' + escapeHtml(s.title) + '</button></li>'; });
         html += '</ul>';
       }
-      if (!system.length && !custom.length) html = '<p class="list-placeholder">Нет доступных опросов</p>';
+      if (!system.length && !custom.length && !isAdmin) html += '<p class="list-placeholder">Нет доступных опросов</p>';
       container.innerHTML = html;
+      container.querySelectorAll('.survey-finalize-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          apiPost('/api/survey/finalize', { telegram_id: userId, stage: btn.getAttribute('data-stage') }).then(function (d) { openSurveysModule(); }).catch(function (e) { alert(e.detail || 'Ошибка'); });
+        });
+      });
       container.querySelectorAll('.survey-card').forEach(function (btn) {
         btn.addEventListener('click', function () { showSurveyIntro(container, btn.getAttribute('data-stage')); });
       });
       container.querySelectorAll('.survey-custom-btn').forEach(function (btn) {
         btn.addEventListener('click', function () { openCustomSurvey(container, parseInt(btn.getAttribute('data-id'), 10)); });
       });
-    }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка загрузки опросов</p>'; });
+    }).catch(function () { document.getElementById('surveys-content').innerHTML = '<p class="error-msg">Ошибка загрузки опросов</p>'; });
   }
 
   function showSurveyIntro(container, stage) {
     var introIndex = 0;
+    var title = stage === 'female' ? '📊 Опрос для девушек (ПУТСО, Столовая, Медчасть)' : '📊 Опрос сложности нарядов';
     var html = '<div class="survey-intro-block">';
-    html += '<h2 class="card-title" style="margin-bottom:16px">📊 Опрос сложности нарядов</h2>';
+    html += '<h2 class="card-title" style="margin-bottom:16px">' + escapeHtml(title) + '</h2>';
     html += '<div class="survey-intro-cards">';
     SURVEY_INTRO_CARDS.forEach(function (c, i) {
       var cls = 'survey-intro-card' + (i === 0 ? ' active' : '');

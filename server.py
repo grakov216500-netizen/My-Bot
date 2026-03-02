@@ -2938,7 +2938,7 @@ def _calc_weights_from_pair_votes(conn, stage_filter: str = None):
 @app.post("/api/survey/finalize")
 async def finalize_survey(data: dict):
     """Завершает опрос и вычисляет веса по формуле k = S/avg, итог = 10 × k"""
-    admin_id = data.get('admin_id')
+    admin_id = data.get('admin_id') or data.get('telegram_id')
     if not admin_id:
         raise HTTPException(status_code=401, detail="Не авторизован")
     conn = get_db()

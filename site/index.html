@@ -179,7 +179,15 @@
     </div>
     <div class="card">
       <h2 class="card-title">Пользователи и роли</h2>
-      <div class="card-body"><div id="admin-users-list"></div></div>
+      <div class="card-body">
+        <div class="admin-filters" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+          <select id="admin-filter-year" class="input-select" style="max-width:120px"><option value="">Все курсы</option></select>
+          <select id="admin-filter-group" class="input-select" style="max-width:140px"><option value="">Все группы</option></select>
+          <input type="text" id="admin-search-fio" class="input-text" placeholder="Поиск по ФИО" style="flex:1;min-width:120px" />
+          <button type="button" class="btn-accent" id="admin-apply-filters">Применить</button>
+        </div>
+        <div id="admin-users-list"></div>
+      </div>
     </div>
   </main>
 
