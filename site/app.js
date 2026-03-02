@@ -1007,17 +1007,46 @@
         var raw = document.getElementById('input-telegram-id').value.trim();
         var id = parseInt(raw, 10);
         if (isNaN(id)) return;
-        userId = id;
-        try { localStorage.setItem(STORAGE_KEY, String(id)); } catch (_) {}
-
         var group = (document.getElementById('input-group').value || '').trim();
         var year = parseInt(document.getElementById('input-year').value, 10);
-        if (group) { userGroup = group; try { localStorage.setItem(STORAGE_GROUP, group); } catch (_) {} }
-        if (year && year >= 2020 && year <= 2030) { userYear = year; try { localStorage.setItem(STORAGE_YEAR, String(year)); } catch (_) {} }
+        if (!year || year < 2020 || year > 2030) year = 2023;
 
-        showScreen('screen-home');
-        setActiveNav('home');
-        loadAll();
+        var btn = document.getElementById('btn-login');
+        btn.disabled = true;
+        btn.textContent = 'Регистрация…';
+
+        fetch(API_BASE + '/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            telegram_id: id,
+            group_name: group,
+            enrollment_year: year
+          })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            userId = id;
+            userGroup = group;
+            userYear = year;
+            try {
+              localStorage.setItem(STORAGE_KEY, String(id));
+              if (group) localStorage.setItem(STORAGE_GROUP, group);
+              localStorage.setItem(STORAGE_YEAR, String(year));
+            } catch (_) {}
+            showScreen('screen-home');
+            setActiveNav('home');
+            loadAll();
+          })
+          .catch(function () {
+            btn.disabled = false;
+            btn.textContent = 'Войти';
+            alert('Ошибка регистрации. Проверьте подключение к серверу.');
+          })
+          .finally(function () {
+            btn.disabled = false;
+            btn.textContent = 'Войти';
+          });
       });
       var resetBtn = document.getElementById('btn-reset-login');
       if (resetBtn) resetBtn.addEventListener('click', function (e) {

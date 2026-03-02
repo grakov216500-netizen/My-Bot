@@ -307,6 +307,80 @@ def _task_reminders_loop():
 # ============================================
 # 1. ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (ИСПРАВЛЕНО)
 # ============================================
+
+@app.post("/api/register")
+async def register_user(data: dict):
+    """
+    Простая регистрация для сайта: создать/обновить пользователя по telegram_id.
+    Тело: { "telegram_id": 123, "group_name": "Ио6-23", "enrollment_year": 2023, "fio": "ФИО" (опц) }
+    Вызывается при нажатии «Войти» на сайте — тогда наряды и график начнут работать.
+    """
+    telegram_id = data.get("telegram_id")
+    if not telegram_id:
+        raise HTTPException(status_code=400, detail="telegram_id обязателен")
+    try:
+        telegram_id = int(telegram_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="telegram_id должен быть числом")
+
+    group_name = (data.get("group_name") or "").strip()
+    enrollment_year = data.get("enrollment_year")
+    fio = (data.get("fio") or "").strip() or "Пользователь"
+
+    if enrollment_year is not None:
+        try:
+            year = int(enrollment_year)
+            year = max(2021, min(2027, year))
+        except (TypeError, ValueError):
+            year = 2023
+    else:
+        year = 2023
+
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+
+    try:
+        cursor = execute(conn, "PRAGMA table_info(users)")
+        cols = [r["name"] for r in cursor.fetchall()]
+        name_col = "fio" if "fio" in cols else "full_name"
+        group_col = "group_name" if "group_name" in cols else ("group_num" if "group_num" in cols else None)
+        faculty_col = "faculty" if "faculty" in cols else None
+
+        existing = execute(conn, "SELECT telegram_id FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+
+        if existing:
+            updates = [f"{name_col} = ?", "enrollment_year = ?"]
+            params = [fio, year]
+            if group_col:
+                updates.append(f"{group_col} = ?")
+                params.append(group_name)
+            params.append(telegram_id)
+            execute(conn, f"UPDATE users SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?", params)
+        else:
+            insert_cols = ["telegram_id", name_col, "enrollment_year"]
+            placeholders = ["?", "?", "?"]
+            values = [telegram_id, fio, year]
+            if group_col:
+                insert_cols.append(group_col)
+                placeholders.append("?")
+                values.append(group_name)
+            if faculty_col:
+                insert_cols.append("faculty")
+                placeholders.append("?")
+                values.append("Инженерно-технический")
+            execute(conn, f"INSERT INTO users ({', '.join(insert_cols)}) VALUES ({', '.join(placeholders)})", values)
+
+        conn.commit()
+        return {"status": "ok", "message": "Пользователь зарегистрирован"}
+    except Exception as e:
+        conn.rollback()
+        print(f"[ERROR] register: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @app.get("/api/user")
 async def get_user(telegram_id: int):
     conn = get_db()
