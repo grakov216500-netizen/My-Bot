@@ -1,9 +1,11 @@
 # server.py — FastAPI сервер для Mini App (финальная версия, с исправлением группы и опросником)
 
+import traceback
+
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, FileResponse, Response, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from datetime import datetime, timedelta
@@ -29,10 +31,14 @@ app = FastAPI()
 # При allow_credentials=True нельзя использовать "*" — указываем явные origins
 CORS_ORIGINS = [
     "https://grakov216500-netizen.github.io",
+    "https://vitechbot.online",
+    "http://vitechbot.online",
     "http://localhost:5173",
     "http://localhost:3000",
+    "http://localhost:8000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:8000",
 ]
 
 
@@ -72,10 +78,17 @@ class ForceCORSHeadersMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
         except Exception as e:
-            from starlette.responses import JSONResponse
+            tb_str = traceback.format_exc()
+            print("[500] Ошибка на", request.url.path, ":", str(e))
+            print(tb_str)
             return JSONResponse(
                 status_code=500,
-                content={"detail": "Internal server error", "error": str(e)},
+                content={
+                    "detail": str(e),
+                    "path": str(request.url.path),
+                    "traceback": tb_str,
+                    "_hint": "Скопируй traceback и покажи — по нему можно найти причину",
+                },
                 headers=cors_headers(),
             )
 
@@ -113,6 +126,35 @@ _apex_parser = None
 async def api_health():
     """Проверка доступности API и CORS (в ответе всегда есть CORS-заголовки)."""
     return {"ok": True, "service": "vitechbot-api"}
+
+
+@app.get("/api/debug/info")
+async def debug_info():
+    """
+    Диагностика: статус БД, список таблиц, колонки users.
+    Вызови в браузере: /api/debug/info — увидишь, что не так с базой.
+    """
+    info = {"db_exists": False, "db_path": DB_PATH, "tables": [], "users_columns": [], "users_sample": None}
+    if not os.path.exists(DB_PATH):
+        return info
+    info["db_exists"] = True
+    conn = get_db()
+    if not conn:
+        info["error"] = "get_db() вернул None"
+        return info
+    try:
+        tables = execute(conn, "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
+        info["tables"] = [t["name"] for t in tables]
+        cols = execute(conn, "PRAGMA table_info(users)").fetchall()
+        info["users_columns"] = [c["name"] for c in cols] if cols else []
+        row = execute(conn, "SELECT * FROM users LIMIT 1").fetchone()
+        info["users_sample"] = dict(row) if row else None
+    except Exception as e:
+        info["error"] = str(e)
+        info["traceback"] = traceback.format_exc()
+    finally:
+        conn.close()
+    return info
 
 
 @app.on_event("startup")
