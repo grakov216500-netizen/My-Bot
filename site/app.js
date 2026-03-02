@@ -90,7 +90,17 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
-    }).then(function (r) { return r.json(); });
+    }).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) {
+          var err = new Error(data.detail || data.message || 'Ошибка ' + r.status);
+          err.status = r.status;
+          err.detail = data.detail;
+          throw err;
+        }
+        return data;
+      });
+    });
   }
 
   function getStoredOrUrlUserId() {
@@ -690,7 +700,7 @@
       dutiesLocalSection = id;
       renderDutiesWorkArea(wa);
     };
-    showModuleLayout('duties', items, renderDutiesWorkArea);
+    loadProfile().then(function () { showModuleLayout('duties', items, renderDutiesWorkArea); });
   }
 
   /* ========== STUDY MODULE ========== */
@@ -815,7 +825,7 @@
 
         html += '<div class="rating-card' + cls + '">';
         html += '<span class="rating-rank">' + r.rank + '</span>';
-        html += '<div class="rating-avatar-wrap' + (isTop3 ? ' animated-border' : '') + '"><img src="' + avatarSrc + '" alt="" onerror="this.src=\'' + avatarUrl(name, 48) + '\'" /></div>';
+        html += '<div class="rating-avatar-wrap"><img src="' + avatarSrc + '" alt="" onerror="this.src=\'' + avatarUrl(name, 48) + '\'" /></div>';
         html += '<div class="rating-card-info"><span class="rating-card-name">' + escapeHtml(name) + '</span>';
         if (r.group_name) html += '<span class="rating-card-group">' + escapeHtml(r.group_name) + '</span>';
         html += '</div>';
@@ -1044,11 +1054,19 @@
       function showPair() {
         if (idx >= pairs.length) { container.innerHTML = '<p class="list-placeholder">Спасибо! Опрос завершён.</p>'; return; }
         var p = pairs[idx];
-        container.innerHTML = '<div class="survey-pair"><p class="muted">Кто сложнее? (' + (idx + 1) + '/' + pairs.length + ')</p><div class="survey-pair-btns"><button data-choice="a" class="btn-accent">' + escapeHtml(p.object_a_name) + '</button><button data-choice="equal" class="btn-accent">Одинаково</button><button data-choice="b" class="btn-accent">' + escapeHtml(p.object_b_name) + '</button></div></div>';
-        container.querySelectorAll('[data-choice]').forEach(function (b) {
-          b.addEventListener('click', function () {
-            apiPost('/api/survey/pair-vote', { user_id: userId, object_a_id: p.object_a_id, object_b_id: p.object_b_id, choice: b.getAttribute('data-choice'), stage: stage })
-              .then(function () { idx++; showPair(); });
+        var a = p.object_a || {}, b = p.object_b || {};
+        var nameA = a.name || '—', nameB = b.name || '—';
+        var idA = a.id, idB = b.id;
+        if (!idA || !idB) { container.innerHTML = '<p class="error-msg">Ошибка формата пар</p>'; return; }
+        container.innerHTML = '<div class="survey-pair"><p class="muted">Кто сложнее? (' + (idx + 1) + '/' + pairs.length + ')</p><div class="survey-pair-btns"><button data-choice="a" class="btn-accent">' + escapeHtml(nameA) + '</button><button data-choice="equal" class="btn-accent">Одинаково</button><button data-choice="b" class="btn-accent">' + escapeHtml(nameB) + '</button></div></div>';
+        container.querySelectorAll('[data-choice]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            apiPost('/api/survey/pair-vote', { user_id: userId, object_a_id: idA, object_b_id: idB, choice: btn.getAttribute('data-choice'), stage: stage })
+              .then(function () { idx++; showPair(); })
+              .catch(function (err) {
+                var msg = (err && err.detail) ? (typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail)) : 'Ошибка голосования';
+                container.innerHTML = '<p class="error-msg">' + escapeHtml(msg) + '</p>';
+              });
           });
         });
       }
@@ -1249,6 +1267,13 @@
       ratingFullBtn.addEventListener('click', function (e) {
         e.preventDefault();
         openRatingModule();
+      });
+    }
+    var ratingStatsBtn = document.getElementById('btn-rating-stats');
+    if (ratingStatsBtn) {
+      ratingStatsBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        openProfilePage();
       });
     }
 

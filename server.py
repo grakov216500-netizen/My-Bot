@@ -21,6 +21,9 @@ import json
 
 from db import get_db, execute, DBIntegrityError
 
+# Admin ID для автоматической роли при регистрации
+ADMIN_TELEGRAM_ID = int(os.getenv("ADMIN_ID", "1027070834"))
+
 # Импортируем функцию расчёта курса
 from utils.course_calculator import get_current_course
 # apex_parser импортируем лениво в _get_apex_parser(), чтобы сервер стартовал даже без APEX_USER/PASS
@@ -347,6 +350,9 @@ async def register_user(data: dict):
         group_col = "group_name" if "group_name" in cols else ("group_num" if "group_num" in cols else None)
         faculty_col = "faculty" if "faculty" in cols else None
 
+        has_role = "role" in cols
+        role_val = "admin" if telegram_id == ADMIN_TELEGRAM_ID else "user"
+
         existing = execute(conn, "SELECT telegram_id FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
 
         if existing:
@@ -355,6 +361,9 @@ async def register_user(data: dict):
             if group_col:
                 updates.append(f"{group_col} = ?")
                 params.append(group_name)
+            if has_role and telegram_id == ADMIN_TELEGRAM_ID:
+                updates.append("role = ?")
+                params.append(role_val)
             params.append(telegram_id)
             execute(conn, f"UPDATE users SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?", params)
         else:
@@ -369,6 +378,10 @@ async def register_user(data: dict):
                 insert_cols.append("faculty")
                 placeholders.append("?")
                 values.append("Инженерно-технический")
+            if has_role:
+                insert_cols.append("role")
+                placeholders.append("?")
+                values.append(role_val)
             execute(conn, f"INSERT INTO users ({', '.join(insert_cols)}) VALUES ({', '.join(placeholders)})", values)
 
         conn.commit()
