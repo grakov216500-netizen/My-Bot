@@ -267,8 +267,19 @@ body {
 .study-day-card { margin: 0; }
 
 /* --- Survey --- */
+.profile-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.profile-name-row h2 { margin: 0; }
+.profile-edit-fio { opacity: 0.6; padding: 4px; font-size: .875rem; }
+.profile-edit-fio:hover { opacity: 1; }
 .survey-list { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
-.survey-card { cursor: pointer; padding: 16px 20px; text-align: center; font-size: .875rem; color: var(--text); }
+.survey-card { cursor: pointer; padding: 16px 24px; text-align: left; font-size: .9375rem; color: var(--text); min-width: 200px; border: var(--border); border-radius: 10px; background: var(--bg-card); transition: border-color .2s, transform .15s; }
+.survey-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.survey-card.survey-male { border-left: 3px solid #3b82f6; }
+.survey-card.survey-female { border-left: 3px solid #ec4899; }
+.survey-results-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: .875rem; }
+.survey-results-table th, .survey-results-table td { padding: 10px 12px; text-align: left; border-bottom: var(--border); }
+.survey-results-table th { color: var(--text-muted); font-weight: 500; }
+.survey-results-table td:last-child { font-family: var(--font-mono); color: var(--accent); }
 .survey-pair { text-align: center; padding: 20px 0; }
 .survey-pair-btns { display: flex; gap: 12px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
 /* Intro cards (swipeable) */

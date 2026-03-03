@@ -1097,6 +1097,13 @@
       var data = await api('/api/profile/full');
       if (data.error) { content.innerHTML = '<p class="error-msg">' + escapeHtml(data.error) + '</p>'; return; }
 
+      window.__profile = window.__profile || {};
+      window.__profile.full_name = data.fio || window.__profile.full_name;
+      window.__profile.fio = data.fio;
+      window.__profile.group = data.group;
+      window.__profile.role = data.role;
+      window.__profile.avatar_url = data.avatar_url;
+
       var avatarSrc = data.avatar_url ? (API_BASE + data.avatar_url) : avatarUrl(data.fio, 120);
       var roleLabels = { admin: 'Администратор', assistant: 'Помощник', sergeant: 'Сержант', user: 'Курсант' };
 
@@ -1105,7 +1112,7 @@
       html += '<div class="profile-avatar-big"><img id="profile-avatar-img" src="' + avatarSrc + '" alt="" onerror="this.src=\'' + avatarUrl(data.fio, 120) + '\'" />';
       html += '<label class="profile-avatar-edit" title="Изменить аватар"><input type="file" accept="image/*" id="avatar-upload-input" style="display:none" />✎</label></div>';
       html += '<div class="profile-header-info">';
-      html += '<h2>' + escapeHtml(data.fio || '—') + '</h2>';
+      html += '<div class="profile-name-row"><h2 id="profile-fio-display">' + escapeHtml(data.fio || '—') + '</h2><button type="button" class="link-btn profile-edit-fio" id="profile-edit-fio-btn" title="Изменить ФИО">✎</button></div>';
       html += '<p class="muted">' + escapeHtml(data.group || '') + ' · ' + escapeHtml(data.course_label || '') + ' курс · ' + escapeHtml(roleLabels[data.role] || data.role) + '</p>';
       html += '<p class="profile-stat"><span class="stat-value">' + (data.points || 0) + '</span> очков · <span class="stat-value">' + (data.total_duties || 0) + '</span> нарядов</p>';
       html += '</div></div>';
@@ -1139,6 +1146,54 @@
       html += '</div></div>';
 
       content.innerHTML = html;
+
+      // FIO edit
+      var editFioBtn = document.getElementById('profile-edit-fio-btn');
+      var fioDisplay = document.getElementById('profile-fio-display');
+      if (editFioBtn && fioDisplay) {
+        editFioBtn.addEventListener('click', function () {
+          var current = (fioDisplay.textContent || '').trim();
+          var inp = document.createElement('input');
+          inp.type = 'text';
+          inp.className = 'input-text';
+          inp.value = current;
+          inp.style.cssText = 'font-size:1.25rem;font-weight:600;margin-right:8px;width:200px;max-width:100%';
+          var saveBtn = document.createElement('button');
+          saveBtn.type = 'button';
+          saveBtn.className = 'btn-accent';
+          saveBtn.textContent = 'Сохранить';
+          var cancelBtn = document.createElement('button');
+          cancelBtn.type = 'button';
+          cancelBtn.className = 'topbar-btn';
+          cancelBtn.textContent = 'Отмена';
+          cancelBtn.style.marginLeft = '8px';
+          fioDisplay.replaceWith(inp);
+          inp.parentNode.insertBefore(saveBtn, inp.nextSibling);
+          inp.parentNode.insertBefore(cancelBtn, saveBtn.nextSibling);
+          inp.focus();
+          function restore(newVal) {
+            var val = newVal !== undefined ? newVal : current;
+            inp.remove(); saveBtn.remove(); cancelBtn.remove();
+            var h2 = document.createElement('h2');
+            h2.id = 'profile-fio-display';
+            h2.textContent = val || '—';
+            editFioBtn.parentNode.insertBefore(h2, editFioBtn);
+          }
+          saveBtn.addEventListener('click', function () {
+            var val = (inp.value || '').trim();
+            if (!val) return;
+            apiPost('/api/profile/update', { telegram_id: userId, fio: val }).then(function () {
+              window.__profile = window.__profile || {};
+              window.__profile.full_name = val;
+              window.__profile.fio = val;
+              var h = document.getElementById('header-name');
+              if (h) h.textContent = val;
+              restore(val);
+            }).catch(function (e) { alert(e.detail || 'Ошибка'); });
+          });
+          cancelBtn.addEventListener('click', function () { restore(); });
+        });
+      }
 
       // Avatar upload
       var avatarInput = document.getElementById('avatar-upload-input');
@@ -1283,28 +1338,34 @@
       var gender = data.user_gender || 'male';
       window.userSurveyGender = gender;
       var html = '';
-      if (canCreateSurvey) {
-        html += '<div style="margin-bottom:16px"><button type="button" class="btn-accent" id="survey-create-btn">➕ Создать опрос</button></div>';
-      }
       if (isAdmin) {
         html += '<div class="survey-status-block card" style="margin-bottom:16px"><div class="card-body">';
         html += '<p class="muted">Проголосовало: ' + (statusData.voted || 0) + (statusData.total ? ' из ' + statusData.total : '') + '</p>';
         html += '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn-accent survey-finalize-btn" data-stage="main">Завершить (основные)</button><button type="button" class="btn-accent survey-finalize-btn" data-stage="canteen">Завершить (столовая)</button><button type="button" class="btn-accent survey-finalize-btn" data-stage="female">Завершить (девушки)</button></div></div></div>';
       }
-      html += '<p class="muted">Выберите опрос для прохождения.</p>';
+      html += '<h3 class="card-title" style="margin-bottom:12px">Системные опросы</h3>';
+      html += '<p class="muted" style="margin-bottom:12px">Выберите опрос для прохождения.</p>';
       if (system.length) {
-        html += '<div class="survey-list">';
+        html += '<div class="survey-list survey-system-list">';
         system.forEach(function (s) {
           if (s.for_gender && s.for_gender !== gender && !isAdmin) return;
           var stage = s.id === 'female' ? 'female' : 'male';
-          html += '<button type="button" class="card survey-card" data-stage="' + stage + '">' + (s.id === 'female' ? '👩 ' : '👨 ') + escapeHtml(s.title) + '</button>';
+          var cls = 'card survey-card survey-' + stage;
+          html += '<button type="button" class="' + cls + '" data-stage="' + stage + '">' + (s.id === 'female' ? '👩 ' : '👨 ') + escapeHtml(s.title) + '</button>';
         });
         html += '</div>';
       }
+      html += '<p style="margin-top:20px"><a href="#" class="link-btn accent survey-results-btn">📊 Результаты голосования</a></p>';
+      html += '<h3 class="card-title" style="margin-top:24px;margin-bottom:12px">Опросы по группе</h3>';
+      if (canCreateSurvey) {
+        html += '<p style="margin-bottom:12px"><button type="button" class="btn-accent" id="survey-create-btn-bottom">➕ Создать опрос</button></p>';
+      }
       if (custom.length) {
-        html += '<h3 class="card-title" style="margin-top:16px">Опросы по группе</h3><ul class="list">';
+        html += '<ul class="list survey-custom-list">';
         custom.forEach(function (s) { html += '<li><button type="button" class="link-btn survey-custom-btn" data-id="' + s.id + '">' + escapeHtml(s.title) + '</button></li>'; });
         html += '</ul>';
+      } else if (!canCreateSurvey) {
+        html += '<p class="list-placeholder">Нет опросов по группе</p>';
       }
       if (!system.length && !custom.length && !isAdmin) html += '<p class="list-placeholder">Нет доступных опросов</p>';
       container.innerHTML = html;
@@ -1322,11 +1383,49 @@
       container.querySelectorAll('.survey-custom-btn').forEach(function (btn) {
         btn.addEventListener('click', function () { openCustomSurvey(container, parseInt(btn.getAttribute('data-id'), 10)); });
       });
-      var createBtn = document.getElementById('survey-create-btn');
+      container.querySelectorAll('.survey-results-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) { e.preventDefault(); showSurveyResults(container); });
+      });
+      var createBtn = document.getElementById('survey-create-btn') || document.getElementById('survey-create-btn-bottom');
       if (createBtn && canCreateSurvey) {
         createBtn.addEventListener('click', function () { openCreateSurveyModal(container); });
       }
     }).catch(function () { document.getElementById('surveys-content').innerHTML = '<p class="error-msg">Ошибка загрузки опросов</p>'; });
+  }
+
+  function showSurveyResults(container) {
+    container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+    api('/api/survey/results').then(function (results) {
+      var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 class="card-title" style="margin:0">Результаты голосования</h2><a href="#" class="link-btn survey-back-results">← К опросам</a></div>';
+      html += '<p class="muted" style="margin-bottom:16px">Веса объектов по результатам оценки сложности нарядов.</p>';
+      if (results && results.length) {
+        var byParent = {};
+        results.forEach(function (r) {
+          var pid = r.parent_id != null ? r.parent_id : '_root';
+          if (!byParent[pid]) byParent[pid] = [];
+          byParent[pid].push(r);
+        });
+        var root = byParent['_root'] || [];
+        var others = Object.keys(byParent).filter(function (k) { return k !== '_root'; });
+        function tableRows(arr) {
+          if (!arr || !arr.length) return '';
+          var h = '<table class="survey-results-table"><thead><tr><th>Объект</th><th>Вес</th></tr></thead><tbody>';
+          arr.forEach(function (r) {
+            var w = r.weight != null ? Number(r.weight).toFixed(2) : '—';
+            h += '<tr><td>' + escapeHtml(r.name || '—') + '</td><td>' + escapeHtml(w) + '</td></tr>';
+          });
+          h += '</tbody></table>';
+          return h;
+        }
+        html += '<div class="card"><div class="card-body">' + tableRows(root);
+        others.forEach(function (pid) { html += tableRows(byParent[pid]); });
+        html += '</div></div>';
+      } else {
+        html += '<p class="list-placeholder">Нет данных. Пройдите опрос и дождитесь завершения голосования.</p>';
+      }
+      container.innerHTML = html;
+      container.querySelector('.survey-back-results')?.addEventListener('click', function (e) { e.preventDefault(); openSurveysModule(); });
+    }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка загрузки</p><p><a href="#" class="link-btn survey-back-results">← К опросам</a></p>'; container.querySelector('.survey-back-results')?.addEventListener('click', function (e) { e.preventDefault(); openSurveysModule(); }); });
   }
 
   function openCreateSurveyModal(container) {
@@ -1522,7 +1621,6 @@
     script = document.createElement('script');
     script.id = 'plans-editor-script';
     script.src = 'dist/plans-editor.iife.js';
-    script.type = 'module';
     script.onload = function () { setTimeout(cb, 50); };
     script.onerror = function () { setTimeout(cb, 0); };
     document.body.appendChild(script);

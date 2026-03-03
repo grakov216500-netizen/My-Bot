@@ -3523,6 +3523,33 @@ async def get_full_profile(telegram_id: int):
         conn.close()
 
 
+@app.post("/api/profile/update")
+async def update_profile(data: dict):
+    """Обновить ФИО и другие данные профиля текущего пользователя."""
+    telegram_id = data.get("telegram_id")
+    fio = (data.get("fio") or "").strip()
+    if not telegram_id:
+        raise HTTPException(status_code=400, detail="Нужен telegram_id")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        cursor = execute(conn, "PRAGMA table_info(users)")
+        cols = [r["name"] for r in cursor.fetchall()]
+        name_col = "fio" if "fio" in cols else "full_name"
+        if name_col not in cols:
+            raise HTTPException(status_code=400, detail="Поле ФИО не найдено в базе")
+        if fio:
+            if len(fio) < 2 or len(fio) > 200:
+                raise HTTPException(status_code=400, detail="ФИО: от 2 до 200 символов")
+            execute(conn, f"UPDATE users SET {name_col} = ? WHERE telegram_id = ?", (fio, telegram_id))
+            conn.commit()
+            return {"status": "ok", "fio": fio}
+        return {"status": "ok"}
+    finally:
+        conn.close()
+
+
 @app.post("/api/profile/sick-leave")
 async def add_sick_leave(data: dict):
     """Добавить/указать больничный с-по."""
