@@ -159,14 +159,14 @@
     }).join('');
     workArea.innerHTML = '';
     if (typeof renderWorkArea === 'function') renderWorkArea(workArea);
-    sidebar.querySelectorAll('a').forEach(function (a) {
-      a.addEventListener('click', function (e) {
-        e.preventDefault();
-        sidebar.querySelectorAll('a').forEach(function (x) { x.classList.remove('active'); });
-        a.classList.add('active');
-        var id = a.getAttribute('data-local');
-        if (window.onLocalNavClick && id) window.onLocalNavClick(id, workArea);
-      });
+    sidebar.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest('a[data-local]');
+      if (!a) return;
+      e.preventDefault();
+      sidebar.querySelectorAll('a').forEach(function (x) { x.classList.remove('active'); });
+      a.classList.add('active');
+      var id = a.getAttribute('data-local');
+      if (window.onLocalNavClick && id) window.onLocalNavClick(id, workArea);
     });
   }
 
@@ -918,8 +918,14 @@
         dutiesLocalSection = 'myduties';
       }
       window.onLocalNavClick = function (id, wa) {
+        if (!id || !wa) return;
         dutiesLocalSection = id;
-        renderDutiesWorkArea(wa);
+        try {
+          renderDutiesWorkArea(wa);
+        } catch (err) {
+          console.error('Duties switch error:', err);
+          wa.innerHTML = '<p class="error-msg">Ошибка переключения</p>';
+        }
       };
       showModuleLayout('duties', items, renderDutiesWorkArea);
     });
@@ -1604,18 +1610,8 @@
     return (tmp.textContent || tmp.innerText || '').trim() || s;
   }
 
-  function loadPlansEditorStyles() {
-    if (document.getElementById('plans-editor-css')) return;
-    var link = document.createElement('link');
-    link.id = 'plans-editor-css';
-    link.rel = 'stylesheet';
-    link.href = 'dist/plans-editor.css';
-    document.head.appendChild(link);
-  }
-
   function loadPlansEditorScript(cb) {
-    if (window.PlansEditor) { loadPlansEditorStyles(); cb(); return; }
-    loadPlansEditorStyles();
+    if (window.PlansEditor) { cb(); return; }
     var script = document.getElementById('plans-editor-script');
     if (script) { script.onload ? cb() : script.addEventListener('load', cb); return; }
     script = document.createElement('script');
