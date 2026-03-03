@@ -1635,54 +1635,68 @@
 
   function renderPlansContent(container) {
     api('/api/tasks?user_id=' + userId).then(function (tasks) {
-      if (!Array.isArray(tasks)) { container.innerHTML = '<p class="error-msg">' + (tasks.error || 'Ошибка') + '</p>'; return; }
-      var hasNovel = !!window.PlansEditor;
-      var html = '<div class="plans-add-section">';
-      if (hasNovel) {
-        html += '<p class="muted" style="margin-bottom:8px">Добавить задачу (Notion-style редактор):</p>';
-        html += '<div id="plans-novel-container"></div>';
-      } else {
-        html += '<form id="plans-add-form" class="plans-form"><input type="text" id="plans-add-text" class="input-text" placeholder="Что сделать?" required /><button type="submit" class="btn-accent">Добавить</button></form>';
-      }
-      html += '</div><ul class="list plans-list" id="plans-list">';
-      if (tasks.length === 0) html += '<li class="list-placeholder">Нет задач. Добавьте выше.</li>';
-      else tasks.forEach(function (t) {
-        var done = t.done ? ' checked' : '';
-        var cls = t.done ? ' class="plan-done"' : '';
-        var displayText = stripHtmlForDisplay(t.text);
-        html += '<li' + cls + '><label class="plan-item"><input type="checkbox" class="plan-checkbox" data-id="' + t.id + '"' + done + ' /><span class="plan-text">' + escapeHtml(displayText) + '</span></label></li>';
-      });
-      html += '</ul>';
-      container.innerHTML = html;
-      if (hasNovel && window.PlansEditor) {
-        var mountEl = document.getElementById('plans-novel-container');
-        if (mountEl) {
-          if (plansEditorInstance) plansEditorInstance.unmount();
-          plansEditorInstance = window.PlansEditor.mount(mountEl, {
-            initialContent: '',
-            onSave: function (content) {
-              if (!content || !content.trim()) return;
-              apiPost('/api/add_task', { user_id: userId, text: content }).then(function () { openPlansModule(); });
-            },
+      try {
+        if (!Array.isArray(tasks)) {
+          container.innerHTML = '<p class="error-msg">' + (tasks && tasks.error ? tasks.error : 'Ошибка загрузки задач') + '</p>';
+          return;
+        }
+        var hasNovel = !!(window.PlansEditor && typeof window.PlansEditor.mount === 'function');
+        var html = '<div class="plans-add-section">';
+        if (hasNovel) {
+          html += '<p class="muted" style="margin-bottom:8px">Добавить задачу (Notion-style редактор):</p>';
+          html += '<div id="plans-novel-container"></div>';
+        } else {
+          html += '<form id="plans-add-form" class="plans-form"><input type="text" id="plans-add-text" class="input-text" placeholder="Что сделать?" required /><button type="submit" class="btn-accent">Добавить</button></form>';
+        }
+        html += '</div><ul class="list plans-list" id="plans-list">';
+        if (tasks.length === 0) html += '<li class="list-placeholder">Нет задач. Добавьте выше.</li>';
+        else tasks.forEach(function (t) {
+          var done = t.done ? ' checked' : '';
+          var cls = t.done ? ' class="plan-done"' : '';
+          var displayText = stripHtmlForDisplay(t.text);
+          html += '<li' + cls + '><label class="plan-item"><input type="checkbox" class="plan-checkbox" data-id="' + t.id + '"' + done + ' /><span class="plan-text">' + escapeHtml(displayText) + '</span></label></li>';
+        });
+        html += '</ul>';
+        container.innerHTML = html;
+        if (hasNovel) {
+          try {
+            var mountEl = document.getElementById('plans-novel-container');
+            if (mountEl) {
+              if (plansEditorInstance) plansEditorInstance.unmount();
+              plansEditorInstance = window.PlansEditor.mount(mountEl, {
+                initialContent: '',
+                onSave: function (content) {
+                  if (!content || !content.trim()) return;
+                  apiPost('/api/add_task', { user_id: userId, text: content }).then(function () { openPlansModule(); });
+                },
+              });
+            }
+          } catch (e) {
+            console.error('Plans editor mount error:', e);
+          }
+        } else {
+          var form = document.getElementById('plans-add-form');
+          if (form) form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var input = document.getElementById('plans-add-text');
+            var text = (input && input.value || '').trim();
+            if (!text) return;
+            apiPost('/api/add_task', { user_id: userId, text: text }).then(function () { input.value = ''; openPlansModule(); });
           });
         }
-      } else {
-        var form = document.getElementById('plans-add-form');
-        if (form) form.addEventListener('submit', function (e) {
-          e.preventDefault();
-          var input = document.getElementById('plans-add-text');
-          var text = (input && input.value || '').trim();
-          if (!text) return;
-          apiPost('/api/add_task', { user_id: userId, text: text }).then(function () { input.value = ''; openPlansModule(); });
+        container.querySelectorAll('.plan-checkbox').forEach(function (cb) {
+          cb.addEventListener('change', function () {
+            apiPost('/api/done_task', { task_id: parseInt(cb.getAttribute('data-id'), 10), user_id: userId, done: cb.checked })
+              .then(function () { cb.closest('li').classList.toggle('plan-done', cb.checked); });
+          });
         });
+      } catch (err) {
+        console.error('Plans render error:', err);
+        container.innerHTML = '<p class="error-msg">Ошибка при отображении задач</p>';
       }
-      container.querySelectorAll('.plan-checkbox').forEach(function (cb) {
-        cb.addEventListener('change', function () {
-          apiPost('/api/done_task', { task_id: parseInt(cb.getAttribute('data-id'), 10), user_id: userId, done: cb.checked })
-            .then(function () { cb.closest('li').classList.toggle('plan-done', cb.checked); });
-        });
-      });
-    }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка загрузки</p>'; });
+    }).catch(function () {
+      container.innerHTML = '<p class="error-msg">Ошибка загрузки задач</p>';
+    });
   }
 
   /* ========== FORUM ========== */
