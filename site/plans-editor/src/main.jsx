@@ -5,7 +5,18 @@
  */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { EditorRoot, EditorContent } from 'novel';
+import {
+  EditorRoot,
+  EditorContent,
+  StarterKit,
+  Placeholder,
+  TiptapLink,
+  TiptapImage,
+  UpdatedImage,
+  TaskList,
+  TaskItem,
+  HorizontalRule,
+} from 'novel';
 
 /** Извлекает plain text из TipTap JSON для отображения в списке. */
 export function jsonToPlainText(jsonOrStr) {
@@ -28,6 +39,19 @@ export function jsonToPlainText(jsonOrStr) {
 
 function PlansEditorWrapper({ initialContent, onSave, onCancel }) {
   const editorRef = React.useRef(null);
+  const extensions = React.useMemo(
+    () => [
+      StarterKit,
+      Placeholder,
+      TiptapLink,
+      TiptapImage,
+      UpdatedImage,
+      TaskList,
+      TaskItem,
+      HorizontalRule,
+    ],
+    []
+  );
 
   const contentToUse = React.useMemo(() => {
     if (initialContent === undefined || initialContent === null) return undefined;
@@ -55,6 +79,7 @@ function PlansEditorWrapper({ initialContent, onSave, onCancel }) {
     <div className="novel-plans-wrapper" style={{ marginTop: 8 }}>
       <EditorRoot>
         <EditorContent
+          extensions={extensions}
           initialContent={contentToUse}
           onUpdate={({ editor }) => { editorRef.current = editor; }}
           className="novel-plans-editor"
