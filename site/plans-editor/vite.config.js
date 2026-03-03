@@ -11,7 +11,9 @@ export default defineConfig({
   build: {
     lib: {
       entry: resolve(__dirname, 'src/main.jsx'),
-      name: 'PlansEditor',
+      // Имя глобальной переменной для бандла Novel.
+      // ВАЖНО: отличаться от window.PlansEditor, чтобы не затирать наш API.
+      name: 'PlansEditorBundle',
       fileName: 'plans-editor',
       formats: ['iife'],
     },
