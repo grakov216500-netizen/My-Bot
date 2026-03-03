@@ -1589,6 +1589,41 @@
   /* ========== PLANS (с Novel) ========== */
   var plansEditorInstance = null;
 
+  function diagnoseNovel() {
+    var scriptEl = document.getElementById('plans-editor-script');
+    var cssEl = document.querySelector('link[href*="plans-editor"]');
+    var diag = {
+      plansEditor: !!(window.PlansEditor),
+      mountFn: !!(window.PlansEditor && typeof window.PlansEditor.mount === 'function'),
+      scriptTag: !!scriptEl,
+      scriptSrc: scriptEl ? scriptEl.src : '—',
+      scriptLoadError: !!(scriptEl && scriptEl.hasAttribute('data-load-error')),
+      cssLoaded: !!cssEl,
+      processPolyfill: typeof window.process !== 'undefined' && !!window.process.env,
+      react: typeof window.React !== 'undefined',
+    };
+    diag.ok = diag.plansEditor && diag.mountFn;
+    return diag;
+  }
+
+  function renderNovelDiagnostic(container) {
+    var d = diagnoseNovel();
+    var lines = [];
+    lines.push('PlansEditor: ' + (d.plansEditor ? 'OK' : 'НЕТ'));
+    lines.push('mount(): ' + (d.mountFn ? 'OK' : 'НЕТ'));
+    lines.push('Скрипт в DOM: ' + (d.scriptTag ? 'да' : 'нет'));
+    lines.push('Скрипт: ' + (d.scriptLoadError ? 'ОШИБКА загрузки' : (d.scriptSrc || '—')));
+    lines.push('CSS: ' + (d.cssLoaded ? 'подключён' : 'НЕТ'));
+    lines.push('process polyfill: ' + (d.processPolyfill ? 'да' : 'НЕТ'));
+    lines.push('React (глобально): ' + (d.react ? 'есть' : 'нет (в бандле)'));
+    var html = '<div class="novel-diagnostic" style="margin:12px 0;padding:12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;font-size:12px;font-family:monospace">';
+    html += '<strong>Диагностика Novel</strong><pre style="margin:8px 0 0;white-space:pre-wrap">' + lines.join('\n') + '</pre>';
+    html += '<p class="muted" style="margin-top:8px;font-size:11px">F12 → Console для ошибок. Пересобери: cd site/plans-editor && npm run build</p></div>';
+    var wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    container.insertBefore(wrap.firstElementChild, container.firstChild);
+  }
+
   function stripHtmlForDisplay(content) {
     if (!content || typeof content !== 'string') return '';
     var s = content.trim();
@@ -1658,8 +1693,10 @@
         });
         html += '</ul>';
         container.innerHTML = html;
+        renderNovelDiagnostic(container);
         if (hasNovel) {
           try {
+            console.log('[Novel] Mounting editor…');
             var mountEl = document.getElementById('plans-novel-container');
             if (mountEl) {
               if (plansEditorInstance) plansEditorInstance.unmount();
@@ -1670,11 +1707,15 @@
                   apiPost('/api/add_task', { user_id: userId, text: content }).then(function () { openPlansModule(); });
                 },
               });
+              console.log('[Novel] Editor mounted OK');
+            } else {
+              console.warn('[Novel] plans-novel-container not found');
             }
           } catch (e) {
-            console.error('Plans editor mount error:', e);
+            console.error('[Novel] Mount error:', e);
           }
         } else {
+          console.warn('[Novel] PlansEditor not available, using plain input. Diagnostic:', diagnoseNovel());
           var form = document.getElementById('plans-add-form');
           if (form) form.addEventListener('submit', function (e) {
             e.preventDefault();

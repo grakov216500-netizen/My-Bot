@@ -197,7 +197,7 @@
   </footer>
 
   <script>window.process={env:{NODE_ENV:'production'}};</script>
-  <script src="dist/plans-editor.iife.js" id="plans-editor-script"></script>
+  <script id="plans-editor-script" src="dist/plans-editor.iife.js" onerror="this.setAttribute('data-load-error','1');console.error('[Novel] Script failed to load:',this.src)"></script>
   <script src="app.js" defer></script>
 </body>
 </html>
