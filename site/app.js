@@ -6,6 +6,7 @@
   var STORAGE_KEY = 'vitech_site_telegram_id';
   var STORAGE_GROUP = 'vitech_site_group';
   var STORAGE_YEAR = 'vitech_site_year';
+  var STORAGE_TEST_ROLE = 'vitech_test_role';
   var isLocal = !window.location.hostname || /localhost|127\.0\.0\.1/.test(window.location.hostname);
   var isUnderSitePath = window.location.pathname.indexOf('/site') !== -1;
   // Всегда вести API на бэкенд: при /site/ — origin; при localhost — явно порт 8000 (чтобы работало при открытии с любого порта/файла).
@@ -32,10 +33,23 @@
     return 'https://ui-avatars.com/api/?name=' + encodeURIComponent(n) + '&background=3B82F6&color=fff&size=' + (size || 64);
   }
 
+  function fetchWithRetry(url, options, maxRetries) {
+    var tries = maxRetries || 2;
+    function doFetch(n) {
+      return fetch(url, options).catch(function (err) {
+        if (n > 0 && (err.name === 'TypeError' || err.message === 'Failed to fetch')) {
+          return new Promise(function (r) { setTimeout(function () { doFetch(n - 1).then(r); }, 800); });
+        }
+        throw err;
+      });
+    }
+    return doFetch(tries);
+  }
+
   function api(path) {
     var sep = path.indexOf('?') >= 0 ? '&' : '?';
     var url = API_BASE + path + sep + 'telegram_id=' + userId;
-    return fetch(url).then(function (res) {
+    return fetchWithRetry(url).then(function (res) {
       if (!res.ok) {
         if (res.status === 404 && !window.__api_404_shown) {
           window.__api_404_shown = true;
@@ -86,11 +100,11 @@
   }
 
   function apiPost(path, body) {
-    return fetch(API_BASE + path, {
+    return fetchWithRetry(API_BASE + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
-    }).then(function (r) {
+    }, 2).then(function (r) {
       return r.json().then(function (data) {
         if (!r.ok) {
           var err = new Error(data.detail || data.message || 'Ошибка ' + r.status);
@@ -129,6 +143,20 @@
 
   function getStoredYear() {
     try { var v = localStorage.getItem(STORAGE_YEAR); return v ? parseInt(v, 10) : 2023; } catch (_) { return 2023; }
+  }
+
+  function getEffectiveRole() {
+    var tr = (window.__profile && window.__profile.test_role) ? window.__profile.test_role : null;
+    if (tr) return tr;
+    return (window.__profile && window.__profile.role) ? window.__profile.role : 'user';
+  }
+
+  function applyNavByRole() {
+    var allowed = (window.__profile && window.__profile.allowed_modules) ? window.__profile.allowed_modules : ['home', 'duties', 'study', 'surveys', 'plans', 'rating', 'forum', 'profile'];
+    document.querySelectorAll('.nav-link[data-module]').forEach(function (a) {
+      var mod = a.getAttribute('data-module');
+      a.style.display = (mod && allowed.indexOf(mod) >= 0) ? '' : 'none';
+    });
   }
 
   /* ---------- navigation ---------- */
@@ -335,11 +363,15 @@
       if (data && data.error) {
         var dataBasic = await api('/api/user');
         if (dataBasic.error) return false;
+        var r = dataBasic.role || 'user';
+        var mods = ['home', 'study', 'plans', 'rating', 'profile'];
+        if (r !== 'teacher') mods.push('duties', 'surveys', 'forum');
         window.__profile = {
           full_name: dataBasic.full_name,
           group: dataBasic.group,
           course_label: dataBasic.course_label,
-          role: dataBasic.role || 'user',
+          role: r,
+          allowed_modules: mods,
           avatar_url: null
         };
       } else if (data) {
@@ -348,6 +380,8 @@
           group: data.group,
           course_label: data.course_label,
           role: data.role || 'user',
+          test_role: data.test_role || null,
+          allowed_modules: data.allowed_modules || ['home', 'duties', 'study', 'surveys', 'plans', 'rating', 'forum', 'profile'],
           avatar_url: data.avatar_url,
           points: data.points,
           total_duties: data.total_duties,
@@ -367,6 +401,7 @@
         userGroup = window.__profile.group;
         try { localStorage.setItem(STORAGE_GROUP, userGroup); } catch (_) {}
       }
+      applyNavByRole();
       return true;
     } catch (_) { return false; }
   }
@@ -790,8 +825,32 @@
           var dayLabel = formatDutyDate(d.date);
           var dateObj = new Date(d.date + 'T12:00:00');
           var weekday = dateObj.toLocaleDateString('ru-RU', { weekday: 'long' });
-          return '<div class="duty-date-card-wrap"><a href="#" class="duty-date-card duty-date-link" data-date="' + d.date + '" data-role="' + escapeHtml(d.role || '') + '"><div class="duty-date-card-left"><div class="duty-date-card-date">' + escapeHtml(dayLabel) + '</div><div class="duty-date-card-weekday">' + escapeHtml(weekday) + '</div><div class="duty-date-card-role">' + escapeHtml(d.role_full || d.role) + '</div></div><span class="muted" style="font-size:12px">▼</span></a></div>';
+          var confirmHtml = '';
+          if (d.can_confirm) {
+            confirmHtml = '<div class="duty-confirm-btns" style="margin-top:8px"><button type="button" class="btn-accent duty-confirm-btn" data-date="' + d.date + '" data-role="' + escapeHtml(d.role || '') + '" data-status="confirmed">Заступаю</button> <button type="button" class="duty-decline-btn" data-date="' + d.date + '" data-role="' + escapeHtml(d.role || '') + '" data-status="declined">Не заступаю</button></div>';
+          } else if (d.confirmation_status === 'confirmed') {
+            confirmHtml = '<p class="muted" style="margin-top:6px;font-size:12px;color:var(--green)">✓ Подтверждено</p>';
+          } else if (d.confirmation_status === 'declined') {
+            confirmHtml = '<p class="muted" style="margin-top:6px;font-size:12px;color:var(--gold)">Не заступаю</p>';
+          }
+          return '<div class="duty-date-card-wrap"><a href="#" class="duty-date-card duty-date-link" data-date="' + d.date + '" data-role="' + escapeHtml(d.role || '') + '"><div class="duty-date-card-left"><div class="duty-date-card-date">' + escapeHtml(dayLabel) + '</div><div class="duty-date-card-weekday">' + escapeHtml(weekday) + '</div><div class="duty-date-card-role">' + escapeHtml(d.role_full || d.role) + '</div></div><span class="muted" style="font-size:12px">▼</span></a>' + confirmHtml + '</div>';
         }).join('') + '</div>';
+        datesEl.addEventListener('click', function (e) {
+          var cb = e.target.closest('.duty-confirm-btn, .duty-decline-btn');
+          if (cb) {
+            e.preventDefault();
+            e.stopPropagation();
+            var dateKey = cb.getAttribute('data-date');
+            var roleKey = cb.getAttribute('data-role');
+            var statusKey = cb.getAttribute('data-status');
+            if (!dateKey || !roleKey || !statusKey) return;
+            cb.disabled = true;
+            apiPost('/api/duties/confirm', { telegram_id: userId, date: dateKey, role: roleKey, status: statusKey })
+              .then(function () { selectDutyMonthAndRender(container); })
+              .catch(function () { cb.disabled = false; });
+            return;
+          }
+        });
         datesEl.querySelectorAll('.duty-date-link').forEach(function (a) {
           var dateKey = a.getAttribute('data-date');
           var roleKey = a.getAttribute('data-role');
@@ -1051,7 +1110,7 @@
         var avatarSrc = r.avatar_url ? (API_BASE + r.avatar_url) : avatarUrl(name, 48);
         var cls = isTop3 ? ' rating-card-top' + r.rank : '';
 
-        html += '<div class="rating-card' + cls + '">';
+        html += '<div class="rating-card' + cls + '" data-tid="' + r.telegram_id + '" data-fio="' + escapeHtml(name) + '" role="button" tabindex="0" title="Нажмите для достижений">';
         html += '<span class="rating-rank">' + r.rank + '</span>';
         html += '<div class="rating-avatar-wrap"><img src="' + avatarSrc + '" alt="" onerror="this.src=\'' + avatarUrl(name, 48) + '\'" /></div>';
         html += '<div class="rating-card-info"><span class="rating-card-name">' + escapeHtml(name) + '</span>';
@@ -1062,6 +1121,20 @@
       });
       html += '</div>';
       content.innerHTML = html;
+      content.querySelectorAll('.rating-card').forEach(function (card) {
+        card.addEventListener('click', function () {
+          var tid = card.getAttribute('data-tid');
+          var fio = card.getAttribute('data-fio') || '—';
+          if (!tid) return;
+          api('/api/user/' + tid + '/achievements?telegram_id=' + userId).then(function (d) {
+            var unlocked = (d.achievements || []).filter(function (a) { return a.unlocked; });
+            var all = (d.achievements || []).map(function (a) {
+              return (a.unlocked ? '✓ ' : '○ ') + escapeHtml(a.title);
+            }).join('\n');
+            alert((d.fio || fio) + '\n\nДостижения:\n' + (all || '—'));
+          }).catch(function () {});
+        });
+      });
     } catch (e) {
       content.innerHTML = '<p class="error-msg">Ошибка загрузки рейтинга</p>';
     }
@@ -1108,6 +1181,8 @@
       window.__profile.fio = data.fio;
       window.__profile.group = data.group;
       window.__profile.role = data.role;
+      window.__profile.test_role = data.test_role || null;
+      window.__profile.allowed_modules = data.allowed_modules || ['home', 'duties', 'study', 'surveys', 'plans', 'rating', 'forum', 'profile'];
       window.__profile.avatar_url = data.avatar_url;
 
       var avatarSrc = data.avatar_url ? (API_BASE + data.avatar_url) : avatarUrl(data.fio, 120);
@@ -1123,6 +1198,21 @@
       html += '<p class="profile-stat"><span class="stat-value">' + (data.points || 0) + '</span> очков · <span class="stat-value">' + (data.total_duties || 0) + '</span> нарядов</p>';
       html += '</div></div>';
       if (data.role === 'admin') html += '<p style="padding:0 16px 16px"><a href="#" class="link-btn accent" id="profile-admin-btn">Админ-панель →</a></p>';
+      html += '<div class="profile-test-role card" style="margin-top:16px"><div class="card-body"><p class="muted" style="margin-bottom:8px">Роль для тестирования (сохраняется, не сбрасывается):</p><div class="profile-role-btns" id="profile-role-btns">';
+      var roles = [
+        { id: '', label: 'По умолчанию' },
+        { id: 'cadet', label: 'Курсант' },
+        { id: 'teacher', label: 'Преподаватель' },
+        { id: 'admin', label: 'Администратор' },
+        { id: 'assistant', label: 'Помощник' },
+        { id: 'sergeant', label: 'Сержант' }
+      ];
+      var currentTest = data.test_role || '';
+      roles.forEach(function (r) {
+        var active = (r.id === currentTest) ? ' active' : '';
+        html += '<button type="button" class="profile-role-btn' + active + '" data-role="' + escapeHtml(r.id) + '">' + escapeHtml(r.label) + '</button>';
+      });
+      html += '</div></div></div>';
       html += '</div>';
 
       // Sick leave
@@ -1240,6 +1330,21 @@
       // Admin button
       var adminBtn = document.getElementById('profile-admin-btn');
       if (adminBtn) adminBtn.addEventListener('click', function (e) { e.preventDefault(); openAdminPanel(); });
+
+      // Test role selector
+      document.querySelectorAll('.profile-role-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var role = btn.getAttribute('data-role') || '';
+          apiPost('/api/profile/test-role', { telegram_id: userId, role: role })
+            .then(function (res) {
+              window.__profile = window.__profile || {};
+              window.__profile.test_role = res.role || null;
+              document.querySelectorAll('.profile-role-btn').forEach(function (b) { b.classList.remove('active'); });
+              btn.classList.add('active');
+            })
+            .catch(function () {});
+        });
+      });
 
     } catch (e) {
       content.innerHTML = '<p class="error-msg">Ошибка загрузки профиля</p>';
@@ -1588,6 +1693,7 @@
 
   /* ========== PLANS (с Novel) ========== */
   var plansEditorInstance = null;
+  var plansCardsCache = [];
 
   function diagnoseNovel() {
     var scriptEl = document.getElementById('plans-editor-script');
@@ -1657,6 +1763,27 @@
     document.body.appendChild(script);
   }
 
+  var PLANS_CATEGORIES = [
+    { id: 'study', label: 'Учёба', color: '#3b82f6' },
+    { id: 'duty', label: 'Наряды', color: '#f59e0b' },
+    { id: 'personal', label: 'Личное', color: '#22c55e' }
+  ];
+
+  function plansJsonToPlainText(jsonOrStr) {
+    if (!jsonOrStr) return '';
+    try {
+      var doc = typeof jsonOrStr === 'string' ? JSON.parse(jsonOrStr) : jsonOrStr;
+      if (!doc || typeof doc !== 'object') return '';
+      function extract(n) {
+        if (!n) return '';
+        if (n.text) return n.text;
+        if (Array.isArray(n.content)) return n.content.map(extract).join('');
+        return '';
+      }
+      return (doc.content || []).map(extract).join(' ').trim() || '';
+    } catch (_) { return String(jsonOrStr); }
+  }
+
   function openPlansModule() {
     setActiveNav('plans');
     showScreen('screen-plans');
@@ -1668,80 +1795,149 @@
     });
   }
 
-  function renderPlansContent(container) {
-    api('/api/tasks?user_id=' + userId).then(function (tasks) {
-      try {
-        if (!Array.isArray(tasks)) {
-          container.innerHTML = '<p class="error-msg">' + (tasks && tasks.error ? tasks.error : 'Ошибка загрузки задач') + '</p>';
-          return;
-        }
-        var hasNovel = !!(window.PlansEditor && typeof window.PlansEditor.mount === 'function');
-        var html = '<div class="plans-add-section">';
-        if (hasNovel) {
-          html += '<p class="muted" style="margin-bottom:8px">Добавить задачу (Notion-style редактор):</p>';
-          html += '<div id="plans-novel-container"></div>';
-        } else {
-          html += '<form id="plans-add-form" class="plans-form"><input type="text" id="plans-add-text" class="input-text" placeholder="Что сделать?" required /><button type="submit" class="btn-accent">Добавить</button></form>';
-        }
-        html += '</div><ul class="list plans-list" id="plans-list">';
-        if (tasks.length === 0) html += '<li class="list-placeholder">Нет задач. Добавьте выше.</li>';
-        else tasks.forEach(function (t) {
-          var done = t.done ? ' checked' : '';
-          var cls = t.done ? ' class="plan-done"' : '';
-          var displayText = stripHtmlForDisplay(t.text);
-          html += '<li' + cls + '><label class="plan-item"><input type="checkbox" class="plan-checkbox" data-id="' + t.id + '"' + done + ' /><span class="plan-text">' + escapeHtml(displayText) + '</span></label></li>';
-        });
-        html += '</ul>';
-        container.innerHTML = html;
-        renderNovelDiagnostic(container);
-        if (hasNovel) {
-          try {
-            console.log('[Novel] Mounting editor…');
-            var mountEl = document.getElementById('plans-novel-container');
-            if (mountEl) {
-              if (plansEditorInstance) plansEditorInstance.unmount();
-              plansEditorInstance = window.PlansEditor.mount(mountEl, {
-                initialContent: '',
-                onSave: function (content) {
-                  if (!content || !content.trim()) return;
-                  apiPost('/api/add_task', { user_id: userId, text: content }).then(function () { openPlansModule(); });
-                },
-              });
-              console.log('[Novel] Editor mounted OK');
-            } else {
-              console.warn('[Novel] plans-novel-container not found');
-            }
-          } catch (e) {
-            console.error('[Novel] Mount error:', e);
-          }
-        } else {
-          console.warn('[Novel] PlansEditor not available, using plain input. Diagnostic:', diagnoseNovel());
-          var form = document.getElementById('plans-add-form');
-          if (form) form.addEventListener('submit', function (e) {
-            e.preventDefault();
-            var input = document.getElementById('plans-add-text');
-            var text = (input && input.value || '').trim();
-            if (!text) return;
-            apiPost('/api/add_task', { user_id: userId, text: text }).then(function () { input.value = ''; openPlansModule(); });
-          });
-        }
-        container.querySelectorAll('.plan-checkbox').forEach(function (cb) {
-          cb.addEventListener('change', function () {
-            apiPost('/api/done_task', { task_id: parseInt(cb.getAttribute('data-id'), 10), user_id: userId, done: cb.checked })
-              .then(function () { cb.closest('li').classList.toggle('plan-done', cb.checked); });
-          });
-        });
-      } catch (err) {
-        console.error('Plans render error:', err);
-        container.innerHTML = '<p class="error-msg">Ошибка при отображении задач</p>';
+  function renderPlansKanban(container, cards) {
+    var hasNovel = !!(window.PlansEditor && typeof window.PlansEditor.mount === 'function');
+    var html = '<p class="muted" style="margin-bottom:12px">Канбан-доска: карточки по категориям. Клик по карточке — редактирование в Novel.</p>';
+    html += '<div class="plans-kanban" id="plans-kanban">';
+    PLANS_CATEGORIES.forEach(function (cat) {
+      var colCards = (cards || []).filter(function (c) { return (c.category || 'study') === cat.id; });
+      html += '<div class="plans-column" data-category="' + escapeHtml(cat.id) + '">';
+      html += '<div class="plans-column-header"><span class="plans-column-accent ' + cat.id + '"></span><span class="plans-column-title">' + escapeHtml(cat.label) + '</span></div>';
+      html += '<div class="plans-cards" data-category="' + escapeHtml(cat.id) + '">';
+      colCards.forEach(function (card) {
+        var preview = plansJsonToPlainText(card.content).slice(0, 80);
+        html += '<div class="plans-card ' + (card.category || 'study') + '" data-card-id="' + card.id + '" data-category="' + escapeHtml(card.category || 'study') + '" role="button" tabindex="0">';
+        html += '<div class="plans-card-title">' + escapeHtml((card.title || preview || 'Без названия').slice(0, 60)) + '</div>';
+        if (preview) html += '<div class="plans-card-preview">' + escapeHtml(preview) + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+      html += '<button type="button" class="plans-add-btn" data-category="' + escapeHtml(cat.id) + '">+ Добавить</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+    container.innerHTML = html;
+    plansCardsCache = cards || [];
+
+    var kanban = document.getElementById('plans-kanban');
+    if (!kanban) return;
+
+    kanban.addEventListener('click', function (e) {
+      var card = e.target.closest('.plans-card');
+      var addBtn = e.target.closest('.plans-add-btn');
+      if (card) {
+        var cid = parseInt(card.getAttribute('data-card-id'), 10);
+        var cat = card.getAttribute('data-category') || 'study';
+        var cardData = plansCardsCache.find(function (c) { return c.id === cid; });
+        openPlansCardModal(cid, cat, cardData, renderPlansContent.bind(null, container));
+      } else if (addBtn) {
+        var cat = addBtn.getAttribute('data-category') || 'study';
+        openPlansCardModal(null, cat, null, renderPlansContent.bind(null, container));
       }
-    }).catch(function () {
-      container.innerHTML = '<p class="error-msg">Ошибка загрузки задач</p>';
+    });
+
+    if (!hasNovel) {
+      container.appendChild(document.createElement('div')).innerHTML = '<p class="muted" style="margin-top:16px">Редактор Novel загружается… Обновите страницу.</p>';
+    }
+  }
+
+  function openPlansCardModal(cardId, category, initialCard, onCloseRefresh) {
+    if (!(window.PlansEditor && typeof window.PlansEditor.mount === 'function')) {
+      console.warn('[Plans] Novel not ready');
+      return;
+    }
+    var catLabel = (PLANS_CATEGORIES.find(function (c) { return c.id === category; }) || {}).label || category;
+    var overlay = document.createElement('div');
+    overlay.className = 'plans-modal-overlay';
+    var deleteBtn = cardId ? '<button type="button" class="plans-modal-delete" data-card-id="' + cardId + '">Удалить</button>' : '';
+    overlay.innerHTML =
+      '<div class="plans-modal">' +
+      '<div class="plans-modal-header">' +
+      '<span class="plans-modal-title">' + (cardId ? 'Редактировать' : 'Новая карточка') + ' — ' + escapeHtml(catLabel) + '</span>' +
+      '<div style="display:flex;align-items:center;gap:8px">' + deleteBtn +
+      '<button type="button" class="plans-modal-close" aria-label="Закрыть">&times;</button>' +
+      '</div></div>' +
+      '<div class="plans-modal-body">' +
+      '<div id="plans-modal-novel"></div>' +
+      '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    function closeModal() {
+      document.removeEventListener('keydown', onEscKey);
+      if (plansEditorInstance) plansEditorInstance.unmount();
+      plansEditorInstance = null;
+      overlay.remove();
+      if (typeof onCloseRefresh === 'function') onCloseRefresh();
+    }
+    function onEscKey(e) { if (e.key === 'Escape') closeModal(); }
+
+    overlay.querySelector('.plans-modal-close').onclick = closeModal;
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closeModal();
+      var delBtn = e.target.closest('.plans-modal-delete');
+      if (delBtn && cardId) {
+        if (confirm('Удалить карточку?')) {
+          fetch(API_BASE + '/api/plans-cards/' + cardId + '?user_id=' + userId, { method: 'DELETE' })
+            .then(function (r) { if (r.ok) closeModal(); })
+            .catch(function (err) { console.error('[Plans] Delete error:', err); });
+        }
+      }
+    });
+    document.addEventListener('keydown', onEscKey);
+
+    var mountEl = overlay.querySelector('#plans-modal-novel');
+    var initialContent = (initialCard && initialCard.content) ? initialCard.content : '';
+
+    plansEditorInstance = window.PlansEditor.mount(mountEl, {
+      initialContent: initialContent,
+      onSave: function (content) {
+        if (!content || !String(content).trim()) return;
+        var title = plansJsonToPlainText(content).slice(0, 100) || 'Без названия';
+        if (cardId) {
+          apiPatch('/api/plans-cards/' + cardId, { user_id: userId, title: title, content: content })
+            .then(function () { closeModal(); })
+            .catch(function (err) { console.error('[Plans] Update error:', err); });
+        } else {
+          apiPost('/api/plans-cards', { user_id: userId, category: category, title: title, content: content })
+            .then(function () { closeModal(); })
+            .catch(function (err) { console.error('[Plans] Create error:', err); });
+        }
+      },
+      onCancel: closeModal
+    });
+  }
+
+  function apiPatch(path, body) {
+    return fetch(API_BASE + path, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) {
+          var err = new Error(data.detail || data.message || 'Ошибка ' + r.status);
+          err.status = r.status;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
+  function renderPlansContent(container) {
+    container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+    api('/api/plans-cards?user_id=' + userId).then(function (data) {
+      var cards = (data && data.cards) ? data.cards : [];
+      renderPlansKanban(container, cards);
+    }).catch(function (err) {
+      container.innerHTML = '<p class="error-msg">Ошибка загрузки карточек. ' + escapeHtml(String(err.message || '')) + '</p>';
     });
   }
 
   /* ========== FORUM ========== */
   var forumSection = 'general';
+  var forumEditorInstance = null;
   var FORUM_SECTIONS = [
     { id: 'general', label: 'Общие', desc: 'Обсуждения' },
     { id: 'gallery', label: 'Галерея', desc: 'Творчество' },
@@ -1751,7 +1947,131 @@
 
   function renderForumWorkArea(container) {
     var section = FORUM_SECTIONS.find(function (s) { return s.id === forumSection; }) || FORUM_SECTIONS[0];
-    container.innerHTML = '<div class="page-head"><h1 class="page-title">' + escapeHtml(section.label) + '</h1><p class="page-subtitle">' + escapeHtml(section.desc) + '</p></div><div class="forum-intro"><strong>Внутреннее сообщество курсантов.</strong> При создании темы — выбор анонимной публикации.</div><div class="card"><div class="card-body"><p class="list-placeholder">Форум в разработке.</p></div></div>';
+    var canCreateBoard = getEffectiveRole() === 'teacher';
+    var canCreate = (forumSection !== 'board') || canCreateBoard;
+    container.innerHTML = '<div class="page-head"><h1 class="page-title">' + escapeHtml(section.label) + '</h1><p class="page-subtitle">' + escapeHtml(section.desc) + '</p></div>' +
+      '<div class="forum-intro"><strong>Внутреннее сообщество курсантов.</strong> При создании темы — выбор анонимной публикации. Объявления создают только преподаватели.</div>' +
+      '<div id="forum-threads-wrap"><p class="list-placeholder">Загрузка…</p></div>' +
+      (canCreate ? '<div style="margin-top:16px"><button type="button" class="btn-accent" id="forum-create-btn">Создать тему</button></div>' : '');
+    var wrap = document.getElementById('forum-threads-wrap');
+    if (wrap) loadForumThreads(wrap, forumSection);
+    var createBtn = document.getElementById('forum-create-btn');
+    if (createBtn) createBtn.addEventListener('click', function () { openForumCreateModal(container); });
+  }
+
+  function loadForumThreads(wrap, category) {
+    wrap.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+    api('/api/forum/threads?category=' + encodeURIComponent(category) + '&telegram_id=' + userId)
+      .then(function (data) {
+        var threads = data.threads || [];
+        if (threads.length === 0) { wrap.innerHTML = '<p class="list-placeholder">Пока нет тем</p>'; return; }
+        var html = '<div class="forum-thread-list">';
+        threads.forEach(function (t) {
+          var preview = (t.content ? plansJsonToPlainText(t.content) : t.title || '').slice(0, 100);
+          html += '<div class="forum-thread-item card" data-thread-id="' + t.id + '" role="button" tabindex="0">';
+          html += '<div class="card-body">';
+          html += '<h3 class="forum-thread-title">' + escapeHtml(t.title) + '</h3>';
+          html += '<p class="forum-thread-meta muted">' + escapeHtml(t.author_name) + ' · ' + (t.created_at ? new Date(t.created_at).toLocaleDateString('ru-RU') : '') + '</p>';
+          if (preview) html += '<p class="forum-thread-preview">' + escapeHtml(preview) + '</p>';
+          html += '</div></div>';
+        });
+        html += '</div>';
+        wrap.innerHTML = html;
+        wrap.querySelectorAll('.forum-thread-item').forEach(function (el) {
+          el.addEventListener('click', function () {
+            var tid = parseInt(el.getAttribute('data-thread-id'), 10);
+            openForumThreadView(tid, wrap);
+          });
+        });
+      })
+      .catch(function () { wrap.innerHTML = '<p class="error-msg">Ошибка загрузки тем</p>'; });
+  }
+
+  function openForumThreadView(threadId, wrap) {
+    api('/api/forum/threads/' + threadId + '?telegram_id=' + userId)
+      .then(function (data) {
+        var t = data.thread;
+        var comments = data.comments || [];
+        var contentHtml = t.content ? plansJsonToPlainText(t.content).replace(/\n/g, '<br/>') : '';
+        var html = '<div class="forum-thread-detail">';
+        html += '<button type="button" class="link-btn" id="forum-back-btn">← К списку</button>';
+        html += '<h2 class="forum-thread-detail-title">' + escapeHtml(t.title) + '</h2>';
+        html += '<p class="forum-thread-meta muted">' + escapeHtml(t.author_name) + ' · ' + (t.created_at ? new Date(t.created_at).toLocaleDateString('ru-RU') : '') + '</p>';
+        html += '<div class="forum-thread-body">' + (contentHtml ? escapeHtml(contentHtml).replace(/\n/g, '<br/>') : '<p class="muted">Нет содержимого</p>') + '</div>';
+        html += '<hr/>';
+        html += '<h4>Комментарии (' + comments.length + ')</h4>';
+        html += '<div class="forum-comments" id="forum-comments-list">';
+        comments.forEach(function (c) {
+          html += '<div class="forum-comment"><p class="forum-comment-author muted">' + escapeHtml(c.author_name) + '</p><p>' + escapeHtml(c.content) + '</p></div>';
+        });
+        html += '</div>';
+        html += '<form id="forum-add-comment" class="forum-comment-form"><textarea id="forum-comment-text" placeholder="Добавить комментарий..." rows="2" style="width:100%;padding:8px;border-radius:6px;border:var(--border);background:var(--bg);color:var(--text)"></textarea><label><input type="checkbox" id="forum-comment-anonymous" /> Анонимно</label><button type="submit" class="btn-accent" style="margin-top:8px">Отправить</button></form>';
+        html += '</div>';
+        wrap.innerHTML = html;
+        wrap.querySelector('#forum-back-btn').addEventListener('click', function () {
+          loadForumThreads(wrap, forumSection);
+        });
+        wrap.querySelector('#forum-add-comment').addEventListener('submit', function (e) {
+          e.preventDefault();
+          var text = (document.getElementById('forum-comment-text') || {}).value || '';
+          var anon = (document.getElementById('forum-comment-anonymous') || {}).checked;
+          if (!text.trim()) return;
+          apiPost('/api/forum/comments', { telegram_id: userId, thread_id: threadId, content: text.trim(), anonymous: anon })
+            .then(function () { openForumThreadView(threadId, wrap); });
+        });
+      })
+      .catch(function () { wrap.innerHTML = '<p class="error-msg">Ошибка загрузки темы</p>'; });
+  }
+
+  function openForumCreateModal(container) {
+    if (!(window.PlansEditor && typeof window.PlansEditor.mount === 'function')) {
+      alert('Редактор загружается. Подождите и попробуйте снова.');
+      return;
+    }
+    var section = FORUM_SECTIONS.find(function (s) { return s.id === forumSection; }) || FORUM_SECTIONS[0];
+    var overlay = document.createElement('div');
+    overlay.className = 'plans-modal-overlay';
+    overlay.innerHTML = '<div class="plans-modal"><div class="plans-modal-header">' +
+      '<span class="plans-modal-title">Новая тема — ' + escapeHtml(section.label) + '</span>' +
+      '<button type="button" class="plans-modal-close" aria-label="Закрыть">&times;</button></div>' +
+      '<div class="plans-modal-body">' +
+      '<label>Заголовок: <input type="text" id="forum-new-title" class="input-text" placeholder="Название темы" style="width:100%;max-width:400px" /></label>' +
+      '<label style="display:block;margin-top:8px"><input type="checkbox" id="forum-new-anonymous" /> Публиковать анонимно</label>' +
+      '<div id="forum-modal-novel" style="margin-top:12px"></div></div></div>';
+    document.body.appendChild(overlay);
+
+    function closeModal() {
+      document.removeEventListener('keydown', onEsc);
+      if (forumEditorInstance) forumEditorInstance.unmount();
+      forumEditorInstance = null;
+      overlay.remove();
+      renderForumWorkArea(container);
+    }
+    function onEsc(e) { if (e.key === 'Escape') closeModal(); }
+
+    overlay.querySelector('.plans-modal-close').onclick = closeModal;
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(); });
+    document.addEventListener('keydown', onEsc);
+
+    var mountEl = overlay.querySelector('#forum-modal-novel');
+    forumEditorInstance = window.PlansEditor.mount(mountEl, {
+      initialContent: '',
+      onSave: function (content) {
+        var title = (document.getElementById('forum-new-title') || {}).value || '';
+        var anon = (document.getElementById('forum-new-anonymous') || {}).checked;
+        if (!title.trim()) { alert('Укажите заголовок'); return; }
+        var body = plansJsonToPlainText(content);
+        if (!body.trim()) body = title;
+        apiPost('/api/forum/threads', {
+          telegram_id: userId,
+          category: forumSection,
+          title: title.trim(),
+          content: content || '',
+          anonymous: anon
+        }).then(function () { closeModal(); }).catch(function (err) { alert(err.detail || 'Ошибка'); });
+      },
+      onCancel: closeModal
+    });
   }
 
   function openForumModule() {

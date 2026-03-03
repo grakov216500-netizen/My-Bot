@@ -11,11 +11,8 @@ import {
   StarterKit,
   Placeholder,
   TiptapLink,
-  TiptapImage,
-  UpdatedImage,
   TaskList,
   TaskItem,
-  HorizontalRule,
 } from 'novel';
 
 /** Извлекает plain text из TipTap JSON для отображения в списке. */
@@ -44,11 +41,8 @@ function PlansEditorWrapper({ initialContent, onSave, onCancel }) {
       StarterKit,
       Placeholder,
       TiptapLink,
-      TiptapImage,
-      UpdatedImage,
       TaskList,
       TaskItem,
-      HorizontalRule,
     ],
     []
   );
@@ -65,6 +59,12 @@ function PlansEditorWrapper({ initialContent, onSave, onCancel }) {
     }
   }, [initialContent]);
 
+  const run = React.useCallback((fn) => {
+    const e = editorRef.current;
+    if (!e) return;
+    fn(e);
+  }, []);
+
   const handleSave = React.useCallback(() => {
     const e = editorRef.current;
     if (!e) return;
@@ -78,6 +78,12 @@ function PlansEditorWrapper({ initialContent, onSave, onCancel }) {
   return (
     <div className="novel-plans-wrapper" style={{ marginTop: 8 }}>
       <EditorRoot>
+        <div className="novel-toolbar">
+          <button type="button" onClick={() => run((e) => e.chain().focus().toggleBold().run())}>Жирный</button>
+          <button type="button" onClick={() => run((e) => e.chain().focus().toggleHeading({ level: 1 }).run())}>H1</button>
+          <button type="button" onClick={() => run((e) => e.chain().focus().toggleBulletList().run())}>Список</button>
+          <button type="button" onClick={() => run((e) => e.chain().focus().toggleTaskList().run())}>Чекбоксы</button>
+        </div>
         <EditorContent
           extensions={extensions}
           initialContent={contentToUse}
@@ -85,7 +91,7 @@ function PlansEditorWrapper({ initialContent, onSave, onCancel }) {
           className="novel-plans-editor"
           editorProps={{
             attributes: {
-              class: 'min-h-[120px] px-3 py-2 outline-none',
+              class: 'outline-none',
             },
           }}
         />

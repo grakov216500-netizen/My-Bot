@@ -574,6 +574,28 @@ async def report_sick_leave(data: dict):
         raise HTTPException(status_code=500, detail="Ошибка сохранения")
 
 
+def _user_role_for_forum(telegram_id: int):
+    """Роль для форума: проверяет тестовый override, затем БД."""
+    conn = get_db()
+    if not conn:
+        return None
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS user_test_roles (
+                telegram_id INTEGER PRIMARY KEY,
+                role TEXT NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        row = execute(conn, "SELECT role FROM user_test_roles WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        if row and row["role"]:
+            return row["role"]
+        row = execute(conn, "SELECT role FROM users WHERE telegram_id = ?", (telegram_id,)).fetchone()
+        return row["role"] if row and row["role"] else "user"
+    finally:
+        conn.close()
+
+
 def _user_role_from_db(telegram_id: int):
     """Роль из БД (admin, assistant, sergeant, user)."""
     conn = get_db()
@@ -718,6 +740,16 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
         return {"error": "База данных не найдена"}
 
     try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS duty_confirmations (
+                telegram_id INTEGER,
+                date TEXT,
+                role TEXT,
+                status TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (telegram_id, date, role)
+            )
+        """)
         # --- Определяем, как называется колонка с ФИО в users (fio или full_name) ---
         cursor = execute(conn, "PRAGMA table_info(users)")
         columns = [row["name"] for row in cursor.fetchall()]
@@ -809,6 +841,18 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
                     partners = execute(conn,partners_query, (row['date'], row['role'], row['enrollment_year'])).fetchall()
                     role_lower = (row['role'] or '').strip().lower()
                     points = points_map.get(role_lower, 10)
+                    conf = None
+                    try:
+                        cc = execute(conn, "SELECT status FROM duty_confirmations WHERE telegram_id = ? AND date = ? AND role = ?",
+                            (telegram_id, row['date'], row['role'])).fetchone()
+                        if cc:
+                            conf = cc["status"]
+                    except Exception:
+                        pass
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    now = datetime.now()
+                    cutoff = now.replace(hour=15, minute=30, second=0, microsecond=0) if now.date() == datetime.strptime(row['date'], "%Y-%m-%d").date() else None
+                    can_confirm = (row['date'] == today_str and (not cutoff or now < cutoff) and conf is None)
                     duties_list.append({
                         "date": row['date'],
                         "role": row['role'],
@@ -816,6 +860,8 @@ async def get_duties(telegram_id: int, month: str = None, year: int = None):
                         "group": row['group_name'],
                         "partners": [{"fio": p['fio'], "group": p['group_name']} for p in partners],
                         "points": points,
+                        "confirmation_status": conf,
+                        "can_confirm": can_confirm,
                     })
                 
                 conn.close()
@@ -1301,6 +1347,50 @@ def distribute_canteen_for_date(date_str: str, ey: int, conn):
     return assignments
 
 
+@app.post("/api/duties/confirm")
+async def confirm_duty(data: dict):
+    """Подтвердить заступление: status=confirmed или declined. Только в день наряда до 15:30."""
+    telegram_id = data.get("telegram_id")
+    date_str = (data.get("date") or "").strip()
+    role = (data.get("role") or "").strip()
+    status = (data.get("status") or "").lower()
+    if not telegram_id or not date_str or not role or status not in ("confirmed", "declined"):
+        raise HTTPException(400, detail="Нужны telegram_id, date (YYYY-MM-DD), role, status (confirmed/declined)")
+    if len(date_str) != 10 or date_str[4] != "-" or date_str[7] != "-":
+        raise HTTPException(400, detail="Дата в формате YYYY-MM-DD")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if date_str != today_str:
+        raise HTTPException(400, detail="Подтверждение возможно только в день наряда")
+    now = datetime.now()
+    cutoff = now.replace(hour=15, minute=30, second=0, microsecond=0)
+    if now >= cutoff:
+        raise HTTPException(400, detail="Время подтверждения истекло (до 15:30)")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(500, detail="БД не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS duty_confirmations (
+                telegram_id INTEGER,
+                date TEXT,
+                role TEXT,
+                status TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (telegram_id, date, role)
+            )
+        """)
+        execute(conn, """
+            INSERT OR REPLACE INTO duty_confirmations (telegram_id, date, role, status) VALUES (?, ?, ?, ?)
+        """, (telegram_id, date_str, role, status))
+        conn.commit()
+        return {"status": "ok", "confirmation": status}
+    except Exception as e:
+        print(f"[ERROR] duty confirm: {e}")
+        raise HTTPException(500, detail="Ошибка БД")
+    finally:
+        conn.close()
+
+
 @app.post("/api/duties/distribute")
 async def distribute_duty(date: str = Form(...), role: str = Form(...), telegram_id: int = Form(...)):
     """Ручной запуск распределения по сменам/объектам (для сержантов/админов)."""
@@ -1558,6 +1648,373 @@ async def set_reminder(data: dict):
     except Exception as e:
         print(f"[ERROR] Ошибка установки напоминания: {e}")
         raise HTTPException(status_code=500, detail="Не удалось установить напоминание")
+    finally:
+        conn.close()
+
+
+# ============================================
+# 3.b ПЛАНЫ (единый rich-редактор)
+# ============================================
+
+@app.get("/api/plans-note")
+async def get_plans_note(user_id: int):
+    """
+    Возвращает один документ с планами для пользователя (JSON-строка от Novel).
+    """
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS plans_notes (
+                user_id INTEGER PRIMARY KEY,
+                content TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        row = execute(conn, "SELECT content FROM plans_notes WHERE user_id = ?", (user_id,)).fetchone()
+        return {"content": row["content"] if row and row["content"] is not None else ""}
+    except Exception as e:
+        print(f"[ERROR] Ошибка загрузки плана: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД при загрузке плана")
+    finally:
+        conn.close()
+
+
+@app.post("/api/plans-note")
+async def save_plans_note(data: dict):
+    """
+    Сохраняет один документ с планами для пользователя.
+    Ожидает JSON:
+      { "user_id": 123, "content": "<JSON-строка от Novel>" }
+    """
+    user_id = data.get("user_id")
+    content = data.get("content") or ""
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Нужен user_id")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS plans_notes (
+                user_id INTEGER PRIMARY KEY,
+                content TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        execute(conn, """
+            INSERT INTO plans_notes (user_id, content, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET content = excluded.content, updated_at = CURRENT_TIMESTAMP
+        """, (user_id, str(content)))
+        conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] Ошибка сохранения плана: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД при сохранении плана")
+    finally:
+        conn.close()
+
+
+# Планы-карточки (Канбан): колонки Учёба, Наряды, Личное
+@app.get("/api/plans-cards")
+async def get_plans_cards(user_id: int):
+    """Список карточек планов по категориям."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS plans_cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                category TEXT NOT NULL DEFAULT 'study',
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        rows = execute(conn,
+            "SELECT id, category, title, content, sort_order, created_at FROM plans_cards WHERE user_id = ? ORDER BY sort_order, id",
+            (user_id,)
+        ).fetchall()
+        return {"cards": [dict(r) for r in rows]}
+    except Exception as e:
+        print(f"[ERROR] plans-cards: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД")
+    finally:
+        conn.close()
+
+
+@app.post("/api/plans-cards")
+async def create_plans_card(data: dict):
+    """Создать карточку. category: study|duty|personal"""
+    user_id = data.get("user_id")
+    category = (data.get("category") or "study").strip() or "study"
+    title = (data.get("title") or "").strip() or "Без названия"
+    content = data.get("content") or ""
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Нужен user_id")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS plans_cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                category TEXT NOT NULL DEFAULT 'study',
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        max_order = execute(conn, "SELECT COALESCE(MAX(sort_order), 0) + 1 as o FROM plans_cards WHERE user_id = ? AND category = ?", (user_id, category)).fetchone()
+        order = max_order["o"] if max_order else 1
+        execute(conn, """
+            INSERT INTO plans_cards (user_id, category, title, content, sort_order) VALUES (?, ?, ?, ?, ?)
+        """, (user_id, category, title, str(content), order))
+        conn.commit()
+        rid = execute(conn, "SELECT last_insert_rowid() as id").fetchone()["id"]
+        return {"status": "ok", "id": rid}
+    except Exception as e:
+        print(f"[ERROR] create plans-card: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД")
+    finally:
+        conn.close()
+
+
+@app.patch("/api/plans-cards/{card_id}")
+async def update_plans_card(card_id: int, data: dict):
+    """Обновить карточку."""
+    user_id = data.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Нужен user_id")
+    title = (data.get("title") or "").strip()
+    content = data.get("content")
+    category = (data.get("category") or "").strip()
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        updates, params = [], []
+        if title: updates.append("title = ?"); params.append(title)
+        if content is not None: updates.append("content = ?"); params.append(str(content))
+        if category: updates.append("category = ?"); params.append(category)
+        if not updates:
+            return {"status": "ok"}
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.extend([card_id, user_id])
+        execute(conn, f"UPDATE plans_cards SET {', '.join(updates)} WHERE id = ? AND user_id = ?", params)
+        conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] update plans-card: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД")
+    finally:
+        conn.close()
+
+
+@app.delete("/api/plans-cards/{card_id}")
+async def delete_plans_card(card_id: int, user_id: int):
+    """Удалить карточку."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, "DELETE FROM plans_cards WHERE id = ? AND user_id = ?", (card_id, user_id))
+        conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] delete plans-card: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД")
+    finally:
+        conn.close()
+
+
+# ============================================
+# ФОРУМ
+# ============================================
+@app.get("/api/forum/threads")
+async def get_forum_threads(category: str, telegram_id: int):
+    """Список тем по категории: general, study, board, gallery."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS forum_threads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT,
+                author_telegram_id INTEGER,
+                anonymous INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        rows = execute(conn, """
+            SELECT t.id, t.title, t.content, t.author_telegram_id, t.anonymous, t.created_at,
+                   u.fio as author_fio
+            FROM forum_threads t
+            LEFT JOIN users u ON u.telegram_id = t.author_telegram_id AND t.anonymous = 0
+            WHERE t.category = ?
+            ORDER BY t.created_at DESC
+            LIMIT 100
+        """, (category,)).fetchall()
+        result = []
+        for r in rows:
+            author_name = "Аноним" if r["anonymous"] else (r["author_fio"] or "—")
+            result.append({
+                "id": r["id"],
+                "title": r["title"],
+                "content": r["content"],
+                "author_name": author_name,
+                "anonymous": bool(r["anonymous"]),
+                "created_at": r["created_at"]
+            })
+        return {"threads": result}
+    except Exception as e:
+        print(f"[ERROR] forum threads: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД")
+    finally:
+        conn.close()
+
+
+@app.post("/api/forum/threads")
+async def create_forum_thread(data: dict):
+    """Создать тему. category=board — только teacher."""
+    telegram_id = data.get("telegram_id")
+    category = (data.get("category") or "general").strip()
+    title = (data.get("title") or "").strip()
+    content = data.get("content") or ""
+    anonymous = bool(data.get("anonymous"))
+    if not telegram_id or not title:
+        raise HTTPException(status_code=400, detail="Нужны telegram_id и title")
+    if category == "board":
+        role = _user_role_for_forum(int(telegram_id))
+        if role != "teacher":
+            raise HTTPException(status_code=403, detail="Только преподаватели могут создавать объявления")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS forum_threads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT,
+                author_telegram_id INTEGER,
+                anonymous INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        execute(conn, """
+            INSERT INTO forum_threads (category, title, content, author_telegram_id, anonymous)
+            VALUES (?, ?, ?, ?, ?)
+        """, (category, title[:500], str(content), telegram_id, 1 if anonymous else 0))
+        conn.commit()
+        rid = execute(conn, "SELECT last_insert_rowid() as id").fetchone()["id"]
+        return {"status": "ok", "id": rid}
+    except Exception as e:
+        print(f"[ERROR] create forum thread: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД")
+    finally:
+        conn.close()
+
+
+@app.get("/api/forum/threads/{thread_id}")
+async def get_forum_thread(thread_id: int, telegram_id: int):
+    """Одна тема с комментариями."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS forum_comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id INTEGER NOT NULL,
+                author_telegram_id INTEGER,
+                content TEXT NOT NULL,
+                anonymous INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        t = execute(conn, """
+            SELECT t.id, t.title, t.content, t.author_telegram_id, t.anonymous, t.created_at,
+                   u.fio as author_fio
+            FROM forum_threads t
+            LEFT JOIN users u ON u.telegram_id = t.author_telegram_id AND t.anonymous = 0
+            WHERE t.id = ?
+        """, (thread_id,)).fetchone()
+        if not t:
+            raise HTTPException(status_code=404, detail="Тема не найдена")
+        comments = execute(conn, """
+            SELECT c.id, c.content, c.author_telegram_id, c.anonymous, c.created_at,
+                   u.fio as author_fio
+            FROM forum_comments c
+            LEFT JOIN users u ON u.telegram_id = c.author_telegram_id AND c.anonymous = 0
+            WHERE c.thread_id = ?
+            ORDER BY c.created_at
+        """, (thread_id,)).fetchall()
+        return {
+            "thread": {
+                "id": t["id"], "title": t["title"], "content": t["content"],
+                "author_name": "Аноним" if t["anonymous"] else (t["author_fio"] or "—"),
+                "anonymous": bool(t["anonymous"]), "created_at": t["created_at"]
+            },
+            "comments": [
+                {"id": c["id"], "content": c["content"], "author_name": "Аноним" if c["anonymous"] else (c["author_fio"] or "—"), "created_at": c["created_at"]}
+                for c in comments
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] forum thread: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД")
+    finally:
+        conn.close()
+
+
+@app.post("/api/forum/comments")
+async def add_forum_comment(data: dict):
+    """Добавить комментарий к теме."""
+    telegram_id = data.get("telegram_id")
+    thread_id = data.get("thread_id")
+    content = (data.get("content") or "").strip()
+    anonymous = bool(data.get("anonymous"))
+    if not telegram_id or not thread_id or not content:
+        raise HTTPException(status_code=400, detail="Нужны telegram_id, thread_id и content")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS forum_comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id INTEGER NOT NULL,
+                author_telegram_id INTEGER,
+                content TEXT NOT NULL,
+                anonymous INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        execute(conn, """
+            INSERT INTO forum_comments (thread_id, author_telegram_id, content, anonymous)
+            VALUES (?, ?, ?, ?)
+        """, (thread_id, telegram_id, content[:2000], 1 if anonymous else 0))
+        conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        print(f"[ERROR] add forum comment: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка БД")
     finally:
         conn.close()
 
@@ -2658,6 +3115,32 @@ async def get_achievements(telegram_id: int):
         raise HTTPException(status_code=500, detail="Ошибка загрузки достижений")
 
 
+@app.get("/api/user/{target_id}/achievements")
+async def get_user_achievements(target_id: int, telegram_id: int):
+    """Достижения пользователя (для отображения в рейтинге по клику)."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(500, detail="БД не найдена")
+    try:
+        row = execute(conn, "SELECT fio FROM users WHERE telegram_id = ?", (target_id,)).fetchone()
+        if not row:
+            return {"fio": "—", "achievements": []}
+        _unlock_achievements(conn, target_id)
+        achs = execute(conn, """
+            SELECT a.id, a.title, a.description, a.icon_url,
+                   ua.telegram_id IS NOT NULL AS unlocked
+            FROM achievements a
+            LEFT JOIN user_achievements ua ON ua.achievement_id = a.id AND ua.telegram_id = ?
+            ORDER BY a.sort_order
+        """, (target_id,)).fetchall()
+        return {"fio": row["fio"], "achievements": [{"id": a["id"], "title": a["title"], "description": a["description"] or "", "unlocked": bool(a["unlocked"])} for a in achs]}
+    except Exception as e:
+        print(f"[ERROR] user achievements: {e}")
+        raise HTTPException(500, detail="Ошибка")
+    finally:
+        conn.close()
+
+
 # ============================================
 # 5. ОПРОСНИК (SURVEY) API — попарное сравнение 2/1/0
 # ============================================
@@ -3505,6 +3988,26 @@ async def get_full_profile(telegram_id: int):
         except Exception:
             sick_leaves = []
         
+        test_role = None
+        try:
+            execute(conn, """
+                CREATE TABLE IF NOT EXISTS user_test_roles (
+                    telegram_id INTEGER PRIMARY KEY,
+                    role TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            tr = execute(conn, "SELECT role FROM user_test_roles WHERE telegram_id = ?", (telegram_id,)).fetchone()
+            if tr and tr.get("role"):
+                test_role = tr["role"]
+        except Exception:
+            pass
+
+        eff_role = test_role or role
+        allowed_modules = ["home", "study", "plans", "rating", "profile"]
+        if eff_role != "teacher":
+            allowed_modules.extend(["duties", "surveys", "forum"])
+        
         return {
             "telegram_id": telegram_id,
             "fio": fio,
@@ -3513,6 +4016,8 @@ async def get_full_profile(telegram_id: int):
             "course": course,
             "course_label": "Выпускник" if course >= 5 else str(course),
             "role": role,
+            "test_role": test_role,
+            "allowed_modules": allowed_modules,
             "avatar_url": avatar_url,
             "points": points,
             "total_duties": total_duties,
@@ -3546,6 +4051,40 @@ async def update_profile(data: dict):
             conn.commit()
             return {"status": "ok", "fio": fio}
         return {"status": "ok"}
+    finally:
+        conn.close()
+
+
+@app.post("/api/profile/test-role")
+async def set_test_role(data: dict):
+    """Установить тестовую роль для проверки интерфейса (сохраняется в БД)."""
+    telegram_id = data.get("telegram_id")
+    role = (data.get("role") or "").strip().lower()
+    if not telegram_id:
+        raise HTTPException(status_code=400, detail="Нужен telegram_id")
+    allowed = ("cadet", "user", "teacher", "admin", "assistant", "sergeant")
+    if role and role not in allowed:
+        raise HTTPException(status_code=400, detail="Роль: " + ", ".join(allowed))
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="База данных не найдена")
+    try:
+        execute(conn, """
+            CREATE TABLE IF NOT EXISTS user_test_roles (
+                telegram_id INTEGER PRIMARY KEY,
+                role TEXT NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        if role:
+            execute(conn, """
+                INSERT INTO user_test_roles (telegram_id, role) VALUES (?, ?)
+                ON CONFLICT(telegram_id) DO UPDATE SET role = excluded.role, updated_at = CURRENT_TIMESTAMP
+            """, (telegram_id, role))
+        else:
+            execute(conn, "DELETE FROM user_test_roles WHERE telegram_id = ?", (telegram_id,))
+        conn.commit()
+        return {"status": "ok", "role": role or None}
     finally:
         conn.close()
 
