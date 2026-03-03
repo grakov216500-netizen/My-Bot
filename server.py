@@ -1003,6 +1003,64 @@ async def get_available_months(telegram_id: int):
         conn.close()
 
 
+@app.get("/api/schedule/uploads")
+async def get_schedule_uploads(telegram_id: int):
+    """Список загруженных графиков с информацией: месяц, группа, кто загрузил (ФИО), когда."""
+    conn = get_db()
+    if not conn:
+        return {"uploads": []}
+    try:
+        user = execute(conn,
+            "SELECT role, group_name, enrollment_year FROM users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if not user or user["role"] not in ("sergeant", "assistant", "admin"):
+            return {"uploads": []}
+        ey = user["enrollment_year"]
+        grp = user["group_name"] or ""
+        if user["role"] == "sergeant":
+            rows = execute(conn, """
+                SELECT su.ym, su.group_name, su.uploaded_by_telegram_id, su.uploaded_at,
+                       u.fio as uploaded_by_fio
+                FROM schedule_uploads su
+                LEFT JOIN users u ON u.telegram_id = su.uploaded_by_telegram_id
+                WHERE su.enrollment_year = ? AND su.group_name = ?
+                ORDER BY su.ym DESC, su.group_name
+            """, (ey, grp)).fetchall()
+        else:
+            rows = execute(conn, """
+                SELECT su.ym, su.group_name, su.uploaded_by_telegram_id, su.uploaded_at,
+                       u.fio as uploaded_by_fio
+                FROM schedule_uploads su
+                LEFT JOIN users u ON u.telegram_id = su.uploaded_by_telegram_id
+                WHERE su.enrollment_year = ?
+                ORDER BY su.ym DESC, su.group_name
+            """, (ey,)).fetchall()
+        uploads = []
+        for r in rows:
+            uploaded_at = r["uploaded_at"]
+            if isinstance(uploaded_at, str) and "T" in uploaded_at:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(uploaded_at.replace("Z", "+00:00"))
+                    uploaded_at = dt.strftime("%d.%m.%Y %H:%M") if dt else uploaded_at
+                except Exception:
+                    pass
+            elif uploaded_at:
+                uploaded_at = str(uploaded_at)[:16].replace("T", " ")
+            uploads.append({
+                "ym": r["ym"],
+                "group_name": r["group_name"],
+                "uploaded_by_fio": r["uploaded_by_fio"] or "—",
+                "uploaded_at": uploaded_at or "—"
+            })
+        return {"uploads": uploads}
+    except Exception as e:
+        print(f"[ERROR] schedule/uploads: {e}")
+        return {"uploads": []}
+    finally:
+        conn.close()
+
+
 @app.get("/api/duties/day-detail")
 async def get_duty_day_detail(date: str, role: str, telegram_id: int):
     """Подробная информация о конкретном наряде (роль) на конкретную дату: все участники того же курса."""
@@ -1841,6 +1899,10 @@ async def upload_schedule(
                AND date >= ? AND date < ?""",
             (group, enrollment_year, month_ym + "-01", month_end_next)
         )
+        execute(conn, """
+            INSERT OR REPLACE INTO schedule_uploads (ym, group_name, enrollment_year, uploaded_by_telegram_id, uploaded_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+        """, (month_ym, group, enrollment_year, telegram_id))
         for d in schedule_data:
             execute(conn,
                 """INSERT OR REPLACE INTO duty_schedule (fio, date, role, group_name, enrollment_year, gender)
@@ -3176,8 +3238,8 @@ async def create_custom_survey(data: dict):
             raise HTTPException(status_code=403, detail="Только сержант/помощник/админ могут создавать опросы")
         if scope_type == "system" and user["role"] != "admin":
             raise HTTPException(status_code=403, detail="Системный опрос может создать только админ")
-        if scope_type == "group" and user["role"] not in ("sergeant", "admin"):
-            raise HTTPException(status_code=403, detail="Опрос по группе может создать только сержант или админ")
+        if scope_type == "group" and user["role"] not in ("sergeant", "assistant", "admin"):
+            raise HTTPException(status_code=403, detail="Опрос по группе может создать только сержант, помощник или админ")
         scope_value = "system" if scope_type == "system" else (user["group_name"] if scope_type == "group" else str(user["enrollment_year"]))
         cursor = execute(conn,
             "INSERT INTO custom_surveys (title, scope_type, scope_value, created_by_telegram_id, ends_at) VALUES (?, ?, ?, ?, ?)",

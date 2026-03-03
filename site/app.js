@@ -383,7 +383,7 @@
   }
 
   /* ========== DUTIES MODULE ========== */
-  var dutiesLocalSection = 'graph';
+  var dutiesLocalSection = 'myduties';
   var dutiesCalYear = new Date().getFullYear();
   var dutiesCalMonth = new Date().getMonth() + 1;
   var dutiesTab = 'upcoming';
@@ -492,12 +492,15 @@
   function renderDutiesWorkArea(container) {
     container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
 
-    if (dutiesLocalSection === 'graph') {
-      Promise.all([api('/api/duties'), api('/api/duties/available-months')]).then(function (res) {
+    if (dutiesLocalSection === 'myduties' || dutiesLocalSection === 'graph') {
+      var canEdit = (window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0) || (Number(userId) === 1027070834);
+      var requests = [api('/api/duties'), api('/api/duties/available-months')];
+      if (dutiesLocalSection === 'graph' && canEdit) requests.push(api('/api/schedule/uploads'));
+      Promise.all(requests).then(function (res) {
         var data = res[0], monthsData = res[1];
+        var uploadsData = res[2] || { uploads: [] };
         dutyAvailableMonths = monthsData.months || [];
         var months = dutyAvailableMonths;
-        var canUpload = (window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0) || (Number(userId) === 1027070834);
 
         if (months.length > 0) {
           var lastYm = months[months.length - 1].split('-');
@@ -515,19 +518,27 @@
           var next = data.next_duty;
           if (next) {
             var df = next.date ? formatDutyDate(next.date) : '';
-            html += '<section class="card"><h2 class="card-title">Ближайший наряд</h2><div class="card-body"><p class="duty-role">' + escapeHtml(next.role_full || '') + '</p><p class="duty-date">' + escapeHtml(df) + '</p></div></section>';
+            var wd = next.date ? new Date(next.date + 'T12:00:00').toLocaleDateString('ru-RU', { weekday: 'long' }) : '';
+            html += '<section class="card"><h2 class="card-title">Ближайший наряд</h2><div class="card-body"><p class="duty-role">' + escapeHtml(next.role_full || '') + '</p><p class="duty-date">' + escapeHtml(df) + (wd ? ' · ' + escapeHtml(wd) : '') + '</p></div></section>';
           }
 
-          html += '<section class="card"><h2 class="card-title">Загрузить график</h2><div class="card-body">';
-          if (canUpload) {
-            html += '<p class="muted">Скачайте шаблон, заполните и загрузите .xlsx. Загрузка доступна сержанту, помощнику и админу.</p>';
+          if (dutiesLocalSection === 'graph' && canEdit) {
+            html += '<section class="card"><h2 class="card-title">Загрузить график</h2><div class="card-body">';
+            html += '<p class="muted">Скачайте шаблон, заполните и загрузите .xlsx.</p>';
             html += '<p><a href="' + API_BASE + '/api/schedule/template?telegram_id=' + userId + '" download class="btn-accent">Скачать шаблон</a></p>';
             html += '<form id="duty-upload-form" class="duty-upload-form"><input type="file" accept=".xlsx" id="duty-upload-file" /><label class="checkbox-label"><input type="checkbox" id="duty-upload-overwrite" /> Заменить существующий месяц</label><button type="submit" class="btn-accent">Загрузить .xlsx</button></form><p id="duty-upload-status" class="muted"></p>';
-          } else {
-            html += '<p class="list-placeholder">Загрузка графика доступна сержанту, помощнику и админу. Скачайте шаблон и передайте его ответственному.</p>';
-            html += '<p><a href="' + API_BASE + '/api/schedule/template?telegram_id=' + userId + '" download class="btn-accent">Скачать шаблон</a></p>';
+            html += '</div></section>';
+            var uploads = uploadsData.uploads || [];
+            if (uploads.length > 0) {
+              html += '<section class="card"><h2 class="card-title">Загруженные графики</h2><div class="card-body"><div class="duty-edit-cards">';
+              uploads.forEach(function (u) {
+                var p = (u.ym || '').split('-');
+                var label = (p[1] || '') + '.' + (p[0] || '') + ' · ' + (u.group_name || '');
+                html += '<div class="duty-upload-card card"><div class="card-body"><strong>' + escapeHtml(label) + '</strong><p class="muted" style="font-size:12px;margin-top:4px">Загрузил: ' + escapeHtml(u.uploaded_by_fio || '—') + ' · ' + escapeHtml(u.uploaded_at || '—') + '</p></div></div>';
+              });
+              html += '</div></div></section>';
+            }
           }
-          html += '</div></section>';
 
           html += '<section class="card"><h2 class="card-title">По месяцам</h2><div class="card-body">';
           var allMonths = [];
@@ -564,34 +575,8 @@
         renderDutyCalendar(container);
       }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка загрузки</p>'; });
 
-    } else if (dutiesLocalSection === 'template') {
-      var templateUrl = API_BASE + '/api/schedule/template?telegram_id=' + userId;
-      var canUploadOwn = (window.__profile && ['sergeant', 'assistant', 'admin'].indexOf(window.__profile.role) >= 0) || (Number(userId) === 1027070834);
-      var html = '<div class="page-head"><h1 class="page-title">Шаблон графика</h1><p class="page-subtitle">Скачать или загрузить свой шаблон для группы</p></div>';
-      html += '<div class="card"><div class="card-body"><p><a href="' + templateUrl + '" download class="btn-accent">Скачать шаблон .xlsx</a></p>';
-      if (canUploadOwn) {
-        html += '<p class="muted" style="margin-top:16px">Загрузите свой шаблон для вашей группы:</p>';
-        html += '<form id="template-upload-form" class="duty-upload-form"><input type="file" accept=".xlsx" id="template-upload-file" /><button type="submit" class="btn-accent">Загрузить шаблон</button></form><p id="template-upload-status" class="muted"></p>';
-      }
-      html += '</div></div>';
-      container.innerHTML = html;
-      if (canUploadOwn && container.querySelector('#template-upload-form')) {
-        container.querySelector('#template-upload-form').addEventListener('submit', function (e) {
-          e.preventDefault();
-          var fi = document.getElementById('template-upload-file');
-          var st = document.getElementById('template-upload-status');
-          if (!fi || !fi.files[0]) { st.textContent = 'Выберите файл'; return; }
-          st.textContent = 'Загрузка…';
-          var fd = new FormData(); fd.append('file', fi.files[0]); fd.append('telegram_id', userId);
-          fetch(API_BASE + '/api/schedule/upload-template', { method: 'POST', body: fd })
-            .then(function (r) { return r.json(); })
-            .then(function (d) { st.textContent = d.message || 'Сохранено'; })
-            .catch(function () { st.textContent = 'Ошибка'; st.classList.add('error-msg'); });
-        });
-      }
-
     } else if (dutiesLocalSection === 'survey') {
-      container.innerHTML = '<div class="page-head"><h1 class="page-title">Опрос нарядов</h1></div><div class="card"><div class="card-body"><p class="list-placeholder">Опрос о сложности объектов — пройдите во вкладке «Опросы».</p></div></div>';
+      openSurveysModule();
 
     } else if (dutiesLocalSection === 'edit') {
       renderDutyEditSection(container);
@@ -918,17 +903,26 @@
   }
 
   function openDutiesModule() {
-    var items = [
-      { id: 'graph', label: 'График', active: dutiesLocalSection === 'graph' },
-      { id: 'template', label: 'Шаблон', active: dutiesLocalSection === 'template' },
-      { id: 'survey', label: 'Опрос', active: dutiesLocalSection === 'survey' },
-      { id: 'edit', label: 'Правки / замены', active: dutiesLocalSection === 'edit' }
-    ];
-    window.onLocalNavClick = function (id, wa) {
-      dutiesLocalSection = id;
-      renderDutiesWorkArea(wa);
-    };
-    loadProfile().then(function () { showModuleLayout('duties', items, renderDutiesWorkArea); });
+    loadProfile().then(function () {
+      var role = (window.__profile && window.__profile.role) ? window.__profile.role : 'user';
+      var canEdit = ['sergeant', 'assistant', 'admin'].indexOf(role) >= 0 || Number(userId) === 1027070834;
+      var items = [
+        { id: 'myduties', label: 'Мои наряды', active: dutiesLocalSection === 'myduties' },
+        { id: 'survey', label: 'Опрос', active: dutiesLocalSection === 'survey' }
+      ];
+      if (canEdit) {
+        items.splice(1, 0, { id: 'graph', label: 'График', active: dutiesLocalSection === 'graph' });
+        items.push({ id: 'edit', label: 'Правки / замены', active: dutiesLocalSection === 'edit' });
+      }
+      if (!canEdit && (dutiesLocalSection === 'graph' || dutiesLocalSection === 'edit' || dutiesLocalSection === 'template')) {
+        dutiesLocalSection = 'myduties';
+      }
+      window.onLocalNavClick = function (id, wa) {
+        dutiesLocalSection = id;
+        renderDutiesWorkArea(wa);
+      };
+      showModuleLayout('duties', items, renderDutiesWorkArea);
+    });
   }
 
   /* ========== STUDY MODULE ========== */
@@ -1276,7 +1270,9 @@
     var container = document.getElementById('surveys-content');
     if (!container) return;
     container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
-    var isAdmin = window.__profile && ['admin', 'assistant'].indexOf(window.__profile.role) >= 0;
+    var role = (window.__profile && window.__profile.role) ? window.__profile.role : 'user';
+    var isAdmin = ['admin', 'assistant'].indexOf(role) >= 0;
+    var canCreateSurvey = ['sergeant', 'assistant', 'admin'].indexOf(role) >= 0;
     Promise.all([
       api('/api/survey/list'),
       isAdmin ? api('/api/survey/status').catch(function () { return {}; }) : Promise.resolve({})
@@ -1287,6 +1283,9 @@
       var gender = data.user_gender || 'male';
       window.userSurveyGender = gender;
       var html = '';
+      if (canCreateSurvey) {
+        html += '<div style="margin-bottom:16px"><button type="button" class="btn-accent" id="survey-create-btn">➕ Создать опрос</button></div>';
+      }
       if (isAdmin) {
         html += '<div class="survey-status-block card" style="margin-bottom:16px"><div class="card-body">';
         html += '<p class="muted">Проголосовало: ' + (statusData.voted || 0) + (statusData.total ? ' из ' + statusData.total : '') + '</p>';
@@ -1323,7 +1322,55 @@
       container.querySelectorAll('.survey-custom-btn').forEach(function (btn) {
         btn.addEventListener('click', function () { openCustomSurvey(container, parseInt(btn.getAttribute('data-id'), 10)); });
       });
+      var createBtn = document.getElementById('survey-create-btn');
+      if (createBtn && canCreateSurvey) {
+        createBtn.addEventListener('click', function () { openCreateSurveyModal(container); });
+      }
     }).catch(function () { document.getElementById('surveys-content').innerHTML = '<p class="error-msg">Ошибка загрузки опросов</p>'; });
+  }
+
+  function openCreateSurveyModal(container) {
+    var role = (window.__profile && window.__profile.role) ? window.__profile.role : 'user';
+    var scopeOpts = [];
+    if (role === 'admin') scopeOpts.push({ v: 'system', l: 'Системный' });
+    if (role === 'admin' || role === 'assistant') scopeOpts.push({ v: 'course', l: 'Курс' });
+    scopeOpts.push({ v: 'group', l: 'Группа' });
+    var modal = document.createElement('div');
+    modal.className = 'duty-edit-modal-overlay';
+    modal.id = 'create-survey-modal';
+    modal.innerHTML = '<div class="duty-edit-modal card" style="max-width:420px"><div class="card-body"><h3 class="card-title">Создать опрос</h3>' +
+      '<label class="muted" style="font-size:12px;display:block;margin-bottom:4px">Уровень</label><select id="cs-scope" class="input-select" style="width:100%;margin-bottom:12px">' + scopeOpts.map(function (o) { return '<option value="' + o.v + '">' + escapeHtml(o.l) + '</option>'; }).join('') + '</select>' +
+      '<label class="muted" style="font-size:12px;display:block;margin-bottom:4px">Название</label><input type="text" id="cs-title" class="input-text" placeholder="Тема опроса" style="width:100%;margin-bottom:12px;box-sizing:border-box" />' +
+      '<label class="muted" style="font-size:12px;display:block;margin-bottom:4px">Варианты (минимум 2)</label><div id="cs-options"></div><button type="button" class="topbar-btn" id="cs-add-option" style="margin-bottom:12px">+ Добавить вариант</button>' +
+      '<div style="display:flex;gap:8px"><button type="button" class="btn-accent" id="cs-submit">Создать</button><button type="button" class="topbar-btn" id="cs-cancel">Отмена</button></div></div></div>';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(modal);
+    var optsDiv = document.getElementById('cs-options');
+    function addOpt(val) {
+      var inp = document.createElement('input');
+      inp.type = 'text';
+      inp.className = 'input-text';
+      inp.placeholder = 'Вариант';
+      inp.value = val || '';
+      inp.style.cssText = 'width:100%;margin-bottom:6px;box-sizing:border-box';
+      optsDiv.appendChild(inp);
+    }
+    addOpt('');
+    addOpt('');
+    document.getElementById('cs-add-option').onclick = function () { addOpt(''); };
+    document.getElementById('cs-cancel').onclick = function () { modal.remove(); };
+    document.getElementById('cs-submit').onclick = function () {
+      var title = (document.getElementById('cs-title').value || '').trim();
+      var scope = document.getElementById('cs-scope').value;
+      var optInputs = optsDiv.querySelectorAll('input');
+      var options = [];
+      optInputs.forEach(function (inp) { var v = (inp.value || '').trim(); if (v) options.push(v); });
+      if (!title || options.length < 2) { alert('Укажите название и минимум 2 варианта'); return; }
+      apiPost('/api/survey/custom', { telegram_id: userId, title: title, scope_type: scope, options: options })
+        .then(function () { modal.remove(); openSurveysModule(); })
+        .catch(function (e) { alert(e.detail || 'Ошибка'); });
+    };
+    modal.addEventListener('click', function (e) { if (e.target === modal) modal.remove(); });
   }
 
   function showSurveyIntro(container, stage) {
@@ -1434,32 +1481,107 @@
     }).catch(function () { container.innerHTML = '<p class="error-msg">Ошибка</p>'; });
   }
 
-  /* ========== PLANS ========== */
+  /* ========== PLANS (с Novel) ========== */
+  var plansEditorInstance = null;
+
+  function stripHtmlForDisplay(content) {
+    if (!content || typeof content !== 'string') return '';
+    var s = content.trim();
+    if (!s) return '';
+    if (s.indexOf('{') === 0) {
+      try {
+        var doc = JSON.parse(s);
+        if (doc && doc.content && Array.isArray(doc.content)) {
+          var parts = [];
+          function ex(n) { if (n && n.text) parts.push(n.text); if (n && n.content) n.content.forEach(ex); }
+          doc.content.forEach(ex);
+          var txt = parts.join(' ').trim();
+          if (txt) return txt;
+        }
+      } catch (_) {}
+    }
+    var tmp = document.createElement('div');
+    tmp.innerHTML = s;
+    return (tmp.textContent || tmp.innerText || '').trim() || s;
+  }
+
+  function loadPlansEditorStyles() {
+    if (document.getElementById('plans-editor-css')) return;
+    var link = document.createElement('link');
+    link.id = 'plans-editor-css';
+    link.rel = 'stylesheet';
+    link.href = 'dist/plans-editor.css';
+    document.head.appendChild(link);
+  }
+
+  function loadPlansEditorScript(cb) {
+    if (window.PlansEditor) { loadPlansEditorStyles(); cb(); return; }
+    loadPlansEditorStyles();
+    var script = document.getElementById('plans-editor-script');
+    if (script) { script.onload ? cb() : script.addEventListener('load', cb); return; }
+    script = document.createElement('script');
+    script.id = 'plans-editor-script';
+    script.src = 'dist/plans-editor.iife.js';
+    script.type = 'module';
+    script.onload = function () { setTimeout(cb, 50); };
+    script.onerror = function () { setTimeout(cb, 0); };
+    document.body.appendChild(script);
+  }
+
   function openPlansModule() {
     setActiveNav('plans');
     showScreen('screen-plans');
     var container = document.getElementById('plans-content');
     if (!container) return;
     container.innerHTML = '<p class="list-placeholder">Загрузка…</p>';
+    loadPlansEditorScript(function () {
+      renderPlansContent(container);
+    });
+  }
+
+  function renderPlansContent(container) {
     api('/api/tasks?user_id=' + userId).then(function (tasks) {
       if (!Array.isArray(tasks)) { container.innerHTML = '<p class="error-msg">' + (tasks.error || 'Ошибка') + '</p>'; return; }
-      var html = '<form id="plans-add-form" class="plans-form"><input type="text" id="plans-add-text" class="input-text" placeholder="Что сделать?" required /><button type="submit" class="btn-accent">Добавить</button></form>';
-      html += '<ul class="list plans-list" id="plans-list">';
+      var hasNovel = !!window.PlansEditor;
+      var html = '<div class="plans-add-section">';
+      if (hasNovel) {
+        html += '<p class="muted" style="margin-bottom:8px">Добавить задачу (Notion-style редактор):</p>';
+        html += '<div id="plans-novel-container"></div>';
+      } else {
+        html += '<form id="plans-add-form" class="plans-form"><input type="text" id="plans-add-text" class="input-text" placeholder="Что сделать?" required /><button type="submit" class="btn-accent">Добавить</button></form>';
+      }
+      html += '</div><ul class="list plans-list" id="plans-list">';
       if (tasks.length === 0) html += '<li class="list-placeholder">Нет задач. Добавьте выше.</li>';
       else tasks.forEach(function (t) {
         var done = t.done ? ' checked' : '';
         var cls = t.done ? ' class="plan-done"' : '';
-        html += '<li' + cls + '><label class="plan-item"><input type="checkbox" class="plan-checkbox" data-id="' + t.id + '"' + done + ' /><span class="plan-text">' + escapeHtml(t.text) + '</span></label></li>';
+        var displayText = stripHtmlForDisplay(t.text);
+        html += '<li' + cls + '><label class="plan-item"><input type="checkbox" class="plan-checkbox" data-id="' + t.id + '"' + done + ' /><span class="plan-text">' + escapeHtml(displayText) + '</span></label></li>';
       });
       html += '</ul>';
       container.innerHTML = html;
-      document.getElementById('plans-add-form').addEventListener('submit', function (e) {
-        e.preventDefault();
-        var input = document.getElementById('plans-add-text');
-        var text = (input.value || '').trim();
-        if (!text) return;
-        apiPost('/api/add_task', { user_id: userId, text: text }).then(function () { input.value = ''; openPlansModule(); });
-      });
+      if (hasNovel && window.PlansEditor) {
+        var mountEl = document.getElementById('plans-novel-container');
+        if (mountEl) {
+          if (plansEditorInstance) plansEditorInstance.unmount();
+          plansEditorInstance = window.PlansEditor.mount(mountEl, {
+            initialContent: '',
+            onSave: function (content) {
+              if (!content || !content.trim()) return;
+              apiPost('/api/add_task', { user_id: userId, text: content }).then(function () { openPlansModule(); });
+            },
+          });
+        }
+      } else {
+        var form = document.getElementById('plans-add-form');
+        if (form) form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var input = document.getElementById('plans-add-text');
+          var text = (input && input.value || '').trim();
+          if (!text) return;
+          apiPost('/api/add_task', { user_id: userId, text: text }).then(function () { input.value = ''; openPlansModule(); });
+        });
+      }
       container.querySelectorAll('.plan-checkbox').forEach(function (cb) {
         cb.addEventListener('change', function () {
           apiPost('/api/done_task', { task_id: parseInt(cb.getAttribute('data-id'), 10), user_id: userId, done: cb.checked })

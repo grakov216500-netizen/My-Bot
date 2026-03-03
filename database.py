@@ -269,6 +269,19 @@ def init_db():
         )
     ''')
 
+    # === 8.0 ЗАГРУЗКИ ГРАФИКОВ (кто и когда загрузил) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS schedule_uploads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ym TEXT NOT NULL CHECK(ym LIKE '____-__'),
+            group_name TEXT NOT NULL,
+            enrollment_year INTEGER NOT NULL,
+            uploaded_by_telegram_id INTEGER,
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(ym, group_name, enrollment_year)
+        )
+    ''')
+
     # === 8.1 ЗАМЕНЫ В НАРЯДАХ (статистика: кто болел, кого заменял) ===
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS duty_replacements (
